@@ -4,7 +4,7 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import Iterable, Mapping, Protocol
 
 import httpx
 
@@ -66,21 +66,41 @@ class DeribitPublicGreeksProvider:
         if not isinstance(result, list):
             raise ValueError(f"Unexpected Deribit payload: {payload}")
 
+        instrument_names = [
+            str(row["instrument_name"])
+            for row in result
+            if row.get("instrument_name")
+        ]
+        return self.fetch_greeks_for_instruments(instrument_names)
+
+    def fetch_greeks_for_instruments(
+        self,
+        instrument_names: Iterable[str],
+    ) -> dict[str, GreekSnapshot]:
         snapshots: dict[str, GreekSnapshot] = {}
         fallback_snapshot_ts = int(time.time() * 1000)
 
-        for row in result:
-            instrument_name = row.get("instrument_name")
-            greeks = row.get("greeks") or {}
-            gamma = greeks.get("gamma")
-            spot_price = self._extract_spot_price(row)
-            snapshot_ts = int(row.get("creation_timestamp") or fallback_snapshot_ts)
-
-            if not instrument_name or gamma is None or spot_price is None:
+        for instrument_name in sorted({str(name) for name in instrument_names if name}):
+            response = self._client.get(
+                "/public/ticker",
+                params={"instrument_name": instrument_name},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            result = payload.get("result")
+            if not isinstance(result, dict):
                 continue
 
-            snapshots[str(instrument_name)] = GreekSnapshot(
-                instrument_name=str(instrument_name),
+            greeks = result.get("greeks") or {}
+            gamma = greeks.get("gamma")
+            spot_price = self._extract_spot_price(result)
+            snapshot_ts = int(result.get("timestamp") or fallback_snapshot_ts)
+
+            if gamma is None or spot_price is None:
+                continue
+
+            snapshots[instrument_name] = GreekSnapshot(
+                instrument_name=instrument_name,
                 gamma=float(gamma),
                 spot_price=float(spot_price),
                 snapshot_ts=snapshot_ts,

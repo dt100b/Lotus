@@ -18,6 +18,7 @@ const els = {
   refreshValue: document.getElementById("refresh-value"),
   visibleStrikes: document.getElementById("visible-strikes"),
   snapshotProvenance: document.getElementById("snapshot-provenance"),
+  chartCopy: document.getElementById("chart-copy"),
   tableBody: document.getElementById("top-strikes-body"),
   chart: document.getElementById("chart"),
   chartEmpty: document.getElementById("chart-empty"),
@@ -126,36 +127,138 @@ function clearSvg(svg) {
   }
 }
 
+function getVisibleChartPoints(data) {
+  const ordered = [...(data.points || [])]
+    .map((point) => ({
+      ...point,
+      strike: Number(point.strike),
+      value: Number(point.value),
+      call_gex: Number(point.call_gex),
+      put_gex: Number(point.put_gex),
+      net_gex: Number(point.net_gex),
+    }))
+    .filter((point) => Number.isFinite(point.strike) && Number.isFinite(point.value))
+    .sort((a, b) => a.strike - b.strike);
+
+  if (!ordered.length) {
+    return [];
+  }
+
+  const maxPoints = state.view === "net" ? 16 : 14;
+  const minWindowPoints = 8;
+  const spot = Number(data.spot_price);
+  if (!Number.isFinite(spot) || spot <= 0) {
+    return ordered
+      .filter((point) => Math.abs(point.value) > 0)
+      .slice(-maxPoints);
+  }
+
+  const windowRatio = 0.12;
+  const lowerBound = spot * (1 - windowRatio);
+  const upperBound = spot * (1 + windowRatio);
+
+  let visible = ordered.filter((point) => point.strike >= lowerBound && point.strike <= upperBound);
+  visible = visible.filter((point) => Math.abs(point.value) > 0);
+
+  if (visible.length < minWindowPoints) {
+    visible = [...ordered]
+      .filter((point) => Math.abs(point.value) > 0)
+      .sort((a, b) => Math.abs(a.strike - spot) - Math.abs(b.strike - spot))
+      .slice(0, Math.min(maxPoints, ordered.length))
+      .sort((a, b) => a.strike - b.strike);
+  } else if (visible.length > maxPoints) {
+    visible = [...visible]
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+      .slice(0, maxPoints)
+      .sort((a, b) => a.strike - b.strike);
+  }
+
+  const maxAbs = Math.max(...visible.map((point) => Math.abs(point.value)), 0);
+  const significanceFloor = maxAbs * 0.01;
+  const filtered = visible.filter((point) => Math.abs(point.value) >= significanceFloor);
+  if (filtered.length >= Math.min(8, visible.length)) {
+    visible = filtered;
+  }
+
+  return visible;
+}
+
+function getSpotBandY(orderedPoints, rowGap, topPadding, spotPrice) {
+  const centers = orderedPoints.map((_, index) => topPadding + index * rowGap + rowGap / 2);
+  const strikes = orderedPoints.map((point) => point.strike);
+
+  if (!Number.isFinite(spotPrice) || !strikes.length) {
+    return null;
+  }
+
+  const highestStrike = strikes[0];
+  const lowestStrike = strikes[strikes.length - 1];
+  if (spotPrice >= highestStrike) {
+    return centers[0] - rowGap / 2;
+  }
+  if (spotPrice <= lowestStrike) {
+    return centers[centers.length - 1] + rowGap / 2;
+  }
+
+  for (let index = 0; index < strikes.length - 1; index += 1) {
+    const highStrike = strikes[index];
+    const lowStrike = strikes[index + 1];
+    if (spotPrice === highStrike) {
+      return centers[index];
+    }
+    if (spotPrice <= highStrike && spotPrice >= lowStrike) {
+      const span = Math.max(highStrike - lowStrike, 1e-9);
+      const ratio = (highStrike - spotPrice) / span;
+      return centers[index] + ratio * (centers[index + 1] - centers[index]);
+    }
+  }
+
+  return centers[centers.length - 1];
+}
+
 function renderChart(data) {
   state.lastProfile = data;
-  const points = data.points || [];
+  const points = getVisibleChartPoints(data);
   els.visibleStrikes.textContent = `${points.length}`;
   clearSvg(els.chart);
 
   if (!points.length) {
     els.chart.hidden = true;
     els.chartEmpty.hidden = false;
+    els.chartCopy.textContent =
+      "No chartable strikes were available for the selected expiry and view.";
     return;
   }
 
   els.chart.hidden = false;
   els.chartEmpty.hidden = true;
+  const orderedPoints = [...points].sort((a, b) => b.strike - a.strike);
+  const spotPrice = Number(data.spot_price);
+  const lowestStrike = Math.min(...points.map((point) => point.strike));
+  const highestStrike = Math.max(...points.map((point) => point.strike));
+  const strikeWindowPct = spotPrice > 0
+    ? Math.max(Math.abs((highestStrike - spotPrice) / spotPrice), Math.abs((spotPrice - lowestStrike) / spotPrice)) * 100
+    : 0;
+  const viewLabel = state.view.toUpperCase();
+  const viewNote =
+    state.view === "net"
+      ? "NET equals signed CALL plus signed PUT exposure."
+      : `${viewLabel} view stays signed, so negative ${state.view} bars are valid when that book is net short at a strike.`;
+  els.chartCopy.textContent =
+    `Focused horizontal ${viewLabel} bars around spot, showing ${points.length} strikes within roughly +/-${fmtNumber(strikeWindowPct, 1)}% of $${fmtNumber(spotPrice, 0)}. ${viewNote}`;
 
   const width = 900;
-  const height = 480;
-  const padding = { top: 28, right: 36, bottom: 60, left: 86 };
+  const rowGap = 22;
+  const height = Math.max(390, 96 + orderedPoints.length * rowGap);
+  const padding = { top: 42, right: 44, bottom: 68, left: 112 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  const strikes = points.map((point) => point.strike);
-  const values = points.map((point) => point.value);
-  const maxAbs = Math.max(...values.map((value) => Math.abs(value)), 1e-9);
-  const minStrike = Math.min(...strikes);
-  const maxStrike = Math.max(...strikes);
-  const strikeSpan = Math.max(maxStrike - minStrike, 1);
-  const zeroY = padding.top + plotHeight / 2;
-  const spotX = padding.left + ((data.spot_price - minStrike) / strikeSpan) * plotWidth;
-  const bandWidth = plotWidth / Math.max(points.length, 1);
-  const barWidth = Math.max(10, bandWidth * 0.72);
+  const zeroX = padding.left + plotWidth / 2;
+  const maxAbs = Math.max(...orderedPoints.map((point) => Math.abs(point.value)), 1e-9);
+  const spotY = getSpotBandY(orderedPoints, rowGap, padding.top, spotPrice);
+  const barHeight = Math.max(10, rowGap * 0.58);
+
+  els.chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
   const root = createSvgNode("g");
   els.chart.appendChild(root);
@@ -173,13 +276,13 @@ function renderChart(data) {
   );
 
   [-1, -0.5, 0, 0.5, 1].forEach((tick) => {
-    const y = zeroY - tick * (plotHeight / 2);
+    const x = zeroX + tick * (plotWidth / 2 - 22);
     root.appendChild(
       createSvgNode("line", {
-        x1: padding.left,
-        y1: y,
-        x2: padding.left + plotWidth,
-        y2: y,
+        x1: x,
+        y1: padding.top,
+        x2: x,
+        y2: padding.top + plotHeight,
         stroke: "rgba(139,178,170,0.16)",
         "stroke-width": tick === 0 ? 1.5 : 1,
       }),
@@ -187,25 +290,22 @@ function renderChart(data) {
 
     root.appendChild(
       createSvgNode("text", {
-        x: padding.left - 12,
-        y: y + 4,
-        "text-anchor": "end",
+        x,
+        y: height - 24,
+        "text-anchor": "middle",
         fill: "rgba(139,178,170,0.9)",
         "font-size": 12,
       }),
     ).textContent = fmtNumber(tick * maxAbs, 2);
   });
 
-  const xScale = (strike) => padding.left + ((strike - minStrike) / strikeSpan) * plotWidth;
-  const yScale = (value) => zeroY - (value / maxAbs) * (plotHeight / 2 - 12);
-
-  if (Number.isFinite(spotX)) {
+  if (Number.isFinite(spotY)) {
     root.appendChild(
       createSvgNode("line", {
-        x1: spotX,
-        y1: padding.top,
-        x2: spotX,
-        y2: padding.top + plotHeight,
+        x1: padding.left,
+        y1: spotY,
+        x2: padding.left + plotWidth,
+        y2: spotY,
         stroke: "#ffd166",
         "stroke-width": 2,
         "stroke-dasharray": "5 7",
@@ -214,29 +314,40 @@ function renderChart(data) {
 
     root.appendChild(
       createSvgNode("text", {
-        x: Math.min(Math.max(spotX + 8, padding.left + 6), padding.left + plotWidth - 6),
-        y: padding.top + 14,
+        x: padding.left + 10,
+        y: Math.max(padding.top + 14, spotY - 10),
         fill: "#ffd166",
         "font-size": 12,
       }),
     ).textContent = `Spot ${fmtNumber(data.spot_price, 0)}`;
   }
 
-  points.forEach((point) => {
-    const xCenter = xScale(point.strike);
-    const yValue = yScale(point.value);
-    const heightValue = Math.abs(zeroY - yValue);
-    const y = point.value >= 0 ? yValue : zeroY;
+  const xScale = (value) => zeroX + (value / maxAbs) * (plotWidth / 2 - 22);
+  const topIndexes = new Set(
+    [...orderedPoints]
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+      .slice(0, 6)
+      .map((point) => point.strike),
+  );
+
+  orderedPoints.forEach((point, index) => {
+    const yCenter = padding.top + index * rowGap + rowGap / 2;
+    const xValue = xScale(point.value);
+    const x = Math.min(zeroX, xValue);
+    const widthValue = Math.abs(xValue - zeroX);
     const fill = point.value >= 0 ? "#42d392" : "#ff6b57";
+    const isHighlighted = topIndexes.has(point.strike);
 
     const bar = createSvgNode("rect", {
-      x: xCenter - barWidth / 2,
-      y,
-      width: barWidth,
-      height: Math.max(heightValue, 1),
+      x,
+      y: yCenter - barHeight / 2,
+      width: Math.max(widthValue, 1),
+      height: barHeight,
       rx: 8,
       fill,
-      opacity: 0.92,
+      opacity: isHighlighted ? 0.96 : 0.82,
+      stroke: isHighlighted ? "rgba(255,255,255,0.2)" : "none",
+      "stroke-width": isHighlighted ? 1.2 : 0,
     });
     bar.appendChild(createSvgNode("title")).textContent = [
       `Strike ${fmtNumber(point.strike, 0)}`,
@@ -248,9 +359,9 @@ function renderChart(data) {
 
     root.appendChild(
       createSvgNode("text", {
-        x: xCenter,
-        y: height - 26,
-        "text-anchor": "middle",
+        x: padding.left - 12,
+        y: yCenter + 4,
+        "text-anchor": "end",
         fill: "rgba(139,178,170,0.86)",
         "font-size": 11,
       }),
@@ -265,17 +376,17 @@ function renderChart(data) {
       fill: "rgba(139,178,170,0.9)",
       "font-size": 12,
     }),
-  ).textContent = "Strike";
+  ).textContent = `${state.view.toUpperCase()} GEX`;
 
   const yAxisLabel = createSvgNode("text", {
-    x: 22,
+    x: 26,
     y: padding.top + plotHeight / 2,
-    transform: `rotate(-90 22 ${padding.top + plotHeight / 2})`,
+    transform: `rotate(-90 26 ${padding.top + plotHeight / 2})`,
     "text-anchor": "middle",
     fill: "rgba(139,178,170,0.9)",
     "font-size": 12,
   });
-  yAxisLabel.textContent = `${state.view.toUpperCase()} GEX`;
+  yAxisLabel.textContent = "Strike";
   root.appendChild(yAxisLabel);
 }
 
@@ -383,15 +494,30 @@ async function init() {
   await loadConfig();
   syncViewButtons();
   els.selectedExpiry.textContent = state.expiry;
-  await loadHealth();
-  await loadExpiries();
+  try {
+    await loadHealth();
+  } catch (error) {
+    els.errorBanner.dataset.source = "request";
+    setError(error.message || "Failed to load snapshot health.");
+  }
+  try {
+    await loadExpiries();
+  } catch (error) {
+    els.errorBanner.dataset.source = "request";
+    setError(error.message || "Failed to load expiry metadata.");
+  }
   await loadProfile();
 
   if (refreshHandle) {
     window.clearInterval(refreshHandle);
   }
   refreshHandle = window.setInterval(async () => {
-    await loadHealth();
+    try {
+      await loadHealth();
+    } catch (error) {
+      els.errorBanner.dataset.source = "request";
+      setError(error.message || "Failed to refresh snapshot health.");
+    }
     await loadProfile();
   }, state.refreshSeconds * 1000);
 }

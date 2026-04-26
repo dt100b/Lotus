@@ -110,5 +110,41 @@ class DeribitPublicClient:
             raise RuntimeError("Unexpected get_last_trades_by_currency_and_time result shape")
         return result
 
+    def get_last_trades_by_currency(
+        self,
+        *,
+        currency: str = "BTC",
+        kind: str | None = None,
+        start_timestamp: int | None = None,
+        end_timestamp: int | None = None,
+        start_id: str | None = None,
+        count: int = 1000,
+        sorting: str = "asc",
+        historical: bool | None = None,
+        include_old: bool | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "currency": currency,
+            "count": count,
+            "sorting": sorting,
+        }
+        if kind is not None:
+            params["kind"] = kind
+        if start_timestamp is not None:
+            params["start_timestamp"] = start_timestamp
+        if end_timestamp is not None:
+            params["end_timestamp"] = end_timestamp
+        if start_id is not None:
+            params["start_id"] = start_id
+        if historical is not None:
+            params["historical"] = historical
+        if include_old is not None:
+            params["include_old"] = include_old
+
+        result = self._call("public/get_last_trades_by_currency", params)
+        if not isinstance(result, dict):
+            raise RuntimeError("Unexpected get_last_trades_by_currency result shape")
+        return result
+
 
 DeribitClient = DeribitPublicClient

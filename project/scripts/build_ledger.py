@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import _bootstrap  # noqa: F401
+
 from ledger.models import NormalizedTradeEvent
 from ledger.replay import LedgerReplayer
 from ledger.rules import LedgerPolicy

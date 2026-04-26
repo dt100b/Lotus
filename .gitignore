@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Lotus generated artifacts
+project/runtime/
+project/greeks/data/
+project/data/phase1.sqlite3
+project/data/live_refresh.sqlite3

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 
@@ -149,9 +150,8 @@ def test_health_marks_stale_snapshot_when_age_exceeds_threshold(tmp_path: Path) 
     snapshot_path = write_snapshot(tmp_path / "latest_gex_snapshot.json")
     repository = build_repository(snapshot_path)
     threshold = settings.refresh_seconds * settings.freshness_multiplier
-    repository._utc_now = lambda: repository._parse_as_of(
-        f"2026-04-25T21:45:{threshold + 1:02d}Z"
-    )
+    base_time = repository._parse_as_of("2026-04-25T21:45:00Z")
+    repository._utc_now = lambda: base_time + timedelta(seconds=threshold + 1)
     app.dependency_overrides[get_repository] = lambda: repository
     client = TestClient(app)
 

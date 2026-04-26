@@ -15,7 +15,7 @@ class Settings:
     contract_version: str = os.getenv("GEX_CONTRACT_VERSION", "phase5.dashboard.v1")
     default_expiry: str = os.getenv("GEX_DEFAULT_EXPIRY", "ALL")
     default_view: str = os.getenv("GEX_DEFAULT_VIEW", "net")
-    freshness_multiplier: int = int(os.getenv("GEX_FRESHNESS_MULTIPLIER", "3"))
+    freshness_multiplier: int = int(os.getenv("GEX_FRESHNESS_MULTIPLIER", "12"))
 
 
 settings = Settings()

@@ -8,6 +8,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import _bootstrap  # noqa: F401
+
 from normalizer.models import CanonicalInstrument
 from normalizer.instruments import normalize_instrument
 

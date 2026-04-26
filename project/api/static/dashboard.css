@@ -31,11 +31,12 @@ body {
   margin: 0;
   color: var(--text);
   font-family: Aptos, "Segoe UI", sans-serif;
+  font-size: 15px;
 }
 
 .page-shell {
   min-height: 100vh;
-  padding: 24px;
+  padding: 16px;
 }
 
 .topbar,
@@ -55,7 +56,7 @@ body {
 }
 
 .topbar {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .eyebrow,
@@ -90,20 +91,21 @@ h2,
 }
 
 h1 {
-  font-size: clamp(2.2rem, 4vw, 3.5rem);
+  font-size: clamp(1.9rem, 3vw, 2.85rem);
   line-height: 0.95;
   text-transform: uppercase;
 }
 
 h2 {
-  font-size: 1.4rem;
+  font-size: 1.2rem;
   text-transform: uppercase;
 }
 
 .subtitle {
   max-width: 62ch;
-  margin-top: 10px;
-  line-height: 1.5;
+  margin-top: 8px;
+  line-height: 1.4;
+  font-size: 0.98rem;
 }
 
 .meta-pills,
@@ -115,7 +117,7 @@ h2 {
 .pill,
 .segment,
 select {
-  min-height: 44px;
+  min-height: 40px;
   border: 1px solid var(--panel-edge);
   border-radius: 14px;
   background: var(--pill);
@@ -126,17 +128,17 @@ select {
 .pill {
   display: inline-flex;
   align-items: center;
-  padding: 0 14px;
+  padding: 0 12px;
   backdrop-filter: blur(16px);
 }
 
 .layout {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .panel {
-  padding: 18px;
+  padding: 14px;
   border: 1px solid var(--panel-edge);
   border-radius: 22px;
   background:
@@ -170,7 +172,7 @@ select {
 }
 
 .segment {
-  padding: 0 16px;
+  padding: 0 14px;
   cursor: pointer;
   transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
 }
@@ -188,11 +190,11 @@ select {
 }
 
 .summary-grid {
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
 }
 
 .stat-card {
-  padding: 14px;
+  padding: 12px;
   border-radius: 18px;
   border: 1px solid rgba(108, 156, 150, 0.18);
   background: rgba(255, 255, 255, 0.03);
@@ -203,24 +205,24 @@ select {
 }
 
 .stat-card strong {
-  font-size: 1.28rem;
+  font-size: 1.16rem;
 }
 
 #snapshot-provenance {
-  font-size: 1rem;
-  line-height: 1.35;
+  font-size: 0.95rem;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
 .chart-wrap {
   position: relative;
-  min-height: 480px;
+  min-height: 420px;
 }
 
 #chart {
   display: block;
   width: 100%;
-  min-height: 480px;
+  min-height: 420px;
 }
 
 .legend {
@@ -259,8 +261,8 @@ select {
 }
 
 .error-banner {
-  margin-bottom: 12px;
-  padding: 12px 14px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
   border: 1px solid rgba(255, 107, 87, 0.45);
   background: rgba(255, 107, 87, 0.12);
 }
@@ -284,7 +286,7 @@ table {
 
 th,
 td {
-  padding: 12px 8px;
+  padding: 10px 8px;
   border-bottom: 1px solid rgba(108, 156, 150, 0.16);
   text-align: right;
   white-space: nowrap;
@@ -309,13 +311,13 @@ tbody tr:last-child td {
 
 @media (min-width: 1120px) {
   .layout {
-    grid-template-columns: 340px minmax(0, 1fr);
+    grid-template-columns: 300px minmax(0, 1fr);
     align-items: start;
   }
 
   .controls-panel {
     position: sticky;
-    top: 18px;
+    top: 12px;
   }
 
   .chart-panel,
@@ -326,7 +328,7 @@ tbody tr:last-child td {
 
 @media (max-width: 780px) {
   .page-shell {
-    padding: 16px;
+    padding: 12px;
   }
 
   .topbar,
@@ -336,6 +338,6 @@ tbody tr:last-child td {
 
   .chart-wrap,
   #chart {
-    min-height: 360px;
+    min-height: 340px;
   }
 }

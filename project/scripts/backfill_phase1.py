@@ -5,6 +5,8 @@ import json
 import sys
 from dataclasses import asdict
 
+import _bootstrap  # noqa: F401
+
 from collector.config import Settings
 from collector.deribit_client import DeribitPublicClient
 from collector.phase1_sync import Phase1SyncService, parse_iso_to_ms

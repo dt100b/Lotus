@@ -4,6 +4,8 @@ import argparse
 import csv
 from pathlib import Path
 
+import _bootstrap  # noqa: F401
+
 from greeks.gex_engine import compute_gex_profile, write_profile_artifacts
 from greeks.providers import (
     DeribitPublicGreeksProvider,
@@ -91,7 +93,9 @@ def main() -> None:
         greeks = load_greeks_snapshot_json(args.greeks_json)
     else:
         with DeribitPublicGreeksProvider() as provider:
-            greeks = provider.fetch_current_option_greeks(currency=currency)
+            greeks = provider.fetch_greeks_for_instruments(
+                row.instrument_name for row in inventory_rows
+            )
         write_greeks_snapshot_json(greeks, output_dir / "greeks_snapshot.json")
 
     profile = compute_gex_profile(
