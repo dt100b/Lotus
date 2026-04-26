@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Deribit BTC GEX Terminal</title>
+    <link rel="stylesheet" href="/static/dashboard.css" />
+    <script defer src="/static/dashboard.js"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Phase 5 Presentation Layer</p>
+          <h1>Deribit BTC GEX Terminal</h1>
+          <p class="subtitle">
+            Validated BTC options gamma exposure by strike, streamed from the Phase 4
+            snapshot contract.
+          </p>
+        </div>
+        <div class="meta-pills">
+          <span class="pill">Underlying: BTC</span>
+          <span class="pill" id="as-of-pill">As of: --</span>
+          <span class="pill" id="spot-pill">Spot: --</span>
+          <span class="pill" id="freshness-pill">Freshness: --</span>
+          <span class="pill" id="contract-pill">Contract: --</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel controls-panel" aria-label="Dashboard controls">
+          <div class="control-row">
+            <div class="control">
+              <label for="expiry-select">Expiry</label>
+              <select id="expiry-select">
+                <option value="ALL">ALL</option>
+              </select>
+            </div>
+
+            <div class="control">
+              <span class="control-label">View</span>
+              <div class="segmented" id="view-switch">
+                <button type="button" class="segment is-active" data-view="net">Net</button>
+                <button type="button" class="segment" data-view="call">Calls</button>
+                <button type="button" class="segment" data-view="put">Puts</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="summary-grid">
+            <article class="stat-card">
+              <span class="stat-label">Selected expiry</span>
+              <strong id="selected-expiry">ALL</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Selected view</span>
+              <strong id="selected-view">NET</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Refresh cadence</span>
+              <strong id="refresh-value">--</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Visible strikes</span>
+              <strong id="visible-strikes">0</strong>
+            </article>
+            <article class="stat-card stat-card-wide">
+              <span class="stat-label">Snapshot provenance</span>
+              <strong id="snapshot-provenance">--</strong>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel chart-panel" aria-label="GEX profile">
+          <div class="panel-header">
+            <div>
+              <h2>Strike Profile</h2>
+              <p class="panel-copy">
+                Signed bars by strike with a live spot marker. Positive exposure is
+                anchored in green, negative exposure in red.
+              </p>
+            </div>
+            <div class="legend">
+              <span><i class="dot dot-positive"></i> Positive</span>
+              <span><i class="dot dot-negative"></i> Negative</span>
+              <span><i class="dot dot-spot"></i> Spot</span>
+            </div>
+          </div>
+          <div id="error-banner" class="error-banner" hidden></div>
+          <div id="chart-wrap" class="chart-wrap">
+            <svg id="chart" viewBox="0 0 900 480" role="img" aria-label="GEX strike profile"></svg>
+          </div>
+          <div id="chart-empty" class="empty-state" hidden>No chart data available.</div>
+        </section>
+
+        <section class="panel table-panel" aria-label="Largest strike rows">
+          <div class="panel-header">
+            <div>
+              <h2>Largest Absolute Strikes</h2>
+              <p class="panel-copy">
+                Top rows ranked by the absolute value of the selected exposure view.
+              </p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Strike</th>
+                  <th>Selected view</th>
+                  <th>Call GEX</th>
+                  <th>Put GEX</th>
+                </tr>
+              </thead>
+              <tbody id="top-strikes-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
