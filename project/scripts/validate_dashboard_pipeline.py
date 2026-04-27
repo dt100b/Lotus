@@ -20,7 +20,9 @@ from pipeline.validation import (
     load_jsonl_file,
     summarize_market_shape,
     validate_expiry_filtering,
+    validate_greeks_coverage,
     validate_position_chain,
+    audit_deribit_trade_payloads,
     validate_raw_to_normalized,
     validate_snapshot_consistency,
 )
@@ -147,6 +149,7 @@ def build_report(
     position_deltas = load_jsonl_file(artifacts_root / "position_deltas.jsonl")
     gex_by_instrument = load_csv_file(artifacts_root / "gex" / "gex_by_instrument.csv")
     gex_by_strike = load_csv_file(artifacts_root / "gex" / "gex_by_strike.csv")
+    gex_summary = load_json_file(artifacts_root / "gex" / "gex_summary.json")
 
     history = collect_history_summary(
         db_path,
@@ -158,6 +161,7 @@ def build_report(
         sample_size=sample_size,
         sample_seed=sample_seed,
     )
+    deribit_payload_audit = audit_deribit_trade_payloads(raw_trades)
     position_chain = validate_position_chain(
         phase3_events,
         position_deltas,
@@ -170,6 +174,7 @@ def build_report(
         gex_by_strike,
     )
     expiry_filtering = validate_expiry_filtering(snapshot_path)
+    greeks_coverage = validate_greeks_coverage(gex_summary)
     determinism = compare_materializations(
         artifacts_root,
         snapshot_path,
@@ -186,9 +191,11 @@ def build_report(
     checks = {
         "history": history,
         "raw_to_normalized": raw_to_normalized,
+        "deribit_payload_audit": deribit_payload_audit,
         "position_chain": position_chain,
         "snapshot_consistency": snapshot_consistency,
         "expiry_filtering": expiry_filtering,
+        "greeks_coverage": greeks_coverage,
         "determinism": determinism,
         "remote_validation": remote_validation,
     }

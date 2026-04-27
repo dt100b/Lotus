@@ -74,6 +74,9 @@ Interpretation:
 
 - Dealer mirror rule: taker `buy` => dealer delta `-amount`;
   taker `sell` => dealer delta `+amount`.
+- Phase 3 v1 uses Deribit trade `amount` as the dealer inventory unit. Historical
+  payload field `contracts` is optional and may be absent; it is audited upstream
+  but does not drive replay in `phase3.ledger.v1`.
 - Excluded events have `applied=false`, delta `0`, and a non-null
   `exclusion_reason`.
 

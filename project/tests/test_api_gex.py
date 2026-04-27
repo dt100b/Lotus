@@ -127,6 +127,18 @@ def test_config_exposes_read_only_dashboard_metadata() -> None:
     }
 
 
+def test_legacy_dashboard_is_archived_and_primary_dashboard_is_pending() -> None:
+    client = TestClient(app)
+
+    primary = client.get("/dashboard")
+    legacy = client.get("/legacy-dashboard")
+
+    assert primary.status_code == 200
+    assert "mock-data first" in primary.text
+    assert legacy.status_code == 200
+    assert "Deribit BTC GEX Terminal" in legacy.text
+
+
 def test_health_reports_snapshot_freshness_and_provenance(tmp_path: Path) -> None:
     snapshot_path = write_snapshot(tmp_path / "latest_gex_snapshot.json")
     repository = build_repository(snapshot_path)

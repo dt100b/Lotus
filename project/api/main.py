@@ -26,7 +26,12 @@ def get_repository() -> SnapshotRepository:
 
 @app.get("/", include_in_schema=False)
 @app.get("/dashboard", include_in_schema=False)
-def dashboard() -> FileResponse:
+def dashboard_pending() -> FileResponse:
+    return FileResponse(STATIC_DIR / "frontend_pending.html")
+
+
+@app.get("/legacy-dashboard", include_in_schema=False)
+def legacy_dashboard() -> FileResponse:
     return FileResponse(STATIC_DIR / "dashboard.html")
 
 

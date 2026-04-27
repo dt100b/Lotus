@@ -18,6 +18,9 @@
   `uvicorn project.api.main:app`
   reads `project/greeks/data/latest_gex_snapshot.json`.
 
+For agent-facing architecture, methodology, invariants, and task boundaries,
+start with `project/docs/agent_handbook.md`.
+
 ## Startup Order
 
 1. Create a Python 3.11+ virtual environment and install the package.
@@ -63,6 +66,13 @@ Open:
 http://127.0.0.1:8000/dashboard
 ```
 
+The current `/dashboard` route is a mock-data-first holding page. The previous
+static dashboard is archived at:
+
+```text
+http://127.0.0.1:8000/legacy-dashboard
+```
+
 ## Continuous Local Refresh
 
 Terminal 1:
@@ -91,6 +101,18 @@ Manual Phase 1 backfill for a fixed window:
 python project/scripts/backfill_phase1.py --start 2026-04-25T00:00:00Z --end 2026-04-26T00:00:00Z --db-path project/data/phase1.sqlite3 --job-name btc_options_2026_04_25
 ```
 
+Production-depth 90-day historical workflow, isolated from the prototype DB:
+
+```powershell
+python project/scripts/historical_backfill.py --start 2026-01-26T00:00:00Z --end 2026-04-26T00:00:00Z --db-path project/data/phase1_history.sqlite3 --job-name btc_options_history_2026_01_26_2026_04_26 --validate-remote
+```
+
+Rerun validation/materialization against an existing historical DB:
+
+```powershell
+python project/scripts/historical_backfill.py --skip-backfill --db-path project/data/phase1_history.sqlite3
+```
+
 Materialize the dashboard snapshot from an existing DB:
 
 ```powershell
@@ -104,6 +126,9 @@ python project/scripts/validate_dashboard_pipeline.py --db-path project/data/pha
 ```
 
 This writes `project/runtime/validation_build/validation_report.json` and will fail the history audit by default unless the raw trade window spans at least 24 hours.
+
+The historical workflow writes `project/runtime/history_validation/validation_report.json`
+and defaults to a 90-day coverage threshold.
 
 ## Verification Commands
 
@@ -135,10 +160,13 @@ python -m pytest -q
 ## What Good Looks Like
 
 - `inspect_phase1_db.py` shows non-zero `raw_instruments_count` and `raw_trades_count`.
+- Historical validation reports no duplicate trade groups, no invalid taker sides,
+  no missing `amount` values, no missing Greeks, and deterministic rematerialization.
 - `materialize_dashboard_snapshot.py` reports non-zero `inventory_row_count` and `snapshot_row_count`.
 - `/api/v1/health` returns `200` with `row_count > 0`.
 - `/api/v1/gex-profile?expiry=ALL&view=net` returns `points` with length greater than zero.
-- `/dashboard` shows spot, freshness, contract, expiries, and visible strikes.
+- `/legacy-dashboard` shows the archived prototype dashboard; `/dashboard` stays
+  mock-data-first until the production frontend is approved.
 
 ## Troubleshooting
 

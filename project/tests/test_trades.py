@@ -35,6 +35,50 @@ def test_normalize_trade_keeps_audit_fields_and_is_eligible_when_single_leg_btc_
     assert len(event.raw_payload_sha256) == 64
 
 
+def test_normalize_trade_uses_amount_as_inventory_unit_and_keeps_contracts_auditable():
+    registry = InstrumentRegistry.build(
+        [{"instrument_name": "BTC-28JUN24-70000-C", "base_currency": "BTC"}]
+    )
+
+    raw_trade = {
+        "trade_id": "123-contracts",
+        "trade_seq": 457,
+        "timestamp": 1717000000000,
+        "instrument_name": "BTC-28JUN24-70000-C",
+        "direction": "buy",
+        "amount": "2",
+        "contracts": "200",
+        "price": "0.055",
+    }
+
+    event = normalize_trade(raw_trade, registry)
+
+    assert str(event.amount) == "2"
+    assert event.raw_payload["contracts"] == "200"
+
+
+def test_normalize_trade_accepts_historical_payload_without_contracts():
+    registry = InstrumentRegistry.build(
+        [{"instrument_name": "BTC-28JUN24-70000-P", "base_currency": "BTC"}]
+    )
+
+    raw_trade = {
+        "trade_id": "123-no-contracts",
+        "trade_seq": 458,
+        "timestamp": 1717000000000,
+        "instrument_name": "BTC-28JUN24-70000-P",
+        "direction": "sell",
+        "amount": "0.5",
+        "price": "0.025",
+    }
+
+    event = normalize_trade(raw_trade, registry)
+
+    assert event.taker_side == "sell"
+    assert str(event.amount) == "0.5"
+    assert "contracts" not in event.raw_payload
+
+
 def test_block_trade_is_preserved_but_excluded():
     registry = InstrumentRegistry.build(
         [{"instrument_name": "BTC-28JUN24-70000-C", "base_currency": "BTC"}]

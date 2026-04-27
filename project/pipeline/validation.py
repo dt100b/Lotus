@@ -184,6 +184,47 @@ def validate_raw_to_normalized(
     }
 
 
+def audit_deribit_trade_payloads(raw_trades: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    rows = list(raw_trades)
+    direction_values = sorted({str(row.get("direction", "")).lower() for row in rows})
+    missing_direction = [row for row in rows if str(row.get("direction", "")).lower() not in {"buy", "sell"}]
+    missing_amount = [row for row in rows if row.get("amount") in {None, ""}]
+    missing_contracts = [row for row in rows if row.get("contracts") in {None, ""}]
+    mismatched_amount_contracts: list[dict[str, Any]] = []
+
+    for row in rows:
+        amount = row.get("amount")
+        contracts = row.get("contracts")
+        if amount in {None, ""} or contracts in {None, ""}:
+            continue
+        try:
+            amount_decimal = Decimal(str(amount))
+            contracts_decimal = Decimal(str(contracts))
+        except Exception:
+            continue
+        if amount_decimal != contracts_decimal and len(mismatched_amount_contracts) < 5:
+            mismatched_amount_contracts.append(
+                {
+                    "instrument_name": row.get("instrument_name"),
+                    "trade_id": row.get("trade_id"),
+                    "amount": str(amount),
+                    "contracts": str(contracts),
+                }
+            )
+
+    return {
+        "passed": not missing_direction and not missing_amount,
+        "inventory_unit_policy": "phase2.v1 uses Deribit trade amount for dealer inventory; contracts is audited when present.",
+        "trade_count": len(rows),
+        "direction_values": direction_values,
+        "missing_or_invalid_direction_count": len(missing_direction),
+        "missing_amount_count": len(missing_amount),
+        "missing_contracts_count": len(missing_contracts),
+        "amount_contracts_mismatch_count": len(mismatched_amount_contracts),
+        "amount_contracts_mismatch_examples": mismatched_amount_contracts,
+    }
+
+
 def validate_position_chain(
     phase3_events: Iterable[dict[str, Any]],
     position_deltas: Iterable[dict[str, Any]],
@@ -390,6 +431,15 @@ def validate_snapshot_consistency(
         "row_violation_examples": row_violations,
         "snapshot_vs_instrument_examples": snapshot_examples,
         "strike_vs_instrument_examples": strike_examples,
+    }
+
+
+def validate_greeks_coverage(gex_summary: dict[str, Any]) -> dict[str, Any]:
+    missing_count = int(gex_summary.get("missing_greeks_count", 0))
+    return {
+        "passed": missing_count == 0,
+        "missing_greeks_count": missing_count,
+        "missing_greeks_examples": list(gex_summary.get("missing_greeks", []))[:10],
     }
 
 

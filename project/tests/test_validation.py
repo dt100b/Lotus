@@ -7,7 +7,9 @@ from ledger.models import NormalizedTradeEvent
 from ledger.replay import LedgerReplayer
 from ledger.rules import LedgerPolicy
 from pipeline.validation import (
+    audit_deribit_trade_payloads,
     validate_expiry_filtering,
+    validate_greeks_coverage,
     validate_position_chain,
     validate_snapshot_consistency,
 )
@@ -180,3 +182,56 @@ def test_validate_expiry_filtering_passes_for_additive_all_view(tmp_path: Path) 
 
     assert result["passed"] is True
     assert result["mismatch_count"] == 0
+
+
+def test_audit_deribit_trade_payloads_allows_missing_contracts_but_requires_amount_and_direction() -> None:
+    result = audit_deribit_trade_payloads(
+        [
+            {
+                "instrument_name": "BTC-26APR26-90000-C",
+                "trade_id": "1",
+                "direction": "buy",
+                "amount": "2",
+            },
+            {
+                "instrument_name": "BTC-26APR26-90000-P",
+                "trade_id": "2",
+                "direction": "sell",
+                "amount": "1",
+                "contracts": "1",
+            },
+        ]
+    )
+
+    assert result["passed"] is True
+    assert result["missing_contracts_count"] == 1
+    assert "amount" in result["inventory_unit_policy"]
+
+
+def test_audit_deribit_trade_payloads_fails_invalid_taker_side_or_amount() -> None:
+    result = audit_deribit_trade_payloads(
+        [
+            {
+                "instrument_name": "BTC-26APR26-90000-C",
+                "trade_id": "1",
+                "direction": "hold",
+                "amount": "",
+            }
+        ]
+    )
+
+    assert result["passed"] is False
+    assert result["missing_or_invalid_direction_count"] == 1
+    assert result["missing_amount_count"] == 1
+
+
+def test_validate_greeks_coverage_fails_missing_greeks() -> None:
+    result = validate_greeks_coverage(
+        {
+            "missing_greeks_count": 2,
+            "missing_greeks": ["BTC-26APR26-90000-C", "BTC-26APR26-90000-P"],
+        }
+    )
+
+    assert result["passed"] is False
+    assert result["missing_greeks_count"] == 2
