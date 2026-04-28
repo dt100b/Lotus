@@ -11,8 +11,15 @@ export function RankingTable({ title, rows }: RankingTableProps) {
   const maxAbs = Math.max(...rows.map((row) => Math.abs(row.gammaExposureUsd)))
 
   return (
-    <Panel title={title} className="flex h-full min-h-[310px] flex-col">
-      <div className="grid flex-1 gap-0.5" style={{ gridTemplateRows: `repeat(${rows.length}, minmax(22px, 1fr))` }}>
+    <Panel title={title} className="flex h-full min-h-[292px] flex-col">
+      <div className="grid grid-cols-[44px_124px_94px_minmax(132px,1fr)_86px] border-b border-[var(--terminal-border)] pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--terminal-muted)]">
+        <div>Rank</div>
+        <div>Strike (USD)</div>
+        <div>Δ% 24H</div>
+        <div>Gamma Exposure (USD)</div>
+        <div />
+      </div>
+      <div className="grid flex-1" style={{ gridTemplateRows: `repeat(${rows.length}, minmax(var(--terminal-table-row), 1fr))` }}>
         {rows.map((row) => {
           const positive = row.gammaExposureUsd >= 0
           const width = `${Math.max(12, (Math.abs(row.gammaExposureUsd) / maxAbs) * 100)}%`
@@ -20,20 +27,20 @@ export function RankingTable({ title, rows }: RankingTableProps) {
           return (
             <div
               key={`${title}-${row.rank}`}
-              className="group grid grid-cols-[42px_120px_106px_minmax(128px,1fr)_88px] items-center border-b border-[#1f2c2f] py-px text-[13px] leading-5 transition-colors last:border-b-0 hover:bg-[#0c1416]"
+              className="group grid grid-cols-[44px_124px_94px_minmax(132px,1fr)_86px] items-center border-b border-[var(--terminal-border)] py-0 text-[12px] leading-[18px] transition-colors last:border-b-0 hover:bg-[var(--terminal-surface-2)]"
             >
-              <div className="terminal-value text-[#d4d1c9]">{row.rank}</div>
-              <div className="terminal-value font-semibold text-[#ff8a00]">${formatStrike(row.strike)}</div>
-              <div className={row.changePercent < 0 ? 'terminal-value text-[#ff4b43]' : 'terminal-value text-[#51cf66]'}>
+              <div className="terminal-value text-[var(--terminal-text)]">{row.rank}</div>
+              <div className="terminal-value font-semibold text-[var(--terminal-heading)]">${formatStrike(row.strike)}</div>
+              <div className={row.changePercent < 0 ? 'terminal-value text-[var(--terminal-red-strong)]' : 'terminal-value text-[var(--terminal-green-strong)]'}>
                 {formatSignedPercent(row.changePercent)}
               </div>
-              <div className="h-[6px] border border-[#1c292b] bg-[#0a0f10] shadow-[inset_0_0_10px_rgba(0,0,0,0.44)]">
+              <div className="h-1 border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)]">
                 <div
-                  className={positive ? 'h-full bg-[#3fc35d] shadow-[0_0_10px_rgba(63,195,93,0.34)]' : 'h-full bg-[#ff3f37] shadow-[0_0_10px_rgba(255,63,55,0.34)]'}
+                  className={positive ? 'h-full bg-[var(--chart-positive)]' : 'h-full bg-[var(--chart-negative)]'}
                   style={{ width }}
                 />
               </div>
-              <div className={positive ? 'terminal-value text-right text-[#51cf66]' : 'terminal-value text-right text-[#ff4b43]'}>
+              <div className={positive ? 'terminal-value text-right text-[var(--terminal-green-strong)]' : 'terminal-value text-right text-[var(--terminal-red-strong)]'}>
                 {formatMillions(row.gammaExposureUsd)}
               </div>
             </div>

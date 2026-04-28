@@ -14,14 +14,14 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'inline-flex h-10 min-w-44 items-center justify-between rounded-[4px] border border-[#4b5556] bg-[#05090b] px-3 text-sm text-[#e8dcc9] shadow-[inset_0_0_18px_rgba(0,0,0,0.34)] transition-colors hover:border-[#7d8a86] focus:outline-none focus:ring-1 focus:ring-[#ff9b28]',
+      'inline-flex h-[26px] min-w-44 items-center justify-between rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-2.5 text-[9.5px] font-semibold uppercase tracking-[0.1em] text-[var(--terminal-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] transition-colors hover:border-[var(--terminal-border-strong)] focus:outline-none focus:ring-1 focus:ring-[var(--terminal-green)]',
       className,
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 text-[#d5b276]" />
+      <ChevronDown className="h-3 w-3 text-[var(--terminal-muted)]" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ))
@@ -35,7 +35,7 @@ export const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        'z-50 min-w-44 overflow-hidden rounded-[4px] border border-[#536164] bg-[#060b0d] text-[#d8d4ca] shadow-2xl',
+        'z-50 min-w-44 overflow-hidden rounded-[var(--terminal-radius-sm)] border border-[var(--terminal-border-strong)] bg-[var(--terminal-surface)] text-[var(--terminal-text)] shadow-2xl',
         className,
       )}
       {...props}
@@ -53,7 +53,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex cursor-default select-none items-center rounded-[2px] px-8 py-2 text-sm outline-none focus:bg-[#143c32] focus:text-[#d7ffe3] data-[state=checked]:text-[#ffb562]',
+      'relative flex cursor-default select-none items-center rounded-[2px] px-8 py-2 text-xs uppercase tracking-[0.08em] outline-none focus:bg-[var(--terminal-green-soft)] focus:text-[var(--terminal-green-strong)] data-[state=checked]:text-[var(--terminal-green-strong)]',
       className,
     )}
     {...props}

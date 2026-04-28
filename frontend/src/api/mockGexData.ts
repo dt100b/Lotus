@@ -43,17 +43,19 @@ export type MockGexSnapshot = {
 }
 
 type ExpiryProfile = {
-  callCenter: number
-  callWidth: number
-  callPeak: number
-  putCenter: number
-  putWidth: number
-  putPeak: number
-  wingScale: number
+  callClusters: GexCluster[]
+  putClusters: GexCluster[]
+  textureScale: number
 }
 
-const spot = 75_860
-const asOfUtc = '12:42:08 UTC'
+type GexCluster = {
+  strike: number
+  width: number
+  value: number
+}
+
+const spot = 77_041
+const asOfUtc = '04:58:01 UTC'
 const expiries: OpexExpiry[] = [...opexExpiries]
 const expiryTenorDays: Record<OpexExpiry, number> = {
   '27APR26': 0,
@@ -70,6 +72,45 @@ const expiryTenorDays: Record<OpexExpiry, number> = {
   '25DEC26': 242,
   '26MAR27': 333,
 }
+const expiryLiquidityWeights: Record<OpexExpiry, number> = {
+  '27APR26': 0.26,
+  '28APR26': 0.16,
+  '29APR26': 0.1,
+  '30APR26': 0.07,
+  '1MAY26': 0.08,
+  '8MAY26': 0.1,
+  '15MAY26': 0.07,
+  '29MAY26': 0.055,
+  '26JUN26': 0.045,
+  '31JUL26': 0.025,
+  '25SEP26': 0.018,
+  '25DEC26': 0.012,
+  '26MAR27': 0.005,
+}
+
+const referenceCallClusters: GexCluster[] = [
+  { strike: 75_000, width: 250, value: 33_000_000 },
+  { strike: 78_000, width: 320, value: 8_000_000 },
+  { strike: 80_000, width: 170, value: 37_000_000 },
+  { strike: 82_000, width: 210, value: 18_000_000 },
+  { strike: 83_000, width: 320, value: 7_500_000 },
+  { strike: 84_000, width: 260, value: 10_000_000 },
+  { strike: 85_000, width: 350, value: 9_000_000 },
+  { strike: 87_500, width: 300, value: 5_500_000 },
+  { strike: 90_000, width: 260, value: 10_500_000 },
+  { strike: 95_000, width: 360, value: 4_200_000 },
+]
+const referencePutClusters: GexCluster[] = [
+  { strike: 60_000, width: 360, value: 8_700_000 },
+  { strike: 63_000, width: 230, value: 2_200_000 },
+  { strike: 65_000, width: 300, value: 3_000_000 },
+  { strike: 68_000, width: 280, value: 3_600_000 },
+  { strike: 70_000, width: 250, value: 4_500_000 },
+  { strike: 73_500, width: 260, value: 5_400_000 },
+  { strike: 76_500, width: 190, value: 8_700_000 },
+  { strike: 77_000, width: 180, value: 12_000_000 },
+  { strike: 78_000, width: 230, value: 3_000_000 },
+]
 
 const strikeGrid = buildStrikeGrid()
 const snapshots = buildSnapshots()
@@ -117,31 +158,35 @@ function buildAllExpirySnapshot(
 
 function buildExpiryProfile(expiry: OpexExpiry): ExpiryProfile {
   const tenorDays = expiryTenorDays[expiry]
-  const tenor = Math.log1p(tenorDays) / Math.log1p(expiryTenorDays['26MAR27'])
-  const frontWeekWeight = Math.max(0, 1 - tenorDays / 7)
-  const monthlyWeight = expiry.endsWith('MAY26') || expiry.endsWith('JUN26') || expiry.endsWith('JUL26')
-    ? 0.08
-    : 0
+  const tenor = tenorDays / expiryTenorDays['26MAR27']
+  const weight = expiryLiquidityWeights[expiry]
+  const frontDayBoost = expiry === '27APR26' ? 1.2 : 1
+  const callStrikeDrift = tenor * 1_500
+  const putStrikeDrift = -tenor * 2_000
 
   return {
-    callCenter: roundStrike(80_500 + tenor * 14_500 + monthlyWeight * 2_000),
-    callWidth: 2_150 + tenor * 12_000,
-    callPeak: 21_500_000 - tenor * 12_000_000 + frontWeekWeight * 3_500_000,
-    putCenter: roundStrike(71_500 - tenor * 16_500 - monthlyWeight * 1_500),
-    putWidth: 3_100 + tenor * 8_800,
-    putPeak: 19_000_000 - tenor * 8_600_000 + frontWeekWeight * 2_200_000,
-    wingScale: 1_100_000 + tenor * 2_700_000,
+    callClusters: referenceCallClusters.map((cluster) => ({
+      ...cluster,
+      strike: roundStrike(cluster.strike + (cluster.strike >= 84_000 ? callStrikeDrift : 0)),
+      width: cluster.width + tenor * 900,
+      value: cluster.value * weight * frontDayBoost,
+    })),
+    putClusters: referencePutClusters.map((cluster) => ({
+      ...cluster,
+      strike: roundStrike(cluster.strike + (cluster.strike <= 70_000 ? putStrikeDrift : 0)),
+      width: cluster.width + tenor * 700,
+      value: cluster.value * weight * frontDayBoost,
+    })),
+    textureScale: 760_000 * weight * (1 + tenor * 0.8),
   }
 }
 
 function buildStrike(strike: number, profile: ExpiryProfile): MockGexStrike {
-  const callCluster = gaussian(strike, profile.callCenter, profile.callWidth) * profile.callPeak
-  const putCluster = -gaussian(strike, profile.putCenter, profile.putWidth) * profile.putPeak
-  const callWing = farOtmCallWing(strike, profile)
-  const putWing = farOtmPutWing(strike, profile)
-  const localTexture = deterministicTexture(strike) * profile.wingScale
-  const callGexUsd = roundUsd(Math.max(0, callCluster + callWing + Math.max(localTexture, 0)))
-  const putGexUsd = roundUsd(Math.min(0, putCluster + putWing + Math.min(localTexture, 0)))
+  const callCluster = sum(profile.callClusters.map((cluster) => gaussian(strike, cluster.strike, cluster.width) * cluster.value))
+  const putCluster = -sum(profile.putClusters.map((cluster) => gaussian(strike, cluster.strike, cluster.width) * cluster.value))
+  const localTexture = deterministicTexture(strike) * profile.textureScale
+  const callGexUsd = roundUsd(Math.max(0, callCluster + Math.max(localTexture, 0)))
+  const putGexUsd = roundUsd(Math.min(0, putCluster + Math.min(localTexture, 0)))
   const netGexUsd = roundUsd(callGexUsd + putGexUsd)
 
   return toStrikeRow(strike, callGexUsd, putGexUsd, netGexUsd)
@@ -231,18 +276,8 @@ function gaussian(value: number, center: number, width: number) {
   return Math.exp(-((value - center) ** 2) / (2 * width ** 2))
 }
 
-function farOtmCallWing(strike: number, profile: ExpiryProfile) {
-  const distance = Math.max(0, strike - spot)
-  return gaussian(strike, 115_000, 22_000) * profile.wingScale * 0.82 + distance / 70_000 * profile.wingScale * 0.24
-}
-
-function farOtmPutWing(strike: number, profile: ExpiryProfile) {
-  const distance = Math.max(0, spot - strike)
-  return -(gaussian(strike, 45_000, 18_000) * profile.wingScale * 0.76 + distance / 55_000 * profile.wingScale * 0.2)
-}
-
 function deterministicTexture(strike: number) {
-  return (Math.sin(strike / 1_900) * 0.38 + Math.cos(strike / 3_700) * 0.24) * 0.5
+  return Math.sin(strike / 640) * 0.46 + Math.cos(strike / 1_450) * 0.27 + Math.sin(strike / 2_900) * 0.16
 }
 
 function sum(values: number[]) {

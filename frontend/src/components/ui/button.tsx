@@ -4,21 +4,21 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 const buttonVariants = cva(
-  'inline-flex h-10 items-center justify-center gap-2 rounded-[4px] border px-3 text-sm font-semibold uppercase tracking-[0.04em] transition-all duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#ff9b28] disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex h-[26px] items-center justify-center gap-2 rounded-[var(--terminal-control-radius)] border px-2.5 text-[9.5px] font-semibold uppercase tracking-[0.1em] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--terminal-green)] disabled:pointer-events-none disabled:opacity-50',
   {
     variants: {
       variant: {
         default:
-          'border-[#4b5556] bg-[#05090b] text-[#e8dcc9] shadow-[inset_0_0_18px_rgba(0,0,0,0.32)] hover:border-[#8a7560] hover:bg-[#0b1111] hover:text-[#ff9b28]',
+          'border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] text-[var(--terminal-text)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.015)] hover:border-[var(--terminal-border-strong)] hover:bg-[var(--terminal-surface-2)] hover:text-[var(--terminal-heading)]',
         ghost:
-          'border-transparent bg-transparent text-[#d4bd94] hover:border-[#445052] hover:bg-[#0b1111] hover:text-[#ffcf8c]',
+          'border-transparent bg-transparent text-[var(--terminal-muted)] hover:border-[var(--terminal-border)] hover:bg-[var(--terminal-surface-2)] hover:text-[var(--terminal-heading)]',
         active:
-          'border-[#6ea78a] bg-[#143c32] text-[#d7ffe3] shadow-[inset_0_0_20px_rgba(39,178,111,0.25),0_0_14px_rgba(39,178,111,0.12)]',
+          'border-[var(--terminal-active-border)] bg-[rgba(101,136,76,0.22)] text-[var(--terminal-green-strong)] shadow-[inset_0_0_0_1px_rgba(137,180,102,0.32)]',
       },
       size: {
-        default: 'h-10 px-3',
-        icon: 'h-10 w-10 px-0',
-        compact: 'h-7 px-2.5 text-xs',
+        default: 'h-[26px] px-2.5',
+        icon: 'h-[26px] w-[26px] px-0',
+        compact: 'h-[20px] px-1.5 text-[9px] tracking-[0.08em]',
       },
     },
     defaultVariants: {

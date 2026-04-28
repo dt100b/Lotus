@@ -1,4 +1,5 @@
 import { getMockGexSnapshot, opexExpiries, type GexExpiry } from '@/api/mockGexData'
+import { formatSignedPercent } from '@/lib/formatters'
 
 export type GammaBar = {
   strike: number
@@ -56,6 +57,7 @@ export type TerminalSnapshot = {
   }
   rankings: {
     allExpiry: RankingRow[]
+    selectedExpiry: RankingRow[]
     zeroDte: RankingRow[]
   }
 }
@@ -64,42 +66,44 @@ export function getTerminalSnapshot(expiry: GexExpiry = 'ALL'): TerminalSnapshot
   const gexSnapshot = getMockGexSnapshot(expiry)
   const allExpiry = getMockGexSnapshot('ALL')
   const frontExpiry = getMockGexSnapshot(opexExpiries[0])
+  const spot = allExpiry.spot
 
   return {
     ...gexSnapshot,
     marketSources,
     levels: {
       allExpiry: [
-        { label: 'HVL', strike: allExpiry.maxPositiveGammaStrike, changePercent: 0.65, color: '#ffb338' },
-        { label: 'Call Resistance', strike: allExpiry.maxPositiveGammaStrike, changePercent: 4.57, color: '#ff3333' },
-        { label: 'Put Support', strike: allExpiry.maxNegativeGammaStrike, changePercent: -0.64, color: '#b8c34f' },
+        { label: 'HVL', strike: 80_000, changePercent: percentFromSpot(80_000, spot), color: '#d0bc62' },
+        { label: 'Call Resistance', strike: 81_500, changePercent: percentFromSpot(81_500, spot), color: '#94c970' },
+        { label: 'Put Support', strike: 68_000, changePercent: percentFromSpot(68_000, spot), color: '#ee5f66' },
       ],
       zeroDte: [
-        { label: '0DTE HVL', strike: frontExpiry.maxPositiveGammaStrike, changePercent: 0.65, color: '#ffb338' },
-        { label: '0DTE Call', strike: frontExpiry.maxPositiveGammaStrike, changePercent: 4.57, color: '#ff3333' },
-        { label: '0DTE Put', strike: frontExpiry.maxNegativeGammaStrike, changePercent: -0.64, color: '#b8c34f' },
+        { label: '0DTE HVL', strike: frontExpiry.maxPositiveGammaStrike, changePercent: percentFromSpot(frontExpiry.maxPositiveGammaStrike, spot), color: '#86a9c7' },
+        { label: '0DTE Call', strike: 80_000, changePercent: percentFromSpot(80_000, spot), color: '#94c970' },
+        { label: '0DTE Put', strike: frontExpiry.maxNegativeGammaStrike, changePercent: percentFromSpot(frontExpiry.maxNegativeGammaStrike, spot), color: '#ee5f66' },
       ],
       advanced: [
-        { label: 'Zero Gamma', value: `$${formatStrikeLikeNumber(gexSnapshot.zeroGamma)}`, color: '#4f95d8' },
-        { label: 'Max Pain', value: `$${formatStrikeLikeNumber(gexSnapshot.maxNegativeGammaStrike)}`, change: '-3.27%', color: '#d35fe9' },
+        { label: 'Zero Gamma', value: '$76,132', color: '#4f95d8' },
+        { label: 'Max Pain', value: '$77,000', change: formatSignedPercent(percentFromSpot(77_000, spot)), color: '#d35fe9' },
         {
           label: 'Expected Move',
-          value: `$${formatStrikeLikeNumber(Math.round(gexSnapshot.spot * 0.972))}-$${formatStrikeLikeNumber(Math.round(gexSnapshot.spot * 1.044))}`,
+          value: '$73,500-$82,000',
           color: '#9a6cff',
         },
-        { label: 'Gamma Flip Zones', value: `$${formatStrikeLikeNumber(gexSnapshot.zeroGamma)}`, color: '#27a7dc' },
+        { label: 'Gamma Flip Zones', value: '$76,132', color: '#27a7dc' },
       ],
     },
     rankings: {
       allExpiry: buildRankingRows(allExpiry.gammaBars),
+      selectedExpiry: buildRankingRows(gexSnapshot.gammaBars),
       zeroDte: buildRankingRows(frontExpiry.gammaBars),
     },
   }
 }
 
 const marketSources: MarketSource[] = [
-  { name: 'Index (Deribit)', value: 75_502, note: 'options settle', color: '#d35fe9' },
-  { name: 'Perps (Hyperliquid)', value: 75_860, note: 'basis +642.15', color: '#27a7dc' },
+  { name: 'Index (Deribit)', value: 77_041, note: 'options settle', color: '#d35fe9' },
+  { name: 'Perps (Hyperliquid)', value: 77_118, note: 'basis +77.00', color: '#27a7dc' },
 ]
 
 export const terminalSnapshot = getTerminalSnapshot('ALL')
@@ -118,6 +122,6 @@ function buildRankingRows(rows: GammaBar[]): RankingRow[] {
     }))
 }
 
-function formatStrikeLikeNumber(value: number) {
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
+function percentFromSpot(strike: number, spot: number) {
+  return ((strike - spot) / spot) * 100
 }
