@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { scaleBand, scaleLinear } from 'd3-scale'
-import type { ScaleLinear } from 'd3-scale'
+import type { ScaleBand, ScaleLinear } from 'd3-scale'
 import { area, curveMonotoneX, line } from 'd3-shape'
+import { getGexChartTitle } from '@/components/terminal/gexModes'
 import { formatAxisMillions, formatMillions, formatStrike } from '@/lib/formatters'
 
 export type GexMode = 'net' | 'split' | 'call' | 'put' | 'abs' | 'profile'
@@ -16,7 +17,19 @@ export type GexLevelMarker = {
   label: string
   strike: number
   color: string
+  glyph?: LevelMarkerGlyphVariant
+  axisOnly?: boolean
+  components?: GexLevelMarker[]
 }
+
+export type LevelMarkerGlyphVariant =
+  | 'diamond'
+  | 'chevronUp'
+  | 'chevronDown'
+  | 'crosshair'
+  | 'slash'
+  | 'bracket'
+  | 'flipZone'
 
 type GexSourceRow = {
   strike: number
@@ -31,6 +44,8 @@ export type GexProfileChartProps = {
   mode: GexMode
   dataWindowPct: number | 'full'
   levelMarkers?: GexLevelMarker[]
+  titleAccessory?: ReactNode
+  titleOverride?: string
 }
 
 type ChartDatum = {
@@ -38,6 +53,8 @@ type ChartDatum = {
   netGexUsd: number
   callGexUsd: number
   putGexUsd: number
+  positiveGexUsd: number
+  negativeGexUsd: number
   displayGexUsd: number
 }
 
@@ -45,7 +62,10 @@ type HoverState = {
   datum: ChartDatum
   xPct: number
   yPct: number
+  side: TooltipSide
 }
+
+type TooltipSide = 'left' | 'right'
 
 type ChartDimensions = {
   width: number
@@ -70,47 +90,100 @@ type AreaChartLayout = {
   zeroY: number
   spotX: number
   levelMarkers: PositionedAreaLevelMarker[]
+  axisMarkers: PositionedAreaLevelMarker[]
 }
 
 type PositionedBarLevelMarker = GexLevelMarker & {
+  y: number
+  components?: GexLevelMarker[]
+}
+
+type StrikeAxisTick = {
+  strike: number
   y: number
 }
 
 type PositionedAreaLevelMarker = GexLevelMarker & {
   x: number
+  components?: GexLevelMarker[]
 }
 
 const defaultWidth = 1120
 const minChartWidth = 720
-const chartHeight = 516
+const defaultChartHeight = 516
+const minChartHeight = 516
 const margin = { top: 60, right: 102, bottom: 54, left: 78 }
 const areaMargin = { top: 54, right: 30, bottom: 50, left: 104 }
 const areaYAxisLabelX = 22
+const barChartDomainPadding = 1.35
+const areaChartDomainPadding = 1.35
+const profileNegativeDomainBuffer = 10_000_000
+const levelHighlightBandSize = 8
+const barSpotLabelNormalOffsetX = -6
+const barSpotLabelWidth = 74
+const barSpotLabelHeight = 18
+const barLevelLabelSpotThreshold = 24
+const barLevelLabelSpotGap = 8
+const areaSpotLabelWidth = 78
+const areaSpotLabelHeight = 18
 
-export function GexProfileChart({ snapshot, mode, dataWindowPct, levelMarkers = [] }: GexProfileChartProps) {
+export function GexProfileChart({
+  snapshot,
+  mode,
+  dataWindowPct,
+  levelMarkers = [],
+  titleAccessory,
+  titleOverride,
+}: GexProfileChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const measuredWidth = useContainerWidth(containerRef, defaultWidth)
+  const gradientIdPrefix = useId().replace(/:/g, '')
+  const { width: measuredWidth, height: measuredHeight } = useContainerSize(containerRef, defaultWidth, defaultChartHeight)
   const areaMode = mode === 'abs' || mode === 'profile'
+  const validLevelMarkers = useMemo(() => levelMarkers.filter((marker) => Number.isFinite(marker.strike)), [levelMarkers])
   const data = useMemo(
     () => prepareChartData(snapshot, mode, dataWindowPct),
     [snapshot, mode, dataWindowPct],
   )
-  const dimensions = areaMode ? getAreaChartDimensions(measuredWidth) : getChartDimensions(measuredWidth)
-  const validLevelMarkers = useMemo(() => levelMarkers.filter((marker) => Number.isFinite(marker.strike)), [levelMarkers])
-  const barLayout = useMemo(() => getChartLayout(data, snapshot.spot, dimensions, validLevelMarkers), [data, dimensions, snapshot.spot, validLevelMarkers])
-  const areaLayout = useMemo(() => getAreaChartLayout(data, snapshot.spot, dimensions, mode, validLevelMarkers), [data, dimensions, mode, snapshot.spot, validLevelMarkers])
+  const visibleLevelMarkers = useMemo(
+    () => getVisibleLevelMarkers(validLevelMarkers, data),
+    [data, validLevelMarkers],
+  )
+  const visibleLineLevelMarkers = useMemo(
+    () => groupLevelMarkers(visibleLevelMarkers.filter((marker) => !marker.axisOnly)),
+    [visibleLevelMarkers],
+  )
+  const visibleAxisLevelMarkers = useMemo(
+    () => groupLevelMarkers(visibleLevelMarkers),
+    [visibleLevelMarkers],
+  )
+  const dimensions = areaMode ? getAreaChartDimensions(measuredWidth, measuredHeight) : getChartDimensions(measuredWidth, measuredHeight)
+  const barLayout = useMemo(
+    () => getChartLayout(data, snapshot.spot, dimensions, mode, dataWindowPct, visibleLineLevelMarkers, visibleAxisLevelMarkers),
+    [data, dataWindowPct, dimensions, mode, snapshot.spot, visibleAxisLevelMarkers, visibleLineLevelMarkers],
+  )
+  const areaLayout = useMemo(
+    () => getAreaChartLayout(data, snapshot.spot, dimensions, mode, visibleLineLevelMarkers, visibleAxisLevelMarkers),
+    [data, dimensions, mode, snapshot.spot, visibleAxisLevelMarkers, visibleLineLevelMarkers],
+  )
   const [hovered, setHovered] = useState<HoverState | null>(null)
   if (areaMode) {
     return (
       <div ref={containerRef} className="relative h-full min-h-[516px] w-full overflow-hidden">
+        {titleAccessory ? (
+          <div className="absolute right-[18px] top-[12px] z-20">
+            {titleAccessory}
+          </div>
+        ) : null}
         <AreaGexChart
           data={data}
           dimensions={dimensions}
+          gradientIdPrefix={gradientIdPrefix}
           hovered={hovered}
           layout={areaLayout}
           mode={mode}
           setHovered={setHovered}
           spot={snapshot.spot}
+          titleOverride={titleOverride}
         />
       </div>
     )
@@ -118,9 +191,22 @@ export function GexProfileChart({ snapshot, mode, dataWindowPct, levelMarkers = 
 
   const layout = barLayout
   const chartRight = dimensions.margin.left + layout.innerWidth
+  const barLevelMarkerScale = getLevelMarkerScale(layout.levelMarkers.map((marker) => marker.y), dataWindowPct)
+  const barLevelLabelYById = getBarLevelLabelYById(
+    layout.levelMarkers,
+    dimensions.margin.top,
+    dimensions.margin.top + layout.innerHeight,
+    barLevelMarkerScale,
+  )
+  const barSpotLabelX = chartRight + barSpotLabelNormalOffsetX
 
   return (
     <div ref={containerRef} className="relative h-full min-h-[516px] w-full overflow-hidden">
+      {titleAccessory ? (
+        <div className="absolute right-[18px] top-[12px] z-20">
+          {titleAccessory}
+        </div>
+      ) : null}
       <svg
         width="100%"
         height={dimensions.height}
@@ -131,27 +217,27 @@ export function GexProfileChart({ snapshot, mode, dataWindowPct, levelMarkers = 
         onMouseLeave={() => setHovered(null)}
       >
         <defs>
-          <linearGradient id="chart-panel-fill" x1="0" x2="0" y1="0" y2="1">
+          <linearGradient id={`${gradientIdPrefix}-chart-panel-fill`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="#0f1212" />
             <stop offset="55%" stopColor="#0a0d0d" />
             <stop offset="100%" stopColor="#070909" />
           </linearGradient>
-          <linearGradient id="positive-gex-fill" x1="0" x2="1" y1="0" y2="0">
+          <linearGradient id={`${gradientIdPrefix}-positive-gex-fill`} x1="0" x2="1" y1="0" y2="0">
             <stop offset="0%" stopColor="#6f8f55" />
             <stop offset="100%" stopColor="var(--chart-positive-edge)" />
           </linearGradient>
-          <linearGradient id="negative-gex-fill" x1="0" x2="1" y1="0" y2="0">
+          <linearGradient id={`${gradientIdPrefix}-negative-gex-fill`} x1="0" x2="1" y1="0" y2="0">
             <stop offset="0%" stopColor="var(--chart-negative-edge)" />
             <stop offset="100%" stopColor="#9a3e43" />
           </linearGradient>
-          <linearGradient id="profile-gex-fill" x1="0" x2="1" y1="0" y2="0">
+          <linearGradient id={`${gradientIdPrefix}-profile-gex-fill`} x1="0" x2="1" y1="0" y2="0">
             <stop offset="0%" stopColor="#6f7772" />
             <stop offset="50%" stopColor="#aeb6af" />
             <stop offset="100%" stopColor="#6f7772" />
           </linearGradient>
         </defs>
 
-        <rect width={dimensions.width} height={dimensions.height} fill="url(#chart-panel-fill)" />
+        <rect width={dimensions.width} height={dimensions.height} fill={`url(#${gradientIdPrefix}-chart-panel-fill)`} />
         <rect
           x={dimensions.margin.left}
           y={dimensions.margin.top}
@@ -162,8 +248,9 @@ export function GexProfileChart({ snapshot, mode, dataWindowPct, levelMarkers = 
         />
 
         <text x={22} y={29} fill="var(--terminal-heading)" fontSize={14} fontWeight={700} letterSpacing={1.4}>
-          {chartTitle(mode)}
+          {titleOverride ?? getGexChartTitle(mode)}
         </text>
+
         <text x={22} y={53} fill="var(--terminal-muted)" fontSize={10.5} letterSpacing={1.1}>
           STRIKE (USD)
         </text>
@@ -193,37 +280,29 @@ export function GexProfileChart({ snapshot, mode, dataWindowPct, levelMarkers = 
           </g>
         ))}
 
+        {layout.yAxisTicks.map((tick) => (
+          <YAxisStrikeLabel
+            key={tick.strike}
+            strike={tick.strike}
+            x={50}
+            y={tick.y}
+            highlighted={false}
+          />
+        ))}
+
         {data.map((datum) => {
           const rowTop = layout.yScale(datum.strike) ?? dimensions.margin.top
           const rowCenter = rowTop + layout.yScale.bandwidth() / 2
-          const isNearestSpotRow = datum.strike === layout.closestSpotStrike
           const isHovered = hovered?.datum.strike === datum.strike
-          const levelMarker = getLevelMarkerAtStrike(layout.levelMarkers, datum.strike)
-          const showStrikeLabel = isHovered || (!isNearestSpotRow && shouldShowYAxisStrike(datum.strike, dataWindowPct, Boolean(levelMarker)))
           const bar = getBarGeometry(datum.displayGexUsd, layout.xScale, rowCenter)
           const barHeight = getBarHeight(layout.yScale.bandwidth())
           const positive = datum.displayGexUsd >= 0
           const stroke = positive ? 'var(--chart-positive-edge)' : 'var(--chart-negative-edge)'
-          const tooltipX = getTooltipX(bar, dimensions)
+          const positiveBar = getBarGeometry(datum.positiveGexUsd, layout.xScale, rowCenter)
+          const negativeBar = getBarGeometry(datum.negativeGexUsd, layout.xScale, rowCenter)
 
           return (
-            <g
-              key={datum.strike}
-              onMouseEnter={() =>
-                setHovered({
-                  datum,
-                  xPct: tooltipX,
-                  yPct: (rowCenter / dimensions.height) * 100,
-                })
-              }
-              onMouseMove={() =>
-                setHovered({
-                  datum,
-                  xPct: tooltipX,
-                  yPct: (rowCenter / dimensions.height) * 100,
-                })
-              }
-            >
+            <g key={datum.strike}>
               {isHovered ? (
                 <rect
                   x={dimensions.margin.left}
@@ -234,57 +313,64 @@ export function GexProfileChart({ snapshot, mode, dataWindowPct, levelMarkers = 
                   opacity="0.72"
                 />
               ) : null}
-              {showStrikeLabel ? (
-                <text
+              {isHovered ? (
+                <YAxisStrikeLabel
+                  strike={datum.strike}
                   x={50}
-                  y={rowCenter + 4}
-                  textAnchor="middle"
-                  fill={levelMarker?.color ?? 'var(--terminal-muted)'}
-                  fontSize={11.5}
-                  fontWeight={levelMarker ? 700 : 400}
-                  fontFamily="var(--font-mono)"
-                >
-                  {formatStrike(datum.strike)}
-                </text>
+                  y={rowCenter}
+                  highlighted
+                />
               ) : null}
               {mode === 'split' ? (
-                <SplitBars datum={datum} xScale={layout.xScale} y={rowCenter} rowHeight={barHeight} />
+                <SplitBars
+                  datum={datum}
+                  negativeFillId={`${gradientIdPrefix}-negative-gex-fill`}
+                  positiveFillId={`${gradientIdPrefix}-positive-gex-fill`}
+                  xScale={layout.xScale}
+                  y={rowCenter}
+                  rowHeight={barHeight}
+                />
               ) : (
-                <SingleBar bar={bar} positive={positive} stroke={stroke} height={barHeight} />
+                <SingleBar
+                  bar={bar}
+                  fillId={positive ? `${gradientIdPrefix}-positive-gex-fill` : `${gradientIdPrefix}-negative-gex-fill`}
+                  positive={positive}
+                  stroke={stroke}
+                  height={barHeight}
+                />
               )}
-              <rect
-                x={dimensions.margin.left}
-                y={rowTop}
-                width={layout.innerWidth}
-                height={layout.yScale.bandwidth()}
-                fill="transparent"
-              />
+              {mode === 'split' ? (
+                <>
+                  <BarHoverTarget
+                    bar={negativeBar}
+                    datum={datum}
+                    dimensions={dimensions}
+                    height={barHeight}
+                    setHovered={setHovered}
+                    side="left"
+                  />
+                  <BarHoverTarget
+                    bar={positiveBar}
+                    datum={datum}
+                    dimensions={dimensions}
+                    height={barHeight}
+                    setHovered={setHovered}
+                    side="right"
+                  />
+                </>
+              ) : (
+                <BarHoverTarget
+                  bar={bar}
+                  datum={datum}
+                  dimensions={dimensions}
+                  height={barHeight}
+                  setHovered={setHovered}
+                  side={positive ? 'right' : 'left'}
+                />
+              )}
             </g>
           )
         })}
-
-        <text
-          x={50}
-          y={layout.spotY + 4}
-          textAnchor="middle"
-          fill="var(--terminal-heading)"
-          fontSize={11.5}
-          fontWeight={700}
-          fontFamily="var(--font-mono)"
-        >
-          {formatStrike(snapshot.spot)}
-        </text>
-
-        {layout.levelMarkers.map((marker, index) => (
-          <BarLevelMarker
-            key={marker.id}
-            marker={marker}
-            chartLeft={dimensions.margin.left}
-            chartRight={chartRight}
-            data={data}
-            index={index}
-          />
-        ))}
 
         <line
           x1={dimensions.margin.left}
@@ -295,14 +381,35 @@ export function GexProfileChart({ snapshot, mode, dataWindowPct, levelMarkers = 
           strokeWidth={1}
           strokeDasharray="4 6"
           strokeOpacity="0.6"
+          pointerEvents="none"
         />
-        <g transform={`translate(${chartRight - 6} ${layout.spotY})`}>
-          <rect x="0" y="-11" width="94" height="22" rx="2" fill="var(--terminal-surface)" stroke="var(--terminal-border-strong)" />
+
+        {layout.levelMarkers.map((marker) => (
+          <BarLevelMarker
+            key={marker.id}
+            marker={marker}
+            chartLeft={dimensions.margin.left}
+            spotLabelX={barSpotLabelX}
+            labelY={barLevelLabelYById.get(marker.id) ?? marker.y}
+            markerScale={barLevelMarkerScale}
+            spotY={layout.spotY}
+          />
+        ))}
+        <g transform={`translate(${barSpotLabelX} ${layout.spotY})`}>
+          <rect
+            x="0"
+            y={-barSpotLabelHeight / 2}
+            width={barSpotLabelWidth}
+            height={barSpotLabelHeight}
+            rx="2"
+            fill="var(--terminal-surface)"
+            stroke="var(--terminal-border-strong)"
+          />
           <text
-            x="47"
+            x={barSpotLabelWidth / 2}
             y="1"
             fill="var(--terminal-heading)"
-            fontSize={10.5}
+            fontSize={9.5}
             textAnchor="middle"
             dominantBaseline="middle"
             fontFamily="var(--font-mono)"
@@ -330,16 +437,24 @@ export function GexProfileChart({ snapshot, mode, dataWindowPct, levelMarkers = 
           style={{
             left: `${hovered.xPct}%`,
             top: `${hovered.yPct}%`,
-            transform: 'translate(12px, -50%)',
+            transform: getTooltipTransform(hovered.side),
           }}
         >
           <div className="mb-1 text-[var(--terminal-heading)]">Strike {formatStrike(hovered.datum.strike)}</div>
           <div className={hovered.datum.netGexUsd >= 0 ? 'terminal-value text-[var(--terminal-green-strong)]' : 'terminal-value text-[var(--terminal-red-strong)]'}>
             Net GEX {formatMillions(hovered.datum.netGexUsd)}
           </div>
-          <div className="terminal-value mt-1 text-[var(--terminal-green)]">Calls {formatMillions(hovered.datum.callGexUsd)}</div>
-          <div className="terminal-value text-[var(--terminal-red)]">Puts {formatMillions(hovered.datum.putGexUsd)}</div>
-          <div className="text-[var(--terminal-muted)]">Mode {modeLabel(mode)}</div>
+          {mode === 'split' ? (
+            <>
+              <div className="terminal-value mt-1 text-[var(--terminal-green)]">Long Gamma {formatMillions(hovered.datum.positiveGexUsd)}</div>
+              <div className="terminal-value text-[var(--terminal-red)]">Short Gamma {formatMillions(hovered.datum.negativeGexUsd)}</div>
+            </>
+          ) : (
+            <>
+              <div className="terminal-value mt-1 text-[var(--terminal-green)]">Calls {formatMillions(hovered.datum.callGexUsd)}</div>
+              <div className="terminal-value text-[var(--terminal-red)]">Puts {formatMillions(hovered.datum.putGexUsd)}</div>
+            </>
+          )}
         </div>
       ) : null}
     </div>
@@ -349,19 +464,23 @@ export function GexProfileChart({ snapshot, mode, dataWindowPct, levelMarkers = 
 function AreaGexChart({
   data,
   dimensions,
+  gradientIdPrefix,
   hovered,
   layout,
   mode,
   setHovered,
   spot,
+  titleOverride,
 }: {
   data: ChartDatum[]
   dimensions: ChartDimensions
+  gradientIdPrefix: string
   hovered: HoverState | null
   layout: AreaChartLayout
   mode: 'abs' | 'profile'
   setHovered: (hovered: HoverState | null) => void
   spot: number
+  titleOverride?: string
 }) {
   const isAbsMode = mode === 'abs'
   const chartRight = dimensions.margin.left + layout.innerWidth
@@ -392,7 +511,10 @@ function AreaGexChart({
     : getSignedLinePath(layout.profileData, layout.xScale, layout.yScale, (datum) => datum.netGexUsd <= 0)
   const hoveredDatum = hovered && layout.data.length > 0 ? getClosestDatumByStrike(layout.data, hovered.datum.strike) : null
   const hoverX = hoveredDatum ? layout.xScale(hoveredDatum.strike) : null
-  const spotLabelX = getClampedLabelX(layout.spotX, dimensions.margin.left + 47, chartRight - 47)
+  const spotLabelX = getClampedLabelX(layout.spotX, dimensions.margin.left + areaSpotLabelWidth / 2, chartRight - areaSpotLabelWidth / 2)
+  const spotLabelY = dimensions.margin.top + 13
+  const spotGuideTop = spotLabelY - areaSpotLabelHeight / 2
+  const areaLevelLabelYById = getAreaGlyphLabelYById(layout.levelMarkers, dimensions, spotLabelX)
 
   return (
     <>
@@ -406,30 +528,30 @@ function AreaGexChart({
         onMouseLeave={() => setHovered(null)}
       >
         <defs>
-          <linearGradient id="chart-panel-fill" x1="0" x2="0" y1="0" y2="1">
+          <linearGradient id={`${gradientIdPrefix}-chart-panel-fill`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="#0f1212" />
             <stop offset="55%" stopColor="#0a0d0d" />
             <stop offset="100%" stopColor="#070909" />
           </linearGradient>
-          <linearGradient id="abs-call-area-fill" x1="0" x2="0" y1="0" y2="1">
+          <linearGradient id={`${gradientIdPrefix}-abs-call-area-fill`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="var(--chart-positive-edge)" stopOpacity="0.68" />
             <stop offset="100%" stopColor="var(--chart-positive)" stopOpacity="0.08" />
           </linearGradient>
-          <linearGradient id="abs-put-area-fill" x1="0" x2="0" y1="0" y2="1">
+          <linearGradient id={`${gradientIdPrefix}-abs-put-area-fill`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="var(--chart-negative-edge)" stopOpacity="0.64" />
             <stop offset="100%" stopColor="var(--chart-negative)" stopOpacity="0.07" />
           </linearGradient>
-          <linearGradient id="profile-positive-area-fill" x1="0" x2="0" y1="0" y2="1">
+          <linearGradient id={`${gradientIdPrefix}-profile-positive-area-fill`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="var(--chart-positive-edge)" stopOpacity="0.7" />
             <stop offset="100%" stopColor="var(--chart-positive)" stopOpacity="0.12" />
           </linearGradient>
-          <linearGradient id="profile-negative-area-fill" x1="0" x2="0" y1="0" y2="1">
+          <linearGradient id={`${gradientIdPrefix}-profile-negative-area-fill`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="var(--chart-negative)" stopOpacity="0.12" />
             <stop offset="100%" stopColor="var(--chart-negative-edge)" stopOpacity="0.68" />
           </linearGradient>
         </defs>
 
-        <rect width={dimensions.width} height={dimensions.height} fill="url(#chart-panel-fill)" />
+        <rect width={dimensions.width} height={dimensions.height} fill={`url(#${gradientIdPrefix}-chart-panel-fill)`} />
         <rect
           x={dimensions.margin.left}
           y={dimensions.margin.top}
@@ -440,7 +562,7 @@ function AreaGexChart({
         />
 
         <text x={22} y={29} fill="var(--terminal-heading)" fontSize={14} fontWeight={700} letterSpacing={1.4}>
-          {isAbsMode ? 'ABS CALL/PUT GAMMA EXPOSURE' : 'NET GAMMA EXPOSURE PROFILE'}
+          {titleOverride ?? getGexChartTitle(mode)}
         </text>
 
         {layout.yTicks.map((tick) => {
@@ -475,18 +597,10 @@ function AreaGexChart({
 
         {layout.xTicks.map((tick) => {
           const x = layout.xScale(tick)
-          const levelMarker = getLevelMarkerAtStrike(layout.levelMarkers, tick)
+          const levelMarker = getLevelMarkerAtStrike(layout.axisMarkers, tick)
 
           return (
             <g key={`x-${tick}`}>
-              <line
-                x1={x}
-                x2={x}
-                y1={dimensions.margin.top}
-                y2={chartBottom}
-                stroke="var(--terminal-grid)"
-                strokeDasharray="2 8"
-              />
               <text
                 x={x}
                 y={dimensions.height - 34}
@@ -504,8 +618,8 @@ function AreaGexChart({
 
         {data.length > 0 && isAbsMode ? (
           <g pointerEvents="none">
-            {callAreaPath ? <path d={callAreaPath} fill="url(#abs-call-area-fill)" /> : null}
-            {putAreaPath ? <path d={putAreaPath} fill="url(#abs-put-area-fill)" /> : null}
+            {callAreaPath ? <path d={callAreaPath} fill={`url(#${gradientIdPrefix}-abs-call-area-fill)`} /> : null}
+            {putAreaPath ? <path d={putAreaPath} fill={`url(#${gradientIdPrefix}-abs-put-area-fill)`} /> : null}
             {callLinePath ? (
               <path d={callLinePath} fill="none" stroke="var(--chart-positive-edge)" strokeLinecap="round" strokeWidth={1.6} />
             ) : null}
@@ -517,8 +631,8 @@ function AreaGexChart({
 
         {data.length > 0 && !isAbsMode ? (
           <g pointerEvents="none">
-            {positiveAreaPath ? <path d={positiveAreaPath} fill="url(#profile-positive-area-fill)" /> : null}
-            {negativeAreaPath ? <path d={negativeAreaPath} fill="url(#profile-negative-area-fill)" /> : null}
+            {positiveAreaPath ? <path d={positiveAreaPath} fill={`url(#${gradientIdPrefix}-profile-positive-area-fill)`} /> : null}
+            {negativeAreaPath ? <path d={negativeAreaPath} fill={`url(#${gradientIdPrefix}-profile-negative-area-fill)`} /> : null}
             {positiveLinePath ? (
               <path d={positiveLinePath} fill="none" stroke="var(--chart-positive-edge)" strokeLinecap="round" strokeWidth={1.6} />
             ) : null}
@@ -528,34 +642,43 @@ function AreaGexChart({
           </g>
         ) : null}
 
-        {layout.levelMarkers.map((marker, index) => (
-          <AreaLevelMarker
-            key={marker.id}
-            marker={marker}
-            chartBottom={chartBottom}
-            chartTop={dimensions.margin.top}
-            dimensions={dimensions}
-            index={index}
-          />
-        ))}
-
         <line
           x1={layout.spotX}
           x2={layout.spotX}
-          y1={dimensions.margin.top}
+          y1={spotGuideTop}
           y2={chartBottom}
           stroke="var(--terminal-heading)"
           strokeWidth={1}
           strokeDasharray="4 6"
           strokeOpacity="0.58"
         />
-        <g transform={`translate(${spotLabelX} ${dimensions.margin.top + 13})`}>
-          <rect x="-47" y="-11" width="94" height="22" rx="2" fill="var(--terminal-surface)" stroke="var(--terminal-border-strong)" />
+
+        {layout.levelMarkers.map((marker) => (
+          <AreaLevelMarker
+            key={marker.id}
+            marker={marker}
+            chartBottom={chartBottom}
+            chartTop={dimensions.margin.top}
+            dimensions={dimensions}
+            labelY={areaLevelLabelYById.get(marker.id) ?? dimensions.margin.top + 13}
+          />
+        ))}
+
+        <g transform={`translate(${spotLabelX} ${spotLabelY})`}>
+          <rect
+            x={-areaSpotLabelWidth / 2}
+            y={-areaSpotLabelHeight / 2}
+            width={areaSpotLabelWidth}
+            height={areaSpotLabelHeight}
+            rx="2"
+            fill="var(--terminal-surface)"
+            stroke="var(--terminal-border-strong)"
+          />
           <text
             x="0"
             y="1"
             fill="var(--terminal-heading)"
-            fontSize={10.5}
+            fontSize={9.5}
             textAnchor="middle"
             dominantBaseline="middle"
             fontFamily="var(--font-mono)"
@@ -636,18 +759,6 @@ function AreaGexChart({
           GAMMA EXPOSURE (USD)
         </text>
 
-        {isAbsMode ? (
-          <g transform={`translate(${chartRight - 142} 25)`}>
-            <line x1="0" x2="18" y1="0" y2="0" stroke="var(--chart-positive-edge)" strokeWidth={2} />
-            <text x="24" y="4" fill="var(--terminal-muted)" fontSize={10.5} fontFamily="var(--font-mono)">
-              Call ABS
-            </text>
-            <line x1="82" x2="100" y1="0" y2="0" stroke="var(--chart-negative-edge)" strokeWidth={2} />
-            <text x="106" y="4" fill="var(--terminal-muted)" fontSize={10.5} fontFamily="var(--font-mono)">
-              Put ABS
-            </text>
-          </g>
-        ) : null}
       </svg>
 
       {hoveredDatum && hovered ? (
@@ -656,7 +767,7 @@ function AreaGexChart({
           style={{
             left: `${hovered.xPct}%`,
             top: `${hovered.yPct}%`,
-            transform: 'translate(12px, -50%)',
+            transform: getTooltipTransform(hovered.side),
           }}
         >
           <div className="mb-1 text-[var(--terminal-heading)]">Strike {formatStrike(hoveredDatum.strike)}</div>
@@ -681,7 +792,6 @@ function AreaGexChart({
               <div className="terminal-value text-[var(--terminal-red)]">Puts {formatMillions(hoveredDatum.putGexUsd)}</div>
             </>
           )}
-          <div className="text-[var(--terminal-muted)]">Mode {modeLabel(mode)}</div>
         </div>
       ) : null}
     </>
@@ -691,69 +801,85 @@ function AreaGexChart({
 function BarLevelMarker({
   marker,
   chartLeft,
-  chartRight,
-  data,
-  index,
+  spotLabelX,
+  labelY,
+  markerScale,
+  spotY,
 }: {
   marker: PositionedBarLevelMarker
   chartLeft: number
-  chartRight: number
-  data: ChartDatum[]
-  index: number
+  spotLabelX: number
+  labelY: number
+  markerScale: number
+  spotY: number
 }) {
-  const hasAxisRow = data.some((datum) => datum.strike === marker.strike)
-  const labelY = marker.y + index * 24
+  const glyphs = getLevelMarkerComponents(marker)
+  const labelWidth = getGlyphGroupWidth(glyphs.length, markerScale)
+  const labelHeight = getGlyphGroupHeight(markerScale)
+  const glowFilter = getLevelMarkerGlowFilter(marker.color)
+  const labelRightX = spotLabelX + barSpotLabelWidth
+  const overlapsSpotLabel = Math.abs(labelY - spotY) <= barLevelLabelSpotThreshold * markerScale
+  const labelX = overlapsSpotLabel
+    ? spotLabelX - labelWidth - barLevelLabelSpotGap
+    : labelRightX - labelWidth
 
   return (
     <g pointerEvents="none">
-      <line
-        x1={chartLeft}
-        x2={chartRight}
-        y1={marker.y}
-        y2={marker.y}
-        stroke={marker.color}
-        strokeWidth={1}
-        strokeDasharray="4 6"
-        strokeOpacity="0.58"
+      <rect
+        x={chartLeft}
+        y={marker.y - levelHighlightBandSize / 2}
+        width={labelRightX - chartLeft}
+        height={levelHighlightBandSize}
+        fill={marker.color}
+        opacity="0.075"
+        style={{ filter: glowFilter }}
       />
-      {!hasAxisRow ? (
-        <text
-          x={50}
-          y={marker.y + 4}
-          textAnchor="middle"
-          fill={marker.color}
-          fontSize={11.5}
-          fontWeight={700}
-          fontFamily="var(--font-mono)"
-        >
-          {formatStrike(marker.strike)}
-        </text>
-      ) : null}
-      <g transform={`translate(${chartRight - 6} ${labelY})`}>
+      <g transform={`translate(${labelX} ${labelY})`}>
         <rect
           x="0"
-          y="-11"
-          width="102"
-          height="22"
+          y={-labelHeight / 2}
+          width={labelWidth}
+          height={labelHeight}
           rx="2"
           fill="var(--terminal-surface)"
           stroke={marker.color}
           strokeOpacity="0.76"
         />
-        <text
-          x="58"
-          y="1"
-          fill={marker.color}
-          fontSize={10.5}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fontFamily="var(--font-mono)"
-          fontWeight={700}
-        >
-          {marker.label} {formatStrike(marker.strike)}
-        </text>
-        <LevelMarkerGlyph x={13} y={0} color={marker.color} />
+        <LevelMarkerGlyphGroup glow scale={markerScale} glyphs={glyphs} x={labelWidth / 2} y={0} />
       </g>
+    </g>
+  )
+}
+
+function YAxisStrikeLabel({
+  highlighted,
+  marker,
+  strike,
+  x,
+  y,
+}: {
+  highlighted: boolean
+  marker?: PositionedBarLevelMarker
+  strike: number
+  x: number
+  y: number
+}) {
+  const fill = marker?.color ?? (highlighted ? 'var(--terminal-heading)' : 'var(--terminal-muted)')
+  const fontWeight = marker || highlighted ? 700 : 400
+
+  return (
+    <g pointerEvents="none">
+      <text
+        x={x}
+        y={y + 4}
+        textAnchor="middle"
+        fill={fill}
+        fontSize={11.5}
+        fontWeight={fontWeight}
+        fontFamily="var(--font-mono)"
+      >
+        {formatStrike(strike)}
+      </text>
     </g>
   )
 }
@@ -763,70 +889,206 @@ function AreaLevelMarker({
   chartBottom,
   chartTop,
   dimensions,
-  index,
+  labelY,
 }: {
   marker: PositionedAreaLevelMarker
   chartBottom: number
   chartTop: number
   dimensions: ChartDimensions
-  index: number
+  labelY: number
 }) {
   const chartRight = dimensions.width - dimensions.margin.right
-  const labelX = getClampedLabelX(marker.x, dimensions.margin.left + 54, chartRight - 54)
+  const glyphs = getLevelMarkerComponents(marker)
+  const labelWidth = getGlyphGroupWidth(glyphs.length)
+  const labelHeight = 22
+  const glowFilter = getLevelMarkerGlowFilter(marker.color)
+  const labelX = getClampedLabelX(marker.x, dimensions.margin.left + labelWidth / 2, chartRight - labelWidth / 2)
 
   return (
     <g pointerEvents="none">
-      <line
-        x1={marker.x}
-        x2={marker.x}
-        y1={chartTop}
-        y2={chartBottom}
-        stroke={marker.color}
-        strokeWidth={1}
-        strokeDasharray="4 6"
-        strokeOpacity="0.56"
-      />
-      <text
-        x={marker.x}
-        y={dimensions.height - 34}
-        textAnchor="middle"
+      <rect
+        x={marker.x - levelHighlightBandSize / 2}
+        y={chartTop}
+        width={levelHighlightBandSize}
+        height={chartBottom - chartTop}
         fill={marker.color}
-        fontSize={11}
-        fontWeight={700}
-        fontFamily="var(--font-mono)"
-      >
-        {formatStrike(marker.strike)}
-      </text>
-      <g transform={`translate(${labelX} ${chartTop + 39 + index * 24})`}>
+        opacity="0.075"
+        style={{ filter: glowFilter }}
+      />
+      <g transform={`translate(${labelX} ${labelY})`}>
         <rect
-          x="-54"
+          x={-labelWidth / 2}
           y="-11"
-          width="108"
-          height="22"
+          width={labelWidth}
+          height={labelHeight}
           rx="2"
           fill="var(--terminal-surface)"
           stroke={marker.color}
           strokeOpacity="0.76"
         />
-        <text
-          x="8"
-          y="1"
-          fill={marker.color}
-          fontSize={10.5}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fontFamily="var(--font-mono)"
-          fontWeight={700}
-        >
-          {marker.label} {formatStrike(marker.strike)}
-        </text>
-        <LevelMarkerGlyph x={-42} y={0} color={marker.color} />
+        <LevelMarkerGlyphGroup glow glyphs={glyphs} x={0} y={0} />
       </g>
     </g>
   )
 }
 
-function LevelMarkerGlyph({ x, y, color }: { x: number; y: number; color: string }) {
+function getLevelMarkerComponents(marker: GexLevelMarker) {
+  return marker.components ?? [marker]
+}
+
+function getGlyphGroupWidth(glyphCount: number, scale = 1) {
+  return (22 + Math.max(0, glyphCount - 1) * 20) * scale
+}
+
+function getGlyphGroupHeight(scale = 1) {
+  return 22 * scale
+}
+
+function LevelMarkerGlyphGroup({
+  glow = false,
+  glyphs,
+  scale = 1,
+  x,
+  y,
+}: {
+  glow?: boolean
+  glyphs: GexLevelMarker[]
+  scale?: number
+  x: number
+  y: number
+}) {
+  const gap = 20 * scale
+  const startX = x - ((glyphs.length - 1) * gap) / 2
+
+  return (
+    <>
+      {glyphs.map((glyph, index) => {
+        const glyphX = startX + index * gap
+
+        return (
+          <g key={glyph.id}>
+            {index > 0 ? (
+              <text
+                x={glyphX - gap / 2}
+                y={y + 1}
+                fill="var(--terminal-muted)"
+                fontSize={9 * scale}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontFamily="var(--font-mono)"
+                fontWeight={700}
+              >
+                /
+              </text>
+            ) : null}
+            <g
+              transform={`translate(${glyphX} ${y}) scale(${scale})`}
+              style={glow ? { filter: getLevelMarkerGlowFilter(glyph.color) } : undefined}
+            >
+              <LevelMarkerGlyph x={0} y={0} color={glyph.color} variant={glyph.glyph} />
+            </g>
+          </g>
+        )
+      })}
+    </>
+  )
+}
+
+function getLevelMarkerGlowFilter(color: string) {
+  return `drop-shadow(0 0 3px color-mix(in srgb, ${color} 50%, transparent)) drop-shadow(0 0 8px color-mix(in srgb, ${color} 18%, transparent))`
+}
+
+function LevelMarkerGlyph({
+  x,
+  y,
+  color,
+  variant = 'diamond',
+}: {
+  x: number
+  y: number
+  color: string
+  variant?: LevelMarkerGlyphVariant
+}) {
+  if (variant === 'chevronUp' || variant === 'chevronDown') {
+    const direction = variant === 'chevronUp' ? 1 : -1
+
+    return (
+      <path
+        d={`M ${x - 4} ${y + direction * 2.5} L ${x} ${y - direction * 2.5} L ${x + 4} ${y + direction * 2.5}`}
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.7}
+      />
+    )
+  }
+
+  if (variant === 'crosshair') {
+    return (
+      <g>
+        <line x1={x} x2={x} y1={y - 6} y2={y + 6} stroke={color} strokeOpacity={0.8} strokeWidth={1} />
+        <line x1={x - 6} x2={x + 6} y1={y} y2={y} stroke={color} strokeOpacity={0.8} strokeWidth={1} />
+        <rect
+          x={x - 3}
+          y={y - 3}
+          width={6}
+          height={6}
+          rx={1.5}
+          fill="var(--terminal-surface)"
+          stroke={color}
+          strokeWidth={1}
+        />
+      </g>
+    )
+  }
+
+  if (variant === 'slash') {
+    return (
+      <line
+        x1={x - 4.8}
+        x2={x + 4.8}
+        y1={y + 4.4}
+        y2={y - 4.4}
+        stroke={color}
+        strokeLinecap="round"
+        strokeWidth={1.7}
+      />
+    )
+  }
+
+  if (variant === 'bracket') {
+    return (
+      <g>
+        <rect x={x - 4.8} y={y - 5} width={2.4} height={10} rx={0.5} fill={color} />
+        <rect x={x + 2.4} y={y - 5} width={2.4} height={10} rx={0.5} fill={color} fillOpacity={0.62} />
+        <line x1={x - 2.4} x2={x + 2.4} y1={y - 3.6} y2={y - 3.6} stroke={color} strokeOpacity={0.68} strokeWidth={1} />
+      </g>
+    )
+  }
+
+  if (variant === 'flipZone') {
+    return (
+      <g>
+        <path
+          d={`M ${x - 5.2} ${y} L ${x - 1.3} ${y - 3.9} M ${x - 5.2} ${y} L ${x - 1.3} ${y + 3.9}`}
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeWidth={1.5}
+        />
+        <path
+          d={`M ${x + 5.2} ${y} L ${x + 1.3} ${y - 3.9} M ${x + 5.2} ${y} L ${x + 1.3} ${y + 3.9}`}
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeOpacity={0.78}
+          strokeWidth={1.5}
+        />
+      </g>
+    )
+  }
+
   return (
     <rect
       x={x - 3.6}
@@ -842,8 +1104,95 @@ function LevelMarkerGlyph({ x, y, color }: { x: number; y: number; color: string
   )
 }
 
-function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>, fallbackWidth: number) {
-  const [width, setWidth] = useState(fallbackWidth)
+function getLevelMarkerScale(positions: number[], dataWindowPct: number | 'full') {
+  const viewScale = getLevelMarkerViewScale(dataWindowPct)
+  if (positions.length < 2) {
+    return viewScale
+  }
+
+  const sortedPositions = [...positions].sort((a, b) => a - b)
+  const closestGap = sortedPositions.reduce((closest, position, index) => {
+    if (index === 0) {
+      return closest
+    }
+
+    return Math.min(closest, position - sortedPositions[index - 1])
+  }, Number.POSITIVE_INFINITY)
+  const collisionScale = closestGap < 24 ? clamp(closestGap / 24, 0.72, 1) : 1
+
+  return Math.min(viewScale, collisionScale)
+}
+
+function getLevelMarkerViewScale(dataWindowPct: number | 'full') {
+  if (dataWindowPct === 'full') return 0.78
+  if (dataWindowPct >= 80) return 0.78
+  if (dataWindowPct >= 55) return 0.84
+  if (dataWindowPct >= 35) return 0.9
+  if (dataWindowPct >= 22) return 0.96
+
+  return 1
+}
+
+function getBarLevelLabelYById(
+  markers: PositionedBarLevelMarker[],
+  chartTop: number,
+  chartBottom: number,
+  markerScale: number,
+) {
+  const labelGap = 24 * markerScale
+  const labelPadding = 12 * markerScale
+  const sortedMarkers = [...markers].sort((a, b) => a.y - b.y)
+  const labelRows = sortedMarkers.map((marker) => ({
+    id: marker.id,
+    y: clamp(marker.y, chartTop + labelPadding, chartBottom - labelPadding),
+  }))
+
+  for (let index = 1; index < labelRows.length; index += 1) {
+    labelRows[index].y = Math.max(labelRows[index].y, labelRows[index - 1].y + labelGap)
+  }
+
+  const overflow = labelRows.at(-1) ? labelRows[labelRows.length - 1].y - (chartBottom - labelPadding) : 0
+  if (overflow > 0) {
+    for (const row of labelRows) {
+      row.y -= overflow
+    }
+  }
+
+  for (let index = labelRows.length - 2; index >= 0; index -= 1) {
+    labelRows[index].y = Math.min(labelRows[index].y, labelRows[index + 1].y - labelGap)
+  }
+
+  const underflow = labelRows[0] ? (chartTop + labelPadding) - labelRows[0].y : 0
+  if (underflow > 0) {
+    for (const row of labelRows) {
+      row.y += underflow
+    }
+  }
+
+  return new Map(labelRows.map((row) => [row.id, row.y]))
+}
+
+function getAreaGlyphLabelYById(markers: PositionedAreaLevelMarker[], dimensions: ChartDimensions, spotLabelX: number) {
+  const gap = 8
+  const defaultY = dimensions.margin.top + 13
+  const collisionY = dimensions.margin.top + 39
+  const chartRight = dimensions.width - dimensions.margin.right
+  const spotLeft = spotLabelX - areaSpotLabelWidth / 2 - gap
+  const spotRight = spotLabelX + areaSpotLabelWidth / 2 + gap
+
+  return new Map(markers.map((marker) => {
+    const labelWidth = getGlyphGroupWidth(getLevelMarkerComponents(marker).length)
+    const labelX = getClampedLabelX(marker.x, dimensions.margin.left + labelWidth / 2, chartRight - labelWidth / 2)
+    const labelLeft = labelX - labelWidth / 2
+    const labelRight = labelX + labelWidth / 2
+    const overlapsSpot = labelLeft <= spotRight && labelRight >= spotLeft
+
+    return [marker.id, overlapsSpot ? collisionY : defaultY]
+  }))
+}
+
+function useContainerSize(ref: React.RefObject<HTMLDivElement | null>, fallbackWidth: number, fallbackHeight: number) {
+  const [size, setSize] = useState({ width: fallbackWidth, height: fallbackHeight })
 
   useEffect(() => {
     const element = ref.current
@@ -851,14 +1200,21 @@ function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>, fallback
       return
     }
 
-    const updateWidth = () => {
-      const elementWidth = element.getBoundingClientRect().width
+    const updateSize = () => {
+      const elementBounds = element.getBoundingClientRect()
+      const elementWidth = elementBounds.width
+      const elementHeight = elementBounds.height
       const parentWidth = element.parentElement?.getBoundingClientRect().width ?? 0
-      setWidth(Math.max(minChartWidth, Math.floor(Math.max(elementWidth, parentWidth))))
-    }
-    updateWidth()
+      const parentHeight = element.parentElement?.getBoundingClientRect().height ?? 0
 
-    const observer = new ResizeObserver(updateWidth)
+      setSize({
+        width: Math.max(minChartWidth, Math.floor(Math.max(elementWidth, parentWidth))),
+        height: Math.max(minChartHeight, Math.floor(Math.max(elementHeight, parentHeight))),
+      })
+    }
+    updateSize()
+
+    const observer = new ResizeObserver(updateSize)
     observer.observe(element)
     if (element.parentElement) {
       observer.observe(element.parentElement)
@@ -867,7 +1223,7 @@ function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>, fallback
     return () => observer.disconnect()
   }, [ref])
 
-  return width
+  return size
 }
 
 function prepareChartData(snapshot: GexSnapshot, mode: GexMode, dataWindowPct: number | 'full'): ChartDatum[] {
@@ -886,9 +1242,52 @@ function getReadableStrikeRows(rows: GexSourceRow[]) {
     return rows
   }
 
-  const majorRows = rows.filter((row) => row.strike % 1_000 === 0)
+  const halfStrikeRows = rows.filter((row) => row.strike % 500 === 0)
 
-  return majorRows.length > 0 ? majorRows : rows
+  return halfStrikeRows.length > 0 ? halfStrikeRows : rows
+}
+
+function getVisibleLevelMarkers(levelMarkers: GexLevelMarker[], data: ChartDatum[]) {
+  if (data.length === 0) {
+    return []
+  }
+
+  const strikes = data.map((datum) => datum.strike)
+  const minStrike = Math.min(...strikes)
+  const maxStrike = Math.max(...strikes)
+
+  return levelMarkers.filter((marker) => marker.strike >= minStrike && marker.strike <= maxStrike)
+}
+
+function groupLevelMarkers(levelMarkers: GexLevelMarker[]) {
+  const groups = new Map<number, GexLevelMarker[]>()
+
+  for (const marker of levelMarkers) {
+    const group = groups.get(marker.strike)
+
+    if (group) {
+      group.push(marker)
+    } else {
+      groups.set(marker.strike, [marker])
+    }
+  }
+
+  return Array.from(groups.values()).map((group) => {
+    const [primary] = group
+    const styleMarker =
+      group.find((marker) => marker.id === 'advanced-zero-gamma')
+      ?? group.find((marker) => marker.id === 'advanced-gamma-flip')
+      ?? primary
+
+    return {
+      ...styleMarker,
+      strike: primary.strike,
+      axisOnly: group.every((marker) => marker.axisOnly),
+      id: group.map((marker) => marker.id).join('__'),
+      label: group.map((marker) => marker.label).join(' / '),
+      components: group,
+    }
+  })
 }
 
 function isStrikeInDataWindow(strike: number, spot: number, dataWindowPct: number | 'full') {
@@ -916,14 +1315,26 @@ function toChartDatum(row: GexSourceRow, mode: GexMode): ChartDatum {
   const net = row.netGammaExposureUsd ?? row.gammaExposureUsd
   const call = row.callGammaExposureUsd ?? Math.max(net, 0)
   const put = row.putGammaExposureUsd ?? Math.min(net, 0)
+  const positive = getPositiveGammaExposure(call, put)
+  const negative = getNegativeGammaExposure(call, put)
 
   return {
     strike: row.strike,
     netGexUsd: net,
     callGexUsd: call,
     putGexUsd: put,
+    positiveGexUsd: positive,
+    negativeGexUsd: negative,
     displayGexUsd: getDisplayExposureValue(net, call, put, mode),
   }
+}
+
+function getPositiveGammaExposure(call: number, put: number) {
+  return Math.max(call, 0) + Math.max(put, 0)
+}
+
+function getNegativeGammaExposure(call: number, put: number) {
+  return Math.min(call, 0) + Math.min(put, 0)
 }
 
 function getDisplayExposureValue(net: number, call: number, put: number, mode: GexMode) {
@@ -933,35 +1344,50 @@ function getDisplayExposureValue(net: number, call: number, put: number, mode: G
   return net
 }
 
-function getChartDimensions(width: number): ChartDimensions {
+function getChartDimensions(width: number, height: number): ChartDimensions {
   return {
     width,
-    height: chartHeight,
+    height,
     margin,
   }
 }
 
-function getAreaChartDimensions(width: number): ChartDimensions {
+function getAreaChartDimensions(width: number, height: number): ChartDimensions {
   return {
     width,
-    height: chartHeight,
+    height,
     margin: areaMargin,
   }
 }
 
-function getChartLayout(data: ChartDatum[], spot: number, dimensions: ChartDimensions, levelMarkers: GexLevelMarker[]) {
+function getChartLayout(
+  data: ChartDatum[],
+  spot: number,
+  dimensions: ChartDimensions,
+  mode: GexMode,
+  dataWindowPct: number | 'full',
+  levelMarkers: GexLevelMarker[],
+  axisMarkers: GexLevelMarker[],
+) {
   const innerWidth = dimensions.width - dimensions.margin.left - dimensions.margin.right
   const innerHeight = dimensions.height - dimensions.margin.top - dimensions.margin.bottom
-  const maxAbsGex = Math.max(...data.flatMap((datum) => [
-    Math.abs(datum.displayGexUsd),
-    Math.abs(datum.callGexUsd),
-    Math.abs(datum.putGexUsd),
-  ]), 10_000_000)
-  const domainMax = getRoundedDomainMax(maxAbsGex * 1.18)
+  const maxAbsGex = Math.max(...data.flatMap((datum) => {
+    const values = [
+      Math.abs(datum.displayGexUsd),
+      Math.abs(datum.callGexUsd),
+      Math.abs(datum.putGexUsd),
+    ]
+
+    if (mode === 'split') {
+      values.push(Math.abs(datum.positiveGexUsd), Math.abs(datum.negativeGexUsd))
+    }
+
+    return values
+  }), 10_000_000)
+  const domainMax = getRoundedDomainMax(maxAbsGex * barChartDomainPadding)
   const strikes = data.map((datum) => datum.strike)
-  const levelStrikes = levelMarkers.map((marker) => marker.strike)
-  const minStrike = Math.min(...strikes, spot, ...levelStrikes)
-  const maxStrike = Math.max(...strikes, spot, ...levelStrikes)
+  const minStrike = Math.min(...strikes, spot)
+  const maxStrike = Math.max(...strikes, spot)
   const xScale = scaleLinear<number, number>()
     .domain([-domainMax, domainMax])
     .range([dimensions.margin.left, dimensions.margin.left + innerWidth])
@@ -979,20 +1405,53 @@ function getChartLayout(data: ChartDatum[], spot: number, dimensions: ChartDimen
     xScale,
     yScale,
     spotY: strikeScale(spot),
-    levelMarkers: levelMarkers.map((marker) => {
-      const rowTop = yScale(marker.strike)
-
-      return {
-        ...marker,
-        y: rowTop === undefined ? strikeScale(marker.strike) : rowTop + yScale.bandwidth() / 2,
-      }
-    }),
+    levelMarkers: positionBarLevelMarkers(levelMarkers, yScale, strikeScale),
+    axisMarkers: positionBarAxisMarkers(axisMarkers, strikes, yScale, strikeScale),
     xTicks: buildMillionTicks(domainMax),
+    yAxisTicks: buildStrikeAxisTicks(minStrike, maxStrike, strikeScale, dimensions, dataWindowPct),
     closestSpotStrike: getClosestStrike(strikes, spot),
   }
 }
 
-function getAreaChartLayout(data: ChartDatum[], spot: number, dimensions: ChartDimensions, mode: GexMode, levelMarkers: GexLevelMarker[]): AreaChartLayout {
+function positionBarLevelMarkers(
+  markers: GexLevelMarker[],
+  yScale: ScaleBand<number>,
+  strikeScale: ScaleLinear<number, number>,
+) {
+  return markers.map((marker) => {
+    const rowTop = yScale(marker.strike)
+
+    return {
+      ...marker,
+      y: rowTop === undefined ? strikeScale(marker.strike) : rowTop + yScale.bandwidth() / 2,
+    }
+  })
+}
+
+function positionBarAxisMarkers(
+  markers: GexLevelMarker[],
+  strikes: number[],
+  yScale: ScaleBand<number>,
+  strikeScale: ScaleLinear<number, number>,
+) {
+  return positionBarLevelMarkers(
+    markers.map((marker) => ({
+      ...marker,
+      strike: strikes.includes(marker.strike) ? marker.strike : getClosestStrike(strikes, marker.strike),
+    })),
+    yScale,
+    strikeScale,
+  )
+}
+
+function getAreaChartLayout(
+  data: ChartDatum[],
+  spot: number,
+  dimensions: ChartDimensions,
+  mode: GexMode,
+  levelMarkers: GexLevelMarker[],
+  axisMarkers: GexLevelMarker[],
+): AreaChartLayout {
   const innerWidth = dimensions.width - dimensions.margin.left - dimensions.margin.right
   const innerHeight = dimensions.height - dimensions.margin.top - dimensions.margin.bottom
   const sortedData = [...data].sort((a, b) => a.strike - b.strike)
@@ -1006,14 +1465,10 @@ function getAreaChartLayout(data: ChartDatum[], spot: number, dimensions: ChartD
   const xScale = scaleLinear<number, number>()
     .domain([domainMin, domainMaxStrike])
     .range([dimensions.margin.left, dimensions.margin.left + innerWidth])
-  const maxGex = mode === 'abs'
-    ? Math.max(...sortedData.flatMap((datum) => [Math.abs(datum.callGexUsd), Math.abs(datum.putGexUsd)]), 10_000_000)
-    : Math.max(...sortedData.map((datum) => Math.abs(datum.netGexUsd)), 10_000_000)
-  const domainMax = getRoundedDomainMax(maxGex)
+  const yDomain = getAreaChartYDomain(sortedData, mode)
   const yScale = scaleLinear<number, number>()
-    .domain(mode === 'abs' ? [0, domainMax] : [-domainMax, domainMax])
+    .domain(yDomain)
     .range([dimensions.margin.top + innerHeight, dimensions.margin.top])
-    .nice(5)
 
   return {
     data: sortedData,
@@ -1023,11 +1478,86 @@ function getAreaChartLayout(data: ChartDatum[], spot: number, dimensions: ChartD
     xScale,
     yScale,
     xTicks: xScale.ticks(getAreaXAxisTickCount(dimensions.width)),
-    yTicks: yScale.ticks(5),
+    yTicks: getAreaYAxisTicks(yScale, yDomain),
     zeroY: yScale(0),
     spotX: xScale(spot),
     levelMarkers: levelMarkers.map((marker) => ({ ...marker, x: xScale(marker.strike) })),
+    axisMarkers: axisMarkers.map((marker) => ({ ...marker, x: xScale(marker.strike) })),
   }
+}
+
+function getAreaYAxisTicks(yScale: ScaleLinear<number, number>, domain: [number, number]) {
+  const [min, max] = domain
+  const minTickPixelGap = 16
+  const candidates = [
+    { tick: min, priority: 3 },
+    { tick: max, priority: 3 },
+    { tick: 0, priority: 4 },
+    ...yScale.ticks(5).map((tick) => ({ tick, priority: 2 })),
+  ]
+    .filter(({ tick }) => tick >= min && tick <= max)
+    .map(({ tick, priority }) => ({ tick: Math.round(tick), priority }))
+    .sort((a, b) => b.priority - a.priority)
+
+  const ticks: number[] = []
+
+  for (const { tick } of candidates) {
+    const overlapsExistingTick = ticks.some((selectedTick) => (
+      Math.abs(yScale(selectedTick) - yScale(tick)) < minTickPixelGap
+    ))
+
+    if (!overlapsExistingTick) {
+      ticks.push(tick)
+    }
+  }
+
+  return Array.from(new Set(ticks)).sort((a, b) => a - b)
+}
+
+function getAreaChartYDomain(data: ChartDatum[], mode: GexMode): [number, number] {
+  if (mode === 'abs') {
+    const maxGex = Math.max(...data.flatMap((datum) => [Math.abs(datum.callGexUsd), Math.abs(datum.putGexUsd)]), 10_000_000)
+    const domainMax = getRoundedDomainMax(maxGex * areaChartDomainPadding)
+
+    return [0, domainMax]
+  }
+
+  const maxPositiveGex = Math.max(...data.map((datum) => datum.netGexUsd), 0)
+  const minNegativeGex = Math.min(...data.map((datum) => datum.netGexUsd), 0)
+  const upperDomain = getRoundedDomainMax(maxPositiveGex * areaChartDomainPadding)
+  const lowerMagnitude = minNegativeGex < 0
+    ? Math.abs(minNegativeGex) + profileNegativeDomainBuffer
+    : profileNegativeDomainBuffer
+  const lowerDomain = -getRoundedProfileDomainMagnitude(lowerMagnitude)
+
+  return [lowerDomain, upperDomain]
+}
+
+function getRoundedProfileDomainMagnitude(value: number) {
+  const safeValue = Math.max(Math.abs(value), 1_000_000)
+  const step = getProfileDomainStep(safeValue)
+
+  return Math.ceil(safeValue / step) * step
+}
+
+function getProfileDomainStep(value: number) {
+  if (value <= 25_000_000) {
+    return 1_000_000
+  }
+
+  if (value <= 60_000_000) {
+    return 5_000_000
+  }
+
+  if (value <= 120_000_000) {
+    return 10_000_000
+  }
+
+  if (value <= 250_000_000) {
+    return 25_000_000
+  }
+
+  return 50_000_000
 }
 
 function buildMillionTicks(domainMax: number) {
@@ -1079,31 +1609,41 @@ function getLevelMarkerAtStrike<T extends { strike: number }>(markers: T[], stri
   return markers.find((marker) => marker.strike === strike)
 }
 
-function shouldShowYAxisStrike(
-  strike: number,
-  dataWindowPct: number | 'full',
-  hasLevelMarker: boolean,
-) {
-  if (hasLevelMarker) {
-    return true
-  }
-
-  const step = getYAxisStrikeStep(dataWindowPct)
-  if (step === 0) {
-    return true
-  }
-
-  return strike % step === 0
-}
-
 function getYAxisStrikeStep(dataWindowPct: number | 'full') {
-  if (dataWindowPct === 'full') return 10_000
-  if (dataWindowPct <= 10) return 0
+  if (dataWindowPct === 'full') return 20_000
+  if (dataWindowPct <= 2.5) return 250
+  if (dataWindowPct <= 5) return 500
+  if (dataWindowPct <= 10) return 1_000
   if (dataWindowPct <= 18) return 2_500
   if (dataWindowPct <= 35) return 5_000
   if (dataWindowPct <= 65) return 10_000
 
   return 20_000
+}
+
+function buildStrikeAxisTicks(
+  minStrike: number,
+  maxStrike: number,
+  strikeScale: ScaleLinear<number, number>,
+  dimensions: ChartDimensions,
+  dataWindowPct: number | 'full',
+): StrikeAxisTick[] {
+  const step = getYAxisStrikeStep(dataWindowPct)
+  const firstTick = Math.ceil(minStrike / step) * step
+  const lastTick = Math.floor(maxStrike / step) * step
+  const ticks: StrikeAxisTick[] = []
+  const minY = dimensions.margin.top + 8
+  const maxY = dimensions.height - dimensions.margin.bottom - 8
+
+  for (let strike = firstTick; strike <= lastTick; strike += step) {
+    const y = strikeScale(strike)
+
+    if (y >= minY && y <= maxY) {
+      ticks.push({ strike, y })
+    }
+  }
+
+  return ticks
 }
 
 function addZeroCrossings(data: ChartDatum[]) {
@@ -1125,6 +1665,8 @@ function addZeroCrossings(data: ChartDatum[]) {
         netGexUsd: 0,
         callGexUsd: interpolate(previous.callGexUsd, current.callGexUsd, interpolation),
         putGexUsd: interpolate(previous.putGexUsd, current.putGexUsd, interpolation),
+        positiveGexUsd: interpolate(previous.positiveGexUsd, current.positiveGexUsd, interpolation),
+        negativeGexUsd: interpolate(previous.negativeGexUsd, current.negativeGexUsd, interpolation),
         displayGexUsd: 0,
       })
     }
@@ -1158,10 +1700,14 @@ function getBarHeight(bandwidth: number) {
   return Math.max(3.5, Math.min(6.5, bandwidth * 0.54))
 }
 
-function getTooltipX(bar: BarGeometry, dimensions: ChartDimensions) {
-  const anchor = bar.x2 >= bar.x1 ? bar.x2 : bar.x
+function getTooltipX(bar: BarGeometry, dimensions: ChartDimensions, side: TooltipSide) {
+  const anchor = side === 'right' ? bar.x + bar.width : bar.x
 
   return (Math.max(dimensions.margin.left, Math.min(anchor, dimensions.width - dimensions.margin.right)) / dimensions.width) * 100
+}
+
+function getTooltipTransform(side: TooltipSide) {
+  return side === 'left' ? 'translate(calc(-100% - 12px), -50%)' : 'translate(12px, -50%)'
 }
 
 function getAreaPath(
@@ -1247,6 +1793,7 @@ function handleAreaMouseMove(
     datum,
     xPct: clamp((datumX / dimensions.width) * 100, 6, 82),
     yPct: clamp((datumY / dimensions.height) * 100, 14, 86),
+    side: datumValue < 0 ? 'left' : 'right',
   })
 }
 
@@ -1266,11 +1813,13 @@ function clamp(value: number, min: number, max: number) {
 
 function SingleBar({
   bar,
+  fillId,
   positive,
   stroke,
   height,
 }: {
   bar: BarGeometry
+  fillId: string
   positive: boolean
   stroke: string
   height: number
@@ -1287,7 +1836,7 @@ function SingleBar({
         width={bar.width}
         height={height}
         rx={0.5}
-        fill={positive ? 'url(#positive-gex-fill)' : 'url(#negative-gex-fill)'}
+        fill={`url(#${fillId})`}
         fillOpacity={0.82}
         stroke={stroke}
         strokeOpacity={0.48}
@@ -1308,59 +1857,70 @@ function SingleBar({
 
 function SplitBars({
   datum,
+  negativeFillId,
+  positiveFillId,
   xScale,
   y,
   rowHeight,
 }: {
   datum: ChartDatum
+  negativeFillId: string
+  positiveFillId: string
   xScale: ScaleLinear<number, number>
   y: number
   rowHeight: number
 }) {
-  const splitHeight = Math.max(3, rowHeight * 0.42)
-  const callBar = getBarGeometry(datum.callGexUsd, xScale, y - splitHeight * 0.56)
-  const putBar = getBarGeometry(datum.putGexUsd, xScale, y + splitHeight * 0.56)
+  const positiveBar = getBarGeometry(datum.positiveGexUsd, xScale, y)
+  const negativeBar = getBarGeometry(datum.negativeGexUsd, xScale, y)
 
   return (
     <>
-      <SingleBar bar={callBar} positive stroke="var(--chart-positive-edge)" height={splitHeight} />
-      <SingleBar bar={putBar} positive={false} stroke="var(--chart-negative-edge)" height={splitHeight} />
+      <SingleBar bar={negativeBar} fillId={negativeFillId} positive={false} stroke="var(--chart-negative-edge)" height={rowHeight} />
+      <SingleBar bar={positiveBar} fillId={positiveFillId} positive stroke="var(--chart-positive-edge)" height={rowHeight} />
     </>
   )
 }
 
-function modeLabel(mode: GexMode) {
-  if (mode === 'net') {
-    return 'Net'
+function BarHoverTarget({
+  bar,
+  datum,
+  dimensions,
+  height,
+  setHovered,
+  side,
+}: {
+  bar: BarGeometry
+  datum: ChartDatum
+  dimensions: ChartDimensions
+  height: number
+  setHovered: (hovered: HoverState | null) => void
+  side: TooltipSide
+}) {
+  if (bar.width < 0.5) {
+    return null
   }
 
-  if (mode === 'split') {
-    return 'Split'
+  const targetHeight = Math.max(height, 7)
+  const showTooltip = () => {
+    setHovered({
+      datum,
+      xPct: getTooltipX(bar, dimensions, side),
+      yPct: (bar.y / dimensions.height) * 100,
+      side,
+    })
   }
 
-  if (mode === 'call') {
-    return 'Call'
-  }
-
-  if (mode === 'put') {
-    return 'Put'
-  }
-
-  if (mode === 'abs') {
-    return 'Abs'
-  }
-
-  if (mode === 'profile') {
-    return 'Profile'
-  }
-
-  return 'Net'
-}
-
-function chartTitle(mode: GexMode) {
-  if (mode === 'net') {
-    return 'NET GAMMA EXPOSURE'
-  }
-
-  return `${modeLabel(mode).toUpperCase()} GAMMA EXPOSURE PROFILE`
+  return (
+    <rect
+      x={bar.x}
+      y={bar.y - targetHeight / 2}
+      width={bar.width}
+      height={targetHeight}
+      fill="transparent"
+      pointerEvents="all"
+      onMouseEnter={showTooltip}
+      onMouseMove={showTooltip}
+      onMouseLeave={() => setHovered(null)}
+    />
+  )
 }

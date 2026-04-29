@@ -21,14 +21,22 @@ type TerminalState = {
   symbol: 'BTC'
   expiry: GexExpiry
   exposureMode: ExposureMode
+  splitChartEnabled: boolean
+  zeroDteExposureMode: ExposureMode
   dataWindowMode: DataWindowMode
   dataWindowPct: number
+  zeroDteDataWindowMode: DataWindowMode
+  zeroDteDataWindowPct: number
   levelVisibility: LevelVisibility
   strikeRange: string
   setExpiry: (expiry: GexExpiry) => void
   setExposureMode: (mode: ExposureMode) => void
+  setSplitChartEnabled: (enabled: boolean) => void
+  setZeroDteExposureMode: (mode: ExposureMode) => void
   setDataWindowMode: (mode: DataWindowMode) => void
   setDataWindowPct: (pct: number) => void
+  setZeroDteDataWindowMode: (mode: DataWindowMode) => void
+  setZeroDteDataWindowPct: (pct: number) => void
   setLevelVisibility: (level: LevelVisibilityKey, visible: boolean) => void
   setStrikeRange: (range: string) => void
 }
@@ -37,12 +45,16 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   symbol: 'BTC',
   expiry: 'ALL',
   exposureMode: 'net',
+  splitChartEnabled: false,
+  zeroDteExposureMode: 'net',
   dataWindowMode: 'full',
   dataWindowPct: 18,
+  zeroDteDataWindowMode: 'full',
+  zeroDteDataWindowPct: 18,
   levelVisibility: {
     allExpiryHvl: true,
-    allExpiryCallResistance: false,
-    allExpiryPutSupport: false,
+    allExpiryCallResistance: true,
+    allExpiryPutSupport: true,
     zeroDteHvl: false,
     zeroDteCall: false,
     zeroDtePut: false,
@@ -54,8 +66,12 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   strikeRange: 'Auto',
   setExpiry: (expiry) => set({ expiry }),
   setExposureMode: (exposureMode) => set({ exposureMode }),
+  setSplitChartEnabled: (splitChartEnabled) => set({ splitChartEnabled }),
+  setZeroDteExposureMode: (zeroDteExposureMode) => set({ zeroDteExposureMode }),
   setDataWindowMode: (dataWindowMode) => set({ dataWindowMode }),
   setDataWindowPct: (dataWindowPct) => set({ dataWindowPct: clampWindowPct(dataWindowPct) }),
+  setZeroDteDataWindowMode: (zeroDteDataWindowMode) => set({ zeroDteDataWindowMode }),
+  setZeroDteDataWindowPct: (zeroDteDataWindowPct) => set({ zeroDteDataWindowPct: clampWindowPct(zeroDteDataWindowPct) }),
   setLevelVisibility: (level, visible) =>
     set((state) => ({
       levelVisibility: {

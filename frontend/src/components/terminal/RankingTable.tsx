@@ -1,4 +1,5 @@
 import { Panel } from '@/components/terminal/Panel'
+import { getSpotDistanceColor } from '@/data/levelColors'
 import type { RankingRow } from '@/data/mockTerminal'
 import { formatMillions, formatSignedPercent, formatStrike } from '@/lib/formatters'
 
@@ -15,7 +16,7 @@ export function RankingTable({ title, rows }: RankingTableProps) {
       <div className="grid grid-cols-[44px_124px_94px_minmax(132px,1fr)_86px] border-b border-[var(--terminal-border)] pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--terminal-muted)]">
         <div>Rank</div>
         <div>Strike (USD)</div>
-        <div>Δ% 24H</div>
+        <div>% From Spot</div>
         <div>Gamma Exposure (USD)</div>
         <div />
       </div>
@@ -31,8 +32,8 @@ export function RankingTable({ title, rows }: RankingTableProps) {
             >
               <div className="terminal-value text-[var(--terminal-text)]">{row.rank}</div>
               <div className="terminal-value font-semibold text-[var(--terminal-heading)]">${formatStrike(row.strike)}</div>
-              <div className={row.changePercent < 0 ? 'terminal-value text-[var(--terminal-red-strong)]' : 'terminal-value text-[var(--terminal-green-strong)]'}>
-                {formatSignedPercent(row.changePercent)}
+              <div className="terminal-value" style={{ color: getSpotDistanceColor(row.distanceFromSpotPercent) }}>
+                {formatSignedPercent(row.distanceFromSpotPercent)}
               </div>
               <div className="h-1 border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)]">
                 <div

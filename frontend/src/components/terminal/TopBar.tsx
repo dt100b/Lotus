@@ -1,63 +1,12 @@
 import { ChevronDown, Settings } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useTerminalStore } from '@/store/terminalStore'
-import { opexExpiries, type GexExpiry, type OpexExpiry } from '@/api/mockGexData'
-
-const modes = ['net', 'split', 'call', 'put', 'abs', 'profile'] as const
-const expiryOptions: Array<{ value: GexExpiry; label: string }> = [
-  { value: 'ALL', label: 'All Expiries' },
-  ...opexExpiries.map((expiry) => ({ value: expiry, label: expiry })),
-]
-const modeLabels = {
-  net: 'Net',
-  split: 'Split',
-  call: 'Call',
-  put: 'Put',
-  abs: 'Abs',
-  profile: 'Profile',
-} as const
-const opexCutoffHourUtc = 8
-const monthIndexes: Record<string, number> = {
-  JAN: 0,
-  FEB: 1,
-  MAR: 2,
-  APR: 3,
-  MAY: 4,
-  JUN: 5,
-  JUL: 6,
-  AUG: 7,
-  SEP: 8,
-  OCT: 9,
-  NOV: 10,
-  DEC: 11,
-}
+import { deribitOpexCutoffHourUtc, getNextDeribitExpiry } from '@/api/deribitExpiries'
 
 export function TopBar() {
-  const {
-    expiry,
-    exposureMode,
-    dataWindowMode,
-    dataWindowPct,
-    setExpiry,
-    setExposureMode,
-    setDataWindowMode,
-    setDataWindowPct,
-  } = useTerminalStore()
-  const [filterInput, setFilterInput] = useState(() => formatFilterInput(dataWindowMode, dataWindowPct))
-  const [isFilterFocused, setIsFilterFocused] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
-  const nextOpex = useMemo(() => getNextOpex(nowMs), [nowMs])
+  const nextOpex = useMemo(() => getNextDeribitExpiry(nowMs), [nowMs])
   const nyTime = useMemo(() => formatNewYorkTime(nowMs), [nowMs])
-  const displayedFilterInput = isFilterFocused ? filterInput : formatFilterInput(dataWindowMode, dataWindowPct)
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setNowMs(Date.now()), 1_000)
@@ -66,9 +15,9 @@ export function TopBar() {
 
   return (
     <header className="flex min-h-[40px] flex-wrap items-center gap-2 border-b border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-3 py-1 lg:flex-nowrap">
-      <div className="flex h-[26px] min-w-[178px] items-center gap-2.5">
+      <div className="flex h-[26px] min-w-[158px] items-center gap-2">
         <LotusMark />
-        <div className="flex h-[26px] translate-y-[1px] items-center text-[14px] font-semibold leading-none tracking-[0.16em] text-[var(--terminal-heading)]">
+        <div className="flex h-[24px] translate-y-[0.5px] items-center text-[12.5px] font-semibold leading-none tracking-[0.145em] text-[var(--terminal-heading)]">
           LOTUS DATA
         </div>
       </div>
@@ -81,79 +30,18 @@ export function TopBar() {
       <div className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--terminal-text)]">GEX BTC</div>
 
       <div className="flex flex-1 flex-wrap items-center gap-1.5 lg:ml-5 lg:flex-nowrap">
-        <Select value={expiry} onValueChange={(value) => setExpiry(value as GexExpiry)}>
-          <SelectTrigger className="min-w-[170px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {expiryOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Tabs value={exposureMode} onValueChange={(value) => setExposureMode(value as typeof exposureMode)}>
-          <TabsList>
-            {modes.map((mode) => (
-              <TabsTrigger key={mode} value={mode}>
-                {modeLabels[mode]}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-
-        <div className="flex h-[26px] min-w-[118px] items-center justify-center gap-1 rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-2 text-[9.5px] font-semibold text-[var(--terminal-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] transition-colors hover:border-[var(--terminal-border-strong)]">
-          <span className="text-[var(--terminal-muted)]">filters:</span>
-          <span className="text-[var(--terminal-heading)]">±%</span>
-          <input
-            aria-label="Data window filter percent"
-            className="h-[17px] w-[34px] rounded-[1px] border border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-1 text-center text-[9.5px] leading-[17px] text-[var(--terminal-heading)] outline-none focus:border-[var(--terminal-border-strong)]"
-            type="text"
-            value={displayedFilterInput}
-            onFocus={() => {
-              setIsFilterFocused(true)
-              setFilterInput(displayedFilterInput)
-            }}
-            onChange={(event) => {
-              const nextValue = event.currentTarget.value
-              setFilterInput(nextValue)
-
-              const parsed = parseFilterInput(nextValue)
-              if (parsed === 'full') {
-                setDataWindowMode('full')
-              } else if (typeof parsed === 'number') {
-                setDataWindowMode('percent')
-                setDataWindowPct(parsed)
-              }
-            }}
-            onBlur={() => {
-              setIsFilterFocused(false)
-              const parsed = parseFilterInput(filterInput)
-              if (parsed === 'full' || parsed === null) {
-                setDataWindowMode('full')
-                setFilterInput('any')
-                return
-              }
-
-              setFilterInput(formatPercentInput(parsed))
-            }}
-          />
-        </div>
-
         {nextOpex ? (
           <div
             className="flex h-[26px] w-fit min-w-0 items-center justify-center gap-1 rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-2 text-[9.5px] font-semibold text-[var(--terminal-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] lg:ml-auto"
-            title={`Next listed expiry: ${nextOpex.label} at ${String(opexCutoffHourUtc).padStart(2, '0')}:00 UTC`}
+            title={`Next listed expiry: ${nextOpex.label} at ${String(deribitOpexCutoffHourUtc).padStart(2, '0')}:00 UTC`}
           >
-            <span className="text-[var(--terminal-muted)]">next OpEx:</span>
+            <span className="text-[var(--terminal-muted)]">NEXT OPEX:</span>
             <span className="terminal-value text-[var(--terminal-heading)]">
               {formatCountdown(nextOpex.msRemaining)}
             </span>
             <span className="terminal-value text-[var(--terminal-text)]">{nextOpex.label}</span>
             <span className="terminal-value text-[var(--terminal-subtle)]">
-              {String(opexCutoffHourUtc).padStart(2, '0')}:00:00 UTC
+              {String(deribitOpexCutoffHourUtc).padStart(2, '0')}:00:00 UTC
             </span>
           </div>
         ) : null}
@@ -200,55 +88,6 @@ function LotusMark() {
       </svg>
     </div>
   )
-}
-
-function formatFilterInput(dataWindowMode: 'percent' | 'full', dataWindowPct: number) {
-  return dataWindowMode === 'full' ? 'any' : formatPercentInput(dataWindowPct)
-}
-
-function formatPercentInput(value: number) {
-  return Number.isInteger(value) ? String(value) : String(value)
-}
-
-function parseFilterInput(value: string): number | 'full' | null {
-  const normalized = value.trim().toLowerCase()
-  if (normalized === '' || normalized === 'any') return 'full'
-
-  const numericValue = Number(normalized.replace(/[+±%\s]/g, ''))
-  if (!Number.isFinite(numericValue)) return null
-
-  return Math.min(100, Math.max(1, Math.abs(numericValue)))
-}
-
-function getNextOpex(nowMs: number) {
-  const upcomingExpiries: Array<{ label: OpexExpiry; date: Date }> = []
-
-  for (const label of opexExpiries) {
-    const date = parseOpexExpiry(label)
-    if (date && date.getTime() > nowMs) {
-      upcomingExpiries.push({ label, date })
-    }
-  }
-
-  const nextExpiry = upcomingExpiries.sort((a, b) => a.date.getTime() - b.date.getTime())[0]
-
-  if (!nextExpiry) return null
-
-  return {
-    label: nextExpiry.label,
-    msRemaining: Math.max(0, nextExpiry.date.getTime() - nowMs),
-  }
-}
-
-function parseOpexExpiry(value: string) {
-  const match = /^(\d{1,2})([A-Z]{3})(\d{2})$/.exec(value)
-  if (!match) return null
-
-  const [, dayValue, monthValue, yearValue] = match
-  const monthIndex = monthIndexes[monthValue]
-  if (monthIndex === undefined) return null
-
-  return new Date(Date.UTC(2000 + Number(yearValue), monthIndex, Number(dayValue), opexCutoffHourUtc, 0, 0))
 }
 
 function formatCountdown(msRemaining: number) {

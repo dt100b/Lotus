@@ -2,30 +2,25 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { TerminalSnapshot } from '@/data/mockTerminal'
 import { formatSignedPercent, formatStrike, formatUsd } from '@/lib/formatters'
 import { useTerminalStore, type LevelVisibilityKey } from '@/store/terminalStore'
+import { getSpotDistanceColor, levelColors } from '@/data/levelColors'
 
 type SidePanelsProps = {
   snapshot: TerminalSnapshot
 }
 
+const spotProximityThresholdPercent = 0.5
+const lotusPatternThresholdPercent = 0.25
+const lotusSignatureThresholdPercent = 0.1
+
 export function SidePanels({ snapshot }: SidePanelsProps) {
   const levelVisibility = useTerminalStore((state) => state.levelVisibility)
   const setLevelVisibility = useTerminalStore((state) => state.setLevelVisibility)
+  const signatureRowId = getSignatureLevelRowId(snapshot)
 
   return (
-    <aside className="terminal-panel terminal-rail grid h-full grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] content-stretch items-stretch">
+    <aside className="terminal-panel terminal-rail grid h-full grid-rows-[auto_auto_minmax(0,1fr)] content-stretch items-stretch">
       <RailSection
         title="Price Sources"
-        action={
-          <button
-            aria-label="Copy GEX levels"
-            className="flex h-4 min-w-10 cursor-pointer items-center justify-center rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-1.5 text-[10px] font-semibold uppercase leading-none text-[var(--terminal-blue)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)] transition-[border-color,background-color,box-shadow,color,transform] duration-150 hover:border-[var(--terminal-blue)] hover:bg-[rgba(134,169,199,0.12)] hover:text-[var(--terminal-heading)] hover:ring-1 hover:ring-[rgba(134,169,199,0.34)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--terminal-blue)] active:translate-y-px"
-            type="button"
-          >
-            <span className="inline-block origin-center scale-[0.72] tracking-[0.08em]">
-              Copy
-            </span>
-          </button>
-        }
       >
         <div className="grid gap-0">
           {snapshot.marketSources.map((source) => (
@@ -38,58 +33,47 @@ export function SidePanels({ snapshot }: SidePanelsProps) {
                 <span>{source.name}</span>
               </div>
               <div className="text-right">
-                <div className="terminal-value font-semibold text-[var(--terminal-green-strong)]">{formatUsd(source.value)}</div>
-                <div className="text-[10px] text-[var(--terminal-muted)]">{source.note}</div>
+                <div className="terminal-value font-semibold text-[var(--terminal-heading)]">{formatUsd(source.value)}</div>
+                <div className={getPriceSourceNoteClassName(source.note)}>{source.note}</div>
               </div>
             </div>
           ))}
         </div>
       </RailSection>
 
-      <LevelPanel
-        title="All-Expiry Levels"
-        items={snapshot.levels.allExpiry}
-        levelVisibility={levelVisibility}
-        setLevelVisibility={setLevelVisibility}
-      />
-      <LevelPanel
-        title="0DTE Levels"
-        items={snapshot.levels.zeroDte}
-        levelVisibility={levelVisibility}
-        setLevelVisibility={setLevelVisibility}
-      />
+      <RailSection
+        title="Levels"
+        action={<CopyLevelsButton />}
+      >
+        <div className="grid gap-2">
+          <PanelGroupTitle title="All-Expiry Levels" />
+          <LevelRows
+            title="All-Expiry Levels"
+            items={snapshot.levels.allExpiry}
+            levelVisibility={levelVisibility}
+            setLevelVisibility={setLevelVisibility}
+            signatureRowId={signatureRowId}
+            spot={snapshot.spot}
+          />
 
-      <RailSection title="Advanced">
-        <div className="grid gap-0">
-          {snapshot.levels.advanced.map((metric) => {
-            const expectedMoveRange = metric.label === 'Expected Move' ? splitExpectedMoveRange(metric.value) : null
-            const visibilityKey = getAdvancedVisibilityKey(metric.label)
-            const visible = levelVisibility[visibilityKey]
+          <PanelGroupTitle title="0DTE Levels" />
+          <LevelRows
+            title="0DTE Levels"
+            items={snapshot.levels.zeroDte}
+            levelVisibility={levelVisibility}
+            setLevelVisibility={setLevelVisibility}
+            signatureRowId={signatureRowId}
+            spot={snapshot.spot}
+          />
 
-            return (
-              <div
-                key={metric.label}
-                className="grid grid-cols-[170px_120px_minmax(54px,1fr)] items-center border-b border-[var(--terminal-rule)] text-[11px] transition-colors last:border-b-0 hover:bg-[var(--terminal-surface-2)]"
-              >
-                <div className="flex items-center gap-3 px-1 py-1.5 text-[var(--terminal-text)]">
-                  <MetricMarkerButton
-                    color={metric.color}
-                    label={metric.label}
-                    variant={getAdvancedMarkerVariant(metric.label)}
-                    visible={visible}
-                    onToggle={() => setLevelVisibility(visibilityKey, !visible)}
-                  />
-                  {metric.label}
-                </div>
-                <div className="terminal-value border-l border-[var(--terminal-rule)] px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">
-                  {expectedMoveRange?.lower ?? metric.value}
-                </div>
-                <div className={expectedMoveRange ? 'terminal-value -ml-3 px-0 py-1.5 text-left font-semibold text-[var(--terminal-heading)]' : metric.change ? 'terminal-value px-1 py-1.5 text-right text-[var(--terminal-red-strong)]' : 'terminal-value px-1 py-1.5 text-right text-[var(--terminal-muted)]'}>
-                  {expectedMoveRange?.upper ?? metric.change ?? '-'}
-                </div>
-              </div>
-            )
-          })}
+          <PanelGroupTitle title="Advanced" />
+          <AdvancedRows
+            items={snapshot.levels.advanced}
+            levelVisibility={levelVisibility}
+            signatureRowId={signatureRowId}
+            setLevelVisibility={setLevelVisibility}
+            spot={snapshot.spot}
+          />
         </div>
       </RailSection>
 
@@ -103,6 +87,8 @@ type LevelPanelProps = {
   items: TerminalSnapshot['levels']['allExpiry']
   levelVisibility: Record<LevelVisibilityKey, boolean>
   setLevelVisibility: (level: LevelVisibilityKey, visible: boolean) => void
+  signatureRowId: string | null
+  spot: number
 }
 
 type RailSectionProps = {
@@ -124,22 +110,51 @@ function RailSection({ title, action, className, children }: RailSectionProps) {
   )
 }
 
-function LevelPanel({ title, items, levelVisibility, setLevelVisibility }: LevelPanelProps) {
+function CopyLevelsButton() {
   return (
-    <RailSection title={title}>
-      <div className="grid gap-0">
-        {items.map((item) => {
-          const visibilityKey = getLevelVisibilityKey(title, item.label)
-          const visible = levelVisibility[visibilityKey]
+    <button
+      aria-label="Copy GEX levels"
+      className="flex h-4 min-w-10 cursor-pointer items-center justify-center rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-1.5 text-[10px] font-semibold uppercase leading-none text-[var(--terminal-blue)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)] transition-[border-color,background-color,box-shadow,color,transform] duration-150 hover:border-[var(--terminal-blue)] hover:bg-[rgba(134,169,199,0.12)] hover:text-[var(--terminal-heading)] hover:ring-1 hover:ring-[rgba(134,169,199,0.34)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--terminal-blue)] active:translate-y-px"
+      type="button"
+    >
+      <span className="inline-block origin-center scale-[0.72] tracking-[0.08em]">
+        Copy
+      </span>
+    </button>
+  )
+}
 
-          return (
-            <div
-              key={item.label}
-              className="grid grid-cols-[170px_120px_minmax(54px,1fr)] items-center border-b border-[var(--terminal-rule)] text-[11px] transition-colors last:border-b-0 hover:bg-[var(--terminal-surface-2)]"
+function PanelGroupTitle({ title }: { title: string }) {
+  return (
+    <div className="mt-1 flex items-center gap-2 first:mt-0">
+      <span className="text-[9.5px] font-semibold uppercase leading-none tracking-[0.14em] text-[var(--terminal-muted)]">{title}</span>
+      <span className="h-px flex-1 bg-[var(--terminal-rule)]" />
+    </div>
+  )
+}
+
+function LevelRows({ title, items, levelVisibility, setLevelVisibility, signatureRowId, spot }: LevelPanelProps) {
+  return (
+    <div className="grid gap-0">
+      {items.map((item) => {
+        const visibilityKey = getLevelVisibilityKey(title, item.label)
+        const visible = levelVisibility[visibilityKey]
+        const rowId = getLevelRowId(title, item.label)
+        const distanceFromSpotPercent = item.distanceFromSpotPercent ?? getDistanceFromSpotPercent(item.strike, spot)
+        const proximityTier = getSpotProximityTier(distanceFromSpotPercent, rowId, signatureRowId)
+        const markerColor = getLevelMarkerColor(title, item.label)
+        const proximityStyle = getSpotProximityStyle(distanceFromSpotPercent, markerColor, proximityTier)
+
+        return (
+          <div
+            key={item.label}
+            className={getLevelRowClassName(Boolean(proximityStyle))}
+            style={proximityStyle}
           >
-            <div className="flex items-center gap-3 px-1 py-1.5 text-[var(--terminal-text)]">
+            <LevelProximityFlow color={markerColor} tier={proximityTier} />
+            <div className="relative z-10 flex items-center gap-3 px-1 py-1.5 text-[var(--terminal-text)]">
               <MetricMarkerButton
-                color={getLevelMarkerColor(title, item.label)}
+                color={markerColor}
                 label={item.label}
                 variant={getLevelMarkerVariant(item.label)}
                 visible={visible}
@@ -147,16 +162,246 @@ function LevelPanel({ title, items, levelVisibility, setLevelVisibility }: Level
               />
               {item.label}
             </div>
-            <div className="terminal-value border-l border-[var(--terminal-rule)] px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">${formatStrike(item.strike)}</div>
-            <div className={item.changePercent && item.changePercent < 0 ? 'terminal-value px-1 py-1.5 text-right text-[var(--terminal-red-strong)]' : 'terminal-value px-1 py-1.5 text-right text-[var(--terminal-green-strong)]'}>
-              {item.changePercent === undefined ? '-' : formatSignedPercent(item.changePercent)}
+            <div className="terminal-value relative z-10 border-l border-[var(--terminal-rule)] px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">${formatStrike(item.strike)}</div>
+            <div
+              className="terminal-value relative z-10 px-1 py-1.5 text-right"
+              style={{ color: getSpotDistanceColor(distanceFromSpotPercent) }}
+              title="Percent from spot"
+            >
+              {distanceFromSpotPercent === undefined ? '-' : formatSignedPercent(distanceFromSpotPercent)}
             </div>
           </div>
-          )
-        })}
-      </div>
-    </RailSection>
+        )
+      })}
+    </div>
   )
+}
+
+function AdvancedRows({
+  items,
+  levelVisibility,
+  signatureRowId,
+  spot,
+  setLevelVisibility,
+}: {
+  items: TerminalSnapshot['levels']['advanced']
+  levelVisibility: Record<LevelVisibilityKey, boolean>
+  signatureRowId: string | null
+  setLevelVisibility: (level: LevelVisibilityKey, visible: boolean) => void
+  spot: number
+}) {
+  return (
+    <div className="grid gap-0">
+      {items.map((metric) => {
+        const expectedMoveRange = metric.label === 'Expected Move' ? splitExpectedMoveRange(metric.value) : null
+        const visibilityKey = getAdvancedVisibilityKey(metric.label)
+        const visible = levelVisibility[visibilityKey]
+        const rowId = getAdvancedRowId(metric.label)
+        const distanceFromSpotPercent = getAdvancedDistanceFromSpotPercent(metric, spot, expectedMoveRange)
+        const proximityTier = getSpotProximityTier(distanceFromSpotPercent, rowId, signatureRowId)
+        const markerColor = getAdvancedMarkerColor(metric)
+        const proximityStyle = getSpotProximityStyle(distanceFromSpotPercent, markerColor, proximityTier)
+        const distanceDisplay = distanceFromSpotPercent === undefined ? '-' : formatSignedPercent(distanceFromSpotPercent)
+
+        return (
+          <div
+            key={metric.label}
+            className={getLevelRowClassName(Boolean(proximityStyle))}
+            style={proximityStyle}
+          >
+            <LevelProximityFlow color={markerColor} tier={proximityTier} />
+            <div className="relative z-10 flex items-center gap-3 px-1 py-1.5 text-[var(--terminal-text)]">
+              <MetricMarkerButton
+                color={markerColor}
+                label={metric.label}
+                variant={getAdvancedMarkerVariant(metric.label)}
+                visible={visible}
+                onToggle={() => setLevelVisibility(visibilityKey, !visible)}
+              />
+              {metric.label}
+            </div>
+            <div className="terminal-value relative z-10 border-l border-[var(--terminal-rule)] px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">
+              {expectedMoveRange?.lower ?? metric.value}
+            </div>
+            <div
+              className={expectedMoveRange ? 'terminal-value relative z-10 -ml-3 px-0 py-1.5 text-left font-semibold text-[var(--terminal-heading)]' : 'terminal-value relative z-10 px-1 py-1.5 text-right'}
+              style={expectedMoveRange ? undefined : { color: getSpotDistanceColor(distanceFromSpotPercent) }}
+            >
+              {expectedMoveRange?.upper ?? distanceDisplay}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+type SpotProximityTier = 'none' | 'near' | 'pattern' | 'signature'
+
+function LevelProximityFlow({ color, tier }: { color: string, tier: SpotProximityTier }) {
+  if (tier === 'none') {
+    return null
+  }
+
+  const flowStyle = {
+    '--level-flow-color': color,
+  } as CSSProperties
+
+  return <div aria-hidden="true" className={`level-proximity-flow level-proximity-flow--${tier}`} style={flowStyle} />
+}
+
+function getLevelRowClassName(highlighted: boolean) {
+  const baseClassName = 'relative grid grid-cols-[170px_120px_minmax(54px,1fr)] items-center overflow-hidden border-b border-[var(--terminal-rule)] text-[11px] transition-[background-color,filter,box-shadow] last:border-b-0 hover:bg-[var(--terminal-surface-2)]'
+
+  return highlighted ? `${baseClassName} hover:brightness-110` : baseClassName
+}
+
+function getSpotProximityStyle(
+  distanceFromSpotPercent: number | undefined,
+  color: string,
+  tier: SpotProximityTier,
+): CSSProperties | undefined {
+  if (distanceFromSpotPercent === undefined || !Number.isFinite(distanceFromSpotPercent)) {
+    return undefined
+  }
+
+  const distance = Math.abs(distanceFromSpotPercent)
+  if (distance > spotProximityThresholdPercent) {
+    return undefined
+  }
+
+  const intensity = 1 - distance / spotProximityThresholdPercent
+  const edgeMix = 24 + intensity * 34
+  const outlineMix = tier === 'signature' ? 18 : tier === 'pattern' ? 11 : 0
+
+  return {
+    boxShadow: [
+      `inset 2px 0 0 color-mix(in srgb, ${color} ${edgeMix}%, transparent)`,
+      outlineMix > 0 ? `inset 0 0 0 1px color-mix(in srgb, ${color} ${outlineMix}%, transparent)` : '',
+    ].filter(Boolean).join(', '),
+  }
+}
+
+function getSpotProximityTier(
+  distanceFromSpotPercent: number | undefined,
+  rowId: string,
+  signatureRowId: string | null,
+): SpotProximityTier {
+  if (distanceFromSpotPercent === undefined || !Number.isFinite(distanceFromSpotPercent)) {
+    return 'none'
+  }
+
+  const distance = Math.abs(distanceFromSpotPercent)
+  if (rowId === signatureRowId && distance <= lotusSignatureThresholdPercent) {
+    return 'signature'
+  }
+
+  if (distance <= lotusPatternThresholdPercent) {
+    return 'pattern'
+  }
+
+  return distance <= spotProximityThresholdPercent ? 'near' : 'none'
+}
+
+function getAdvancedDistanceFromSpotPercent(
+  metric: TerminalSnapshot['levels']['advanced'][number],
+  spot: number,
+  expectedMoveRange: ReturnType<typeof splitExpectedMoveRange>,
+) {
+  if (expectedMoveRange) {
+    const lower = parseLevelValue(expectedMoveRange.lower)
+    const upper = parseLevelValue(expectedMoveRange.upper)
+
+    if (Number.isFinite(lower) && Number.isFinite(upper)) {
+      if (spot >= lower && spot <= upper) {
+        return 0
+      }
+
+      return getDistanceFromSpotPercent(spot < lower ? lower : upper, spot)
+    }
+  }
+
+  const strike = parseLevelValue(metric.value)
+
+  return Number.isFinite(strike) ? getDistanceFromSpotPercent(strike, spot) : undefined
+}
+
+function getSignatureLevelRowId(snapshot: TerminalSnapshot) {
+  const candidates: Array<{ rowId: string; distance: number }> = []
+  const addCandidate = (rowId: string, distanceFromSpotPercent: number | undefined) => {
+    if (distanceFromSpotPercent === undefined || !Number.isFinite(distanceFromSpotPercent)) {
+      return
+    }
+
+    const distance = Math.abs(distanceFromSpotPercent)
+    if (distance <= lotusSignatureThresholdPercent) {
+      candidates.push({ rowId, distance })
+    }
+  }
+
+  snapshot.levels.allExpiry.forEach((item) => {
+    addCandidate(
+      getLevelRowId('All-Expiry Levels', item.label),
+      item.distanceFromSpotPercent ?? getDistanceFromSpotPercent(item.strike, snapshot.spot),
+    )
+  })
+  snapshot.levels.zeroDte.forEach((item) => {
+    addCandidate(
+      getLevelRowId('0DTE Levels', item.label),
+      item.distanceFromSpotPercent ?? getDistanceFromSpotPercent(item.strike, snapshot.spot),
+    )
+  })
+  snapshot.levels.advanced.forEach((metric) => {
+    const isRangeMetric = metric.label === 'Expected Move' && splitExpectedMoveRange(metric.value)
+    if (isRangeMetric) {
+      return
+    }
+
+    addCandidate(
+      getAdvancedRowId(metric.label),
+      getAdvancedDistanceFromSpotPercent(metric, snapshot.spot, null),
+    )
+  })
+
+  return candidates.sort((a, b) => a.distance - b.distance)[0]?.rowId ?? null
+}
+
+function getLevelRowId(title: string, label: string) {
+  return `${title}:${label}`
+}
+
+function getAdvancedRowId(label: string) {
+  return `Advanced:${label}`
+}
+
+function parseLevelValue(value: string) {
+  return Number(value.replace(/[^\d.-]/g, ''))
+}
+
+function getDistanceFromSpotPercent(strike: number, spot: number) {
+  if (!Number.isFinite(strike) || !Number.isFinite(spot) || spot === 0) {
+    return undefined
+  }
+
+  return ((strike - spot) / spot) * 100
+}
+
+function getPriceSourceNoteClassName(note: string) {
+  const signedValue = note.match(/[+-]\s*\d+(?:\.\d+)?/)
+  const baseClassName = 'text-[10px]'
+
+  if (!signedValue) {
+    return `${baseClassName} text-[var(--terminal-muted)]`
+  }
+
+  const value = Number(signedValue[0].replace(/\s/g, ''))
+  if (!Number.isFinite(value) || value === 0) {
+    return `${baseClassName} text-[var(--terminal-muted)]`
+  }
+
+  return value > 0
+    ? `${baseClassName} text-[var(--terminal-green-strong)]`
+    : `${baseClassName} text-[var(--terminal-red-strong)]`
 }
 
 function SourceLogo({ sourceName }: { sourceName: string }) {
@@ -174,7 +419,13 @@ function SourceLogo({ sourceName }: { sourceName: string }) {
 
 function DeribitLogo() {
   return (
-    <svg viewBox="78 200 208 200" className="h-3.5 w-3.5" role="img" aria-label="Deribit">
+    <svg
+      viewBox="78 200 208 200"
+      className="h-3.5 w-3.5"
+      role="img"
+      aria-label="Deribit"
+      style={{ filter: 'drop-shadow(0 0 4px rgba(0, 207, 190, 0.5)) drop-shadow(0 0 9px rgba(0, 207, 190, 0.22))' }}
+    >
       <path
         d="m220.2 233.4h-7.4v-33.3h-33.6v33.3h-33.6v-33.3h-33.5v33.3h-33.6v33.3h33.6v66.7h-33.6v33.3h33.6v33.3h33.6v-33.3h33.6v33.3h33.6v-33.3h5.9c36.6.4 66.6-30 67-66.1.4-36.3-29-66.8-65.6-67.2zm-.4 100h-74v-66.6h73.1c18.2-.3 33.3 14.3 33.6 32.5.2 18-14.4 33.8-32.7 34.1z"
         fill="#00cfbe"
@@ -185,7 +436,13 @@ function DeribitLogo() {
 
 function HyperliquidLogo() {
   return (
-    <svg viewBox="0 0 144 144" className="h-3.5 w-3.5" role="img" aria-label="Hyperliquid">
+    <svg
+      viewBox="0 0 144 144"
+      className="h-3.5 w-3.5"
+      role="img"
+      aria-label="Hyperliquid"
+      style={{ filter: 'drop-shadow(0 0 4px rgba(151, 252, 228, 0.5)) drop-shadow(0 0 9px rgba(151, 252, 228, 0.22))' }}
+    >
       <path
         d="M144 71.6991C144 119.306 114.866 134.582 99.5156 120.98C86.8804 109.889 83.1211 86.4521 64.116 84.0456C39.9942 81.0113 37.9057 113.133 22.0334 113.133C3.5504 113.133 0 86.2428 0 72.4315C0 58.3063 3.96809 39.0542 19.736 39.0542C38.1146 39.0542 39.1588 66.5722 62.132 65.1073C85.0007 63.5379 85.4184 34.8689 100.247 22.6271C113.195 12.0593 144 23.4641 144 71.6991Z"
         fill="#97FCE4"
@@ -228,6 +485,7 @@ function MetricMarker({ color, variant, visible = true }: { color: string; varia
     color: markerColor,
     '--marker-color': markerColor,
     opacity: visible ? 1 : 0.58,
+    filter: visible ? 'drop-shadow(0 0 4px color-mix(in srgb, var(--marker-color) 52%, transparent)) drop-shadow(0 0 9px color-mix(in srgb, var(--marker-color) 22%, transparent))' : undefined,
   } as CSSProperties
 
   if (variant === 'diamond') {
@@ -297,9 +555,12 @@ function MetricMarker({ color, variant, visible = true }: { color: string; varia
 }
 
 function getLevelMarkerColor(title: string, label: string) {
+  const isZeroDte = title.includes('0DTE')
+  if (isZeroDte && label.includes('Call')) return levelColors.zeroDteCall
+  if (isZeroDte && label.includes('Put')) return levelColors.zeroDtePut
   if (label.includes('Call')) return 'var(--terminal-green-strong)'
   if (label.includes('Put')) return 'var(--terminal-red-strong)'
-  if (title.includes('0DTE')) return 'var(--terminal-blue)'
+  if (isZeroDte) return 'var(--terminal-blue)'
 
   return 'var(--terminal-yellow)'
 }
@@ -353,6 +614,14 @@ function getAdvancedMarkerVariant(label: string): MarkerVariant {
   if (label.includes('Expected')) return 'bracket'
 
   return 'flipZone'
+}
+
+function getAdvancedMarkerColor(metric: TerminalSnapshot['levels']['advanced'][number]) {
+  if (metric.label.includes('Zero')) return levelColors.zeroGamma
+  if (metric.label.includes('Expected')) return levelColors.expectedMove
+  if (metric.label.includes('Gamma Flip')) return levelColors.gammaFlip
+
+  return metric.color
 }
 
 function splitExpectedMoveRange(value: string) {
@@ -479,7 +748,7 @@ function GammaRegimePanel({ snapshot }: SidePanelsProps) {
           {formatRegimeScore(score)}
         </text>
         <text x="180" y="186" textAnchor="middle" fill={positive ? 'var(--terminal-green-strong)' : 'var(--terminal-red-strong)'} fontSize="11" letterSpacing="1.5">
-          {positive ? 'DEALERS LONG GAMMA' : 'DEALERS SHORT GAMMA'}
+          {positive ? 'LONG GAMMA' : 'SHORT GAMMA'}
         </text>
       </svg>
       </div>

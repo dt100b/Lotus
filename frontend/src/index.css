@@ -133,11 +133,6 @@ input[type="number"]::-webkit-outer-spin-button {
   border-bottom: 1px solid var(--terminal-border);
 }
 
-.terminal-panel:hover,
-.terminal-frame:hover {
-  border-color: var(--terminal-border-strong);
-}
-
 .terminal-value {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -175,6 +170,85 @@ input[type="number"]::-webkit-outer-spin-button {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
+}
+
+.level-proximity-flow {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.level-proximity-flow::before {
+  content: '';
+  position: absolute;
+  inset: -40% -55%;
+  opacity: var(--level-flow-peak-opacity, 0.2);
+  background:
+    radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--level-flow-color) 42%, transparent) 0%, transparent 52%),
+    linear-gradient(
+      100deg,
+      transparent 18%,
+      color-mix(in srgb, var(--level-flow-color) 18%, transparent) 34%,
+      color-mix(in srgb, var(--level-flow-color) 28%, transparent) 50%,
+      color-mix(in srgb, var(--level-flow-color) 14%, transparent) 66%,
+      transparent 82%
+    );
+  background-size: 160% 100%, 220% 100%;
+  filter: blur(7px);
+  transform: translateX(-16%);
+  animation: level-proximity-flow 8.5s ease-in-out infinite;
+}
+
+.level-proximity-flow--near {
+  --level-flow-rest-opacity: 0.095;
+  --level-flow-peak-opacity: 0.14;
+}
+
+.level-proximity-flow--pattern {
+  --level-flow-rest-opacity: 0.15;
+  --level-flow-peak-opacity: 0.22;
+}
+
+.level-proximity-flow--signature {
+  --level-flow-rest-opacity: 0.22;
+  --level-flow-peak-opacity: 0.32;
+}
+
+.level-proximity-flow--pattern::before {
+  animation-duration: 7.2s;
+}
+
+.level-proximity-flow--signature::before {
+  animation-duration: 5.8s;
+}
+
+@keyframes level-proximity-flow {
+  0%,
+  100% {
+    opacity: var(--level-flow-rest-opacity, 0.14);
+    background-position: 0% 50%, 0% 50%;
+    transform: translateX(-18%) scale(0.98, 0.92);
+  }
+
+  48% {
+    opacity: var(--level-flow-peak-opacity, 0.2);
+    background-position: 78% 50%, 100% 50%;
+    transform: translateX(10%) scale(1.03, 1.08);
+  }
+
+  72% {
+    background-position: 100% 50%, 66% 50%;
+    transform: translateX(18%) scale(1.01, 0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .level-proximity-flow::before {
+    animation: none;
+    transform: none;
+  }
 }
 
 * {

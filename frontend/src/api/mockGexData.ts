@@ -1,20 +1,11 @@
-export const opexExpiries = [
-  '27APR26',
-  '28APR26',
-  '29APR26',
-  '30APR26',
-  '1MAY26',
-  '8MAY26',
-  '15MAY26',
-  '29MAY26',
-  '26JUN26',
-  '31JUL26',
-  '25SEP26',
-  '25DEC26',
-  '26MAR27',
-] as const
+import {
+  getActiveDeribitExpiries,
+  getDeribitExpiryMs,
+  parseDeribitExpiry,
+  type DeribitExpiry,
+} from '@/api/deribitExpiries'
 
-export type OpexExpiry = (typeof opexExpiries)[number]
+export type OpexExpiry = DeribitExpiry
 export type GexExpiry = 'ALL' | OpexExpiry
 
 export type MockGexStrike = {
@@ -56,37 +47,7 @@ type GexCluster = {
 
 const spot = 77_041
 const asOfUtc = '04:58:01 UTC'
-const expiries: OpexExpiry[] = [...opexExpiries]
-const expiryTenorDays: Record<OpexExpiry, number> = {
-  '27APR26': 0,
-  '28APR26': 1,
-  '29APR26': 2,
-  '30APR26': 3,
-  '1MAY26': 4,
-  '8MAY26': 11,
-  '15MAY26': 18,
-  '29MAY26': 32,
-  '26JUN26': 60,
-  '31JUL26': 95,
-  '25SEP26': 151,
-  '25DEC26': 242,
-  '26MAR27': 333,
-}
-const expiryLiquidityWeights: Record<OpexExpiry, number> = {
-  '27APR26': 0.26,
-  '28APR26': 0.16,
-  '29APR26': 0.1,
-  '30APR26': 0.07,
-  '1MAY26': 0.08,
-  '8MAY26': 0.1,
-  '15MAY26': 0.07,
-  '29MAY26': 0.055,
-  '26JUN26': 0.045,
-  '31JUL26': 0.025,
-  '25SEP26': 0.018,
-  '25DEC26': 0.012,
-  '26MAR27': 0.005,
-}
+const dayMs = 86_400_000
 
 const referenceCallClusters: GexCluster[] = [
   { strike: 75_000, width: 250, value: 33_000_000 },
@@ -113,17 +74,24 @@ const referencePutClusters: GexCluster[] = [
 ]
 
 const strikeGrid = buildStrikeGrid()
-const snapshots = buildSnapshots()
 
 export function getMockGexSnapshot(expiry: GexExpiry = 'ALL'): MockGexSnapshot {
-  return snapshots[expiry]
+  const snapshots = buildSnapshots()
+  return snapshots[expiry] ?? buildExpirySnapshot(expiry)
 }
 
 export function getMockGexSnapshots() {
-  return snapshots
+  return buildSnapshots()
 }
 
-function buildSnapshots(): Record<GexExpiry, MockGexSnapshot> {
+export function getOpexExpiries(nowMs = Date.now()): OpexExpiry[] {
+  return getActiveDeribitExpiries(nowMs)
+}
+
+export const opexExpiries = getOpexExpiries()
+
+function buildSnapshots(): Record<string, MockGexSnapshot> & { ALL: MockGexSnapshot } {
+  const expiries = getOpexExpiries()
   const datedSnapshots = Object.fromEntries(
     expiries.map((expiry) => [expiry, buildExpirySnapshot(expiry)]),
   ) as Record<OpexExpiry, MockGexSnapshot>
@@ -144,6 +112,7 @@ function buildExpirySnapshot(expiry: OpexExpiry): MockGexSnapshot {
 function buildAllExpirySnapshot(
   datedSnapshots: Record<OpexExpiry, MockGexSnapshot>,
 ): MockGexSnapshot {
+  const expiries = Object.keys(datedSnapshots) as OpexExpiry[]
   const gammaBars = strikeGrid.map((strike) => {
     const rows = expiries.map((expiry) => datedSnapshots[expiry].gammaBars.find((row) => row.strike === strike))
     const callGexUsd = roundUsd(sum(rows.map((row) => row?.callGexUsd ?? 0)))
@@ -157,10 +126,12 @@ function buildAllExpirySnapshot(
 }
 
 function buildExpiryProfile(expiry: OpexExpiry): ExpiryProfile {
-  const tenorDays = expiryTenorDays[expiry]
-  const tenor = tenorDays / expiryTenorDays['26MAR27']
-  const weight = expiryLiquidityWeights[expiry]
-  const frontDayBoost = expiry === '27APR26' ? 1.2 : 1
+  const activeExpiries = getOpexExpiries()
+  const expiryIndex = activeExpiries.indexOf(expiry)
+  const tenorDays = getTenorDays(expiry)
+  const tenor = Math.min(1, tenorDays / 333)
+  const weight = getLiquidityWeight(expiry, expiryIndex, tenorDays)
+  const frontDayBoost = expiryIndex === 0 ? 1.2 : 1
   const callStrikeDrift = tenor * 1_500
   const putStrikeDrift = -tenor * 2_000
 
@@ -235,9 +206,7 @@ function summarizeSnapshot(expiry: GexExpiry, gammaBars: MockGexStrike[]): MockG
 function buildStrikeGrid() {
   const strikes = new Set<number>()
   addRange(strikes, 40_000, 55_000, 5_000)
-  addRange(strikes, 56_000, 70_000, 1_000)
-  addRange(strikes, 70_500, 85_000, 500)
-  addRange(strikes, 86_000, 100_000, 1_000)
+  addRange(strikes, 56_000, 100_000, 500)
   addRange(strikes, 105_000, 145_000, 5_000)
 
   return [...strikes].sort((a, b) => a - b)
@@ -290,4 +259,22 @@ function roundUsd(value: number) {
 
 function roundStrike(value: number) {
   return Math.round(value / 500) * 500
+}
+
+function getTenorDays(expiry: OpexExpiry) {
+  const expiryMs = getDeribitExpiryMs(expiry)
+  if (expiryMs === null) return 30
+
+  return Math.max(0, Math.ceil((expiryMs - Date.now()) / dayMs))
+}
+
+function getLiquidityWeight(expiry: OpexExpiry, expiryIndex: number, tenorDays: number) {
+  if (expiryIndex >= 0) {
+    return Math.max(0.005, 0.24 * Math.exp(-expiryIndex / 3.1))
+  }
+
+  const expiryDate = parseDeribitExpiry(expiry)
+  const weekdayBoost = expiryDate?.getUTCDay() === 5 ? 1.25 : 1
+
+  return Math.max(0.005, 0.22 * Math.exp(-tenorDays / 42) * weekdayBoost)
 }
