@@ -1,5 +1,10 @@
 import { create } from 'zustand'
 import type { GexExpiry } from '@/api/mockGexData'
+import {
+  getStoredTerminalThemeId,
+  persistTerminalThemeId,
+  type TerminalThemeId,
+} from '@/data/terminalThemes'
 
 export type ExposureMode = 'net' | 'split' | 'call' | 'put' | 'abs' | 'profile'
 export type DataWindowMode = 'percent' | 'full'
@@ -19,6 +24,7 @@ export type LevelVisibilityKey = keyof LevelVisibility
 
 type TerminalState = {
   symbol: 'BTC'
+  theme: TerminalThemeId
   expiry: GexExpiry
   exposureMode: ExposureMode
   splitChartEnabled: boolean
@@ -29,6 +35,7 @@ type TerminalState = {
   zeroDteDataWindowPct: number
   levelVisibility: LevelVisibility
   strikeRange: string
+  setTheme: (theme: TerminalThemeId) => void
   setExpiry: (expiry: GexExpiry) => void
   setExposureMode: (mode: ExposureMode) => void
   setSplitChartEnabled: (enabled: boolean) => void
@@ -43,6 +50,7 @@ type TerminalState = {
 
 export const useTerminalStore = create<TerminalState>((set) => ({
   symbol: 'BTC',
+  theme: getStoredTerminalThemeId(),
   expiry: 'ALL',
   exposureMode: 'net',
   splitChartEnabled: false,
@@ -64,6 +72,10 @@ export const useTerminalStore = create<TerminalState>((set) => ({
     advancedGammaFlipZones: false,
   },
   strikeRange: 'Auto',
+  setTheme: (theme) => {
+    persistTerminalThemeId(theme)
+    set({ theme })
+  },
   setExpiry: (expiry) => set({ expiry }),
   setExposureMode: (exposureMode) => set({ exposureMode }),
   setSplitChartEnabled: (splitChartEnabled) => set({ splitChartEnabled }),

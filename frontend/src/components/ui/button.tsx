@@ -9,11 +9,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          'border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] text-[var(--terminal-text)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.015)] hover:border-[var(--terminal-border-strong)] hover:bg-[var(--terminal-surface-2)] hover:text-[var(--terminal-heading)]',
+          'border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] text-[var(--terminal-text)] shadow-[var(--terminal-control-inset)] hover:border-[var(--terminal-border-strong)] hover:bg-[var(--terminal-surface-2)] hover:text-[var(--terminal-heading)]',
         ghost:
           'border-transparent bg-transparent text-[var(--terminal-muted)] hover:border-[var(--terminal-border)] hover:bg-[var(--terminal-surface-2)] hover:text-[var(--terminal-heading)]',
         active:
-          'border-[var(--terminal-active-border)] bg-[rgba(101,136,76,0.22)] text-[var(--terminal-green-strong)] shadow-[inset_0_0_0_1px_rgba(137,180,102,0.32)]',
+          'border-[var(--terminal-active-border)] bg-[var(--terminal-active-bg)] text-[var(--terminal-green-strong)] shadow-[var(--terminal-active-shadow)]',
       },
       size: {
         default: 'h-[26px] px-2.5',

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Columns2 } from 'lucide-react'
 import { GexProfileChart, type GexLevelMarker } from '@/components/terminal/GexProfileChart'
-import { RankingTable } from '@/components/terminal/RankingTable'
+import { RankingTable, type GexLevelSelection } from '@/components/terminal/RankingTable'
 import { SidePanels } from '@/components/terminal/SidePanels'
 import { TopBar } from '@/components/terminal/TopBar'
 import { Button } from '@/components/ui/button'
@@ -41,12 +41,15 @@ export function TerminalDashboard() {
   const setZeroDteDataWindowPct = useTerminalStore((state) => state.setZeroDteDataWindowPct)
   const [chartContextMenu, setChartContextMenu] = useState<ChartContextMenuState | null>(null)
   const [maximizedChart, setMaximizedChart] = useState<ChartPanelId | null>(null)
+  const [selectedLevel, setSelectedLevel] = useState<GexLevelSelection | null>(null)
+  const [rankingsCollapsed, setRankingsCollapsed] = useState(false)
   const zeroDteExpiry: GexExpiry = getOpexExpiries()[0] ?? 'ALL'
   const expiryOptions = useMemo<Array<{ value: GexExpiry; label: string }>>(() => [
     { value: 'ALL', label: 'All Expiries' },
     ...getOpexExpiries().map((listedExpiry) => ({ value: listedExpiry, label: listedExpiry })),
   ], [])
   const { data: snapshot } = useTerminalSnapshot(expiry)
+  const { data: allExpirySnapshot } = useTerminalSnapshot('ALL')
   const { data: zeroDteSnapshot } = useTerminalSnapshot(zeroDteExpiry)
   const chartWindow = dataWindowMode === 'full' ? defaultAutoDataWindowPct : dataWindowPct
   const zeroDteChartWindow = zeroDteDataWindowMode === 'full' ? defaultAutoDataWindowPct : zeroDteDataWindowPct
@@ -162,13 +165,18 @@ export function TerminalDashboard() {
         return
       }
 
+      if (selectedLevel) {
+        setSelectedLevel(null)
+        return
+      }
+
       setMaximizedChart(null)
     }
 
     window.addEventListener('keydown', handleKeyDown)
 
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [chartContextMenu])
+  }, [chartContextMenu, selectedLevel])
 
   useEffect(() => {
     if (!chartContextMenu) {
@@ -186,6 +194,18 @@ export function TerminalDashboard() {
   }
 
   const showSplitChart = splitChartEnabled && Boolean(zeroDteSnapshot)
+  const dashboardRowsClassName = rankingsCollapsed
+    ? 'grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_44px] gap-2'
+    : 'grid h-full min-h-0 min-w-0 grid-rows-[516px_minmax(292px,1fr)] gap-2'
+  const chartDeckSizeClassName = rankingsCollapsed ? 'h-full min-h-0' : 'h-[516px] min-h-[516px]'
+  const rankingsGridClassName = rankingsCollapsed
+    ? 'grid h-[44px] min-h-0 gap-2 xl:grid-cols-2'
+    : 'grid min-h-0 gap-2 xl:grid-cols-2'
+  const handleRankingRowSelect = (selection: GexLevelSelection) => {
+    setSelectedLevel((currentSelection) => (
+      currentSelection?.key === selection.key ? null : selection
+    ))
+  }
   const handleChartContextMenu = (event: ReactMouseEvent<HTMLElement>, chartId: ChartPanelId) => {
     event.preventDefault()
     setChartContextMenu({
@@ -238,32 +258,54 @@ export function TerminalDashboard() {
   ) : null
 
   return (
-    <div className="mx-auto flex min-h-screen w-full flex-col bg-[var(--terminal-bg)]">
+    <div className="mx-auto flex h-screen w-full flex-col overflow-hidden bg-[var(--terminal-bg)]">
       <TopBar />
-      <div className="grid min-h-0 flex-1 gap-x-3 gap-y-2 px-3 pb-3 pt-2 lg:grid-cols-[minmax(0,1fr)_406px]">
-        <div className="grid min-h-0 min-w-0 grid-rows-[516px_minmax(292px,1fr)] gap-2">
-          <div className={showSplitChart ? 'grid h-[516px] min-h-[516px] min-w-0 grid-cols-2 gap-2' : 'h-[516px] min-h-[516px]'}>
+      <div className="grid min-h-0 flex-1 overflow-hidden gap-x-3 gap-y-2 px-3 pb-3 pt-2 lg:grid-cols-[minmax(0,1fr)_406px]">
+        <div className={dashboardRowsClassName}>
+          <div className={showSplitChart ? `grid ${chartDeckSizeClassName} min-w-0 grid-cols-2 gap-2` : chartDeckSizeClassName}>
             <section
-              className="terminal-frame h-[516px] min-h-[516px] min-w-0"
+              className={`terminal-frame ${chartDeckSizeClassName} min-w-0`}
               onContextMenu={(event) => handleChartContextMenu(event, 'chart-1')}
             >
               {renderChartOne()}
             </section>
             {showSplitChart && zeroDteSnapshot ? (
               <section
-                className="terminal-frame h-[516px] min-h-[516px] min-w-0"
+                className={`terminal-frame ${chartDeckSizeClassName} min-w-0`}
                 onContextMenu={(event) => handleChartContextMenu(event, 'chart-2')}
               >
                 {renderChartTwo()}
               </section>
             ) : null}
           </div>
-          <div className="grid min-h-0 gap-2 xl:grid-cols-2">
-            <RankingTable title="All-Expiry GEX Top 10 By Gamma Exposure" rows={snapshot.rankings.allExpiry} />
-            <RankingTable title="0DTE GEX Top 10 By Gamma Exposure" rows={snapshot.rankings.zeroDte} />
+          <div className={rankingsGridClassName}>
+            <RankingTable
+              title="All-Expiry GEX Top 10 By Gamma Exposure"
+              scope="allExpiry"
+              rows={snapshot.rankings.allExpiry}
+              collapsed={rankingsCollapsed}
+              selectedKey={selectedLevel?.key}
+              onCollapsedChange={setRankingsCollapsed}
+              onRowSelect={handleRankingRowSelect}
+            />
+            <RankingTable
+              title="0DTE GEX Top 10 By Gamma Exposure"
+              scope="zeroDte"
+              rows={snapshot.rankings.zeroDte}
+              collapsed={rankingsCollapsed}
+              selectedKey={selectedLevel?.key}
+              onCollapsedChange={setRankingsCollapsed}
+              onRowSelect={handleRankingRowSelect}
+            />
           </div>
         </div>
-        <SidePanels snapshot={snapshot} />
+        <SidePanels
+          snapshot={snapshot}
+          allExpirySnapshot={allExpirySnapshot ?? snapshot}
+          zeroDteSnapshot={zeroDteSnapshot ?? undefined}
+          selectedLevel={selectedLevel}
+          onCloseLevelInspector={() => setSelectedLevel(null)}
+        />
       </div>
       {maximizedChart ? (
         <div className="fixed inset-0 z-[70] bg-[var(--terminal-bg)] p-3">
@@ -475,7 +517,7 @@ function DataWindowControl({
   const displayedFilterInput = isFilterFocused ? filterInput : formatFilterInput(dataWindowMode, dataWindowPct)
 
   return (
-    <div className="flex h-[20px] min-w-[72px] items-center justify-center gap-1 rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-1.5 text-[8.5px] font-semibold text-[var(--terminal-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] transition-colors hover:border-[var(--terminal-border-strong)]">
+    <div className="flex h-[20px] min-w-[72px] items-center justify-center gap-1 rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-1.5 text-[8.5px] font-semibold text-[var(--terminal-text)] shadow-[var(--terminal-control-inset)] transition-colors hover:border-[var(--terminal-border-strong)]">
       <span className="text-[var(--terminal-heading)]">± %</span>
       <input
         aria-label="Chart data window filter percent"

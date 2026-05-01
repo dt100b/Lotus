@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
-import { scaleBand, scaleLinear } from 'd3-scale'
-import type { ScaleBand, ScaleLinear } from 'd3-scale'
+import { scaleLinear } from 'd3-scale'
+import type { ScaleLinear } from 'd3-scale'
 import { area, curveMonotoneX, line } from 'd3-shape'
 import { getGexChartTitle } from '@/components/terminal/gexModes'
 import { formatAxisMillions, formatMillions, formatStrike } from '@/lib/formatters'
@@ -190,6 +190,9 @@ export function GexProfileChart({
   }
 
   const layout = barLayout
+  const yAxisTickStrikes = new Set(layout.yAxisTicks.map((tick) => tick.strike))
+  const levelAxisStrikes = new Set(layout.levelMarkers.map((marker) => marker.strike))
+  const barLevelAxisLabels = getBarLevelAxisLabels(layout.levelMarkers, layout.yAxisTicks)
   const chartRight = dimensions.margin.left + layout.innerWidth
   const barLevelMarkerScale = getLevelMarkerScale(layout.levelMarkers.map((marker) => marker.y), dataWindowPct)
   const barLevelLabelYById = getBarLevelLabelYById(
@@ -218,22 +221,22 @@ export function GexProfileChart({
       >
         <defs>
           <linearGradient id={`${gradientIdPrefix}-chart-panel-fill`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#0f1212" />
-            <stop offset="55%" stopColor="#0a0d0d" />
-            <stop offset="100%" stopColor="#070909" />
+            <stop offset="0%" stopColor="var(--chart-panel-fill-top)" />
+            <stop offset="55%" stopColor="var(--chart-panel-fill-mid)" />
+            <stop offset="100%" stopColor="var(--chart-panel-fill-bottom)" />
           </linearGradient>
           <linearGradient id={`${gradientIdPrefix}-positive-gex-fill`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#6f8f55" />
+            <stop offset="0%" stopColor="var(--chart-positive-start)" />
             <stop offset="100%" stopColor="var(--chart-positive-edge)" />
           </linearGradient>
           <linearGradient id={`${gradientIdPrefix}-negative-gex-fill`} x1="0" x2="1" y1="0" y2="0">
             <stop offset="0%" stopColor="var(--chart-negative-edge)" />
-            <stop offset="100%" stopColor="#9a3e43" />
+            <stop offset="100%" stopColor="var(--chart-negative-end)" />
           </linearGradient>
           <linearGradient id={`${gradientIdPrefix}-profile-gex-fill`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#6f7772" />
-            <stop offset="50%" stopColor="#aeb6af" />
-            <stop offset="100%" stopColor="#6f7772" />
+            <stop offset="0%" stopColor="var(--chart-profile-fill-start)" />
+            <stop offset="50%" stopColor="var(--chart-profile-fill-mid)" />
+            <stop offset="100%" stopColor="var(--chart-profile-fill-end)" />
           </linearGradient>
         </defs>
 
@@ -283,6 +286,7 @@ export function GexProfileChart({
         {layout.yAxisTicks.map((tick) => (
           <YAxisStrikeLabel
             key={tick.strike}
+            marker={getLevelMarkerAtStrike(layout.levelMarkers, tick.strike)}
             strike={tick.strike}
             x={50}
             y={tick.y}
@@ -290,12 +294,25 @@ export function GexProfileChart({
           />
         ))}
 
+        {barLevelAxisLabels.map((marker) => (
+          <YAxisStrikeLabel
+            key={`level-axis-${marker.id}`}
+            marker={marker}
+            strike={marker.strike}
+            x={50}
+            y={marker.y}
+            highlighted={false}
+          />
+        ))}
+
         {data.map((datum) => {
-          const rowTop = layout.yScale(datum.strike) ?? dimensions.margin.top
-          const rowCenter = rowTop + layout.yScale.bandwidth() / 2
+          const rowCenter = layout.yScale(datum.strike)
+          const rowHeight = layout.rowHeight
+          const rowTop = rowCenter - rowHeight / 2
           const isHovered = hovered?.datum.strike === datum.strike
+          const showHoverStrikeLabel = isHovered && !yAxisTickStrikes.has(datum.strike) && !levelAxisStrikes.has(datum.strike)
           const bar = getBarGeometry(datum.displayGexUsd, layout.xScale, rowCenter)
-          const barHeight = getBarHeight(layout.yScale.bandwidth())
+          const barHeight = getBarHeight(rowHeight)
           const positive = datum.displayGexUsd >= 0
           const stroke = positive ? 'var(--chart-positive-edge)' : 'var(--chart-negative-edge)'
           const positiveBar = getBarGeometry(datum.positiveGexUsd, layout.xScale, rowCenter)
@@ -308,12 +325,12 @@ export function GexProfileChart({
                   x={dimensions.margin.left}
                   y={rowTop}
                   width={layout.innerWidth}
-                  height={layout.yScale.bandwidth()}
+                  height={rowHeight}
                   fill="var(--terminal-surface-2)"
                   opacity="0.72"
                 />
               ) : null}
-              {isHovered ? (
+              {showHoverStrikeLabel ? (
                 <YAxisStrikeLabel
                   strike={datum.strike}
                   x={50}
@@ -529,9 +546,9 @@ function AreaGexChart({
       >
         <defs>
           <linearGradient id={`${gradientIdPrefix}-chart-panel-fill`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#0f1212" />
-            <stop offset="55%" stopColor="#0a0d0d" />
-            <stop offset="100%" stopColor="#070909" />
+            <stop offset="0%" stopColor="var(--chart-panel-fill-top)" />
+            <stop offset="55%" stopColor="var(--chart-panel-fill-mid)" />
+            <stop offset="100%" stopColor="var(--chart-panel-fill-bottom)" />
           </linearGradient>
           <linearGradient id={`${gradientIdPrefix}-abs-call-area-fill`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="var(--chart-positive-edge)" stopOpacity="0.68" />
@@ -882,6 +899,26 @@ function YAxisStrikeLabel({
       </text>
     </g>
   )
+}
+
+function getBarLevelAxisLabels(markers: PositionedBarLevelMarker[], axisTicks: StrikeAxisTick[]) {
+  const tickClearance = 13
+  const labelClearance = 14
+  const sortedMarkers = [...markers]
+    .filter((marker) => !axisTicks.some((tick) => tick.strike === marker.strike))
+    .sort((a, b) => a.y - b.y)
+  const labels: PositionedBarLevelMarker[] = []
+
+  for (const marker of sortedMarkers) {
+    const overlapsAxisTick = axisTicks.some((tick) => Math.abs(tick.y - marker.y) < tickClearance)
+    const overlapsLevelLabel = labels.some((label) => Math.abs(label.y - marker.y) < labelClearance)
+
+    if (!overlapsAxisTick && !overlapsLevelLabel) {
+      labels.push(marker)
+    }
+  }
+
+  return labels
 }
 
 function AreaLevelMarker({
@@ -1391,57 +1428,56 @@ function getChartLayout(
   const xScale = scaleLinear<number, number>()
     .domain([-domainMax, domainMax])
     .range([dimensions.margin.left, dimensions.margin.left + innerWidth])
-  const yScale = scaleBand<number>()
-    .domain(strikes)
-    .range([dimensions.margin.top, dimensions.margin.top + innerHeight])
-    .padding(0.22)
-  const strikeScale = scaleLinear<number, number>()
+  const yScale = scaleLinear<number, number>()
     .domain([minStrike, maxStrike])
     .range([dimensions.margin.top + innerHeight, dimensions.margin.top])
+  const rowHeight = getContinuousBarRowHeight(strikes, yScale, dataWindowPct)
 
   return {
     innerWidth,
     innerHeight,
     xScale,
     yScale,
-    spotY: strikeScale(spot),
-    levelMarkers: positionBarLevelMarkers(levelMarkers, yScale, strikeScale),
-    axisMarkers: positionBarAxisMarkers(axisMarkers, strikes, yScale, strikeScale),
+    rowHeight,
+    spotY: yScale(spot),
+    levelMarkers: positionBarLevelMarkers(levelMarkers, yScale),
+    axisMarkers: positionBarLevelMarkers(axisMarkers, yScale),
     xTicks: buildMillionTicks(domainMax),
-    yAxisTicks: buildStrikeAxisTicks(minStrike, maxStrike, strikeScale, dimensions, dataWindowPct),
+    yAxisTicks: buildStrikeAxisTicks(minStrike, maxStrike, yScale, dimensions, dataWindowPct),
     closestSpotStrike: getClosestStrike(strikes, spot),
   }
 }
 
 function positionBarLevelMarkers(
   markers: GexLevelMarker[],
-  yScale: ScaleBand<number>,
-  strikeScale: ScaleLinear<number, number>,
+  yScale: ScaleLinear<number, number>,
 ) {
-  return markers.map((marker) => {
-    const rowTop = yScale(marker.strike)
-
-    return {
-      ...marker,
-      y: rowTop === undefined ? strikeScale(marker.strike) : rowTop + yScale.bandwidth() / 2,
-    }
-  })
+  return markers.map((marker) => ({
+    ...marker,
+    y: yScale(marker.strike),
+  }))
 }
 
-function positionBarAxisMarkers(
-  markers: GexLevelMarker[],
+function getContinuousBarRowHeight(
   strikes: number[],
-  yScale: ScaleBand<number>,
-  strikeScale: ScaleLinear<number, number>,
+  yScale: ScaleLinear<number, number>,
+  dataWindowPct: number | 'full',
 ) {
-  return positionBarLevelMarkers(
-    markers.map((marker) => ({
-      ...marker,
-      strike: strikes.includes(marker.strike) ? marker.strike : getClosestStrike(strikes, marker.strike),
-    })),
-    yScale,
-    strikeScale,
-  )
+  const sortedStrikes = Array.from(new Set(strikes)).sort((a, b) => a - b)
+  const pixelGaps = sortedStrikes.slice(1).map((strike, index) => (
+    Math.abs(yScale(strike) - yScale(sortedStrikes[index]))
+  ))
+  const closestGap = pixelGaps.length > 0 ? Math.min(...pixelGaps) : getFallbackContinuousRowHeight(dataWindowPct)
+
+  return clamp(closestGap * 0.82, 4.5, 22)
+}
+
+function getFallbackContinuousRowHeight(dataWindowPct: number | 'full') {
+  if (dataWindowPct === 'full') return 5
+  if (dataWindowPct <= 5) return 22
+  if (dataWindowPct <= 18) return 14
+
+  return 8
 }
 
 function getAreaChartLayout(
