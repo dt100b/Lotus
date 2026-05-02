@@ -467,6 +467,73 @@ input[type="number"]::-webkit-outer-spin-button {
   margin: 0;
 }
 
+input[type="range"].terminal-window-slider {
+  width: 100%;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  appearance: none;
+  background: transparent;
+}
+
+input[type="range"].terminal-window-slider:focus-visible {
+  outline: none;
+}
+
+input[type="range"].terminal-window-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  border: 1px solid var(--terminal-control-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--terminal-heading) 18%, var(--terminal-surface-3));
+  box-shadow: var(--terminal-control-inset);
+}
+
+input[type="range"].terminal-window-slider::-webkit-slider-thumb {
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  appearance: none;
+  border: 1px solid var(--terminal-blue);
+  border-radius: 50%;
+  background: var(--terminal-surface);
+  box-shadow:
+    0 0 0 2px var(--terminal-surface),
+    0 0 8px color-mix(in srgb, var(--terminal-blue) 34%, transparent);
+}
+
+input[type="range"].terminal-window-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 2px var(--terminal-surface),
+    0 0 0 3px color-mix(in srgb, var(--terminal-blue) 34%, transparent),
+    0 0 10px color-mix(in srgb, var(--terminal-blue) 38%, transparent);
+}
+
+input[type="range"].terminal-window-slider::-moz-range-track {
+  height: 2px;
+  border: 1px solid var(--terminal-control-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--terminal-heading) 18%, var(--terminal-surface-3));
+  box-shadow: var(--terminal-control-inset);
+}
+
+input[type="range"].terminal-window-slider::-moz-range-thumb {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--terminal-blue);
+  border-radius: 50%;
+  background: var(--terminal-surface);
+  box-shadow:
+    0 0 0 2px var(--terminal-surface),
+    0 0 8px color-mix(in srgb, var(--terminal-blue) 34%, transparent);
+}
+
+input[type="range"].terminal-window-slider:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 2px var(--terminal-surface),
+    0 0 0 3px color-mix(in srgb, var(--terminal-blue) 34%, transparent),
+    0 0 10px color-mix(in srgb, var(--terminal-blue) 38%, transparent);
+}
+
 ::selection {
   background: var(--terminal-selection-bg);
   color: var(--terminal-heading);
@@ -735,6 +802,97 @@ html[data-theme='blueprint'] [role='combobox'] {
   align-items: center;
 }
 
+.terminal-brand {
+  --terminal-brand-accent: var(--terminal-green-strong);
+
+  position: relative;
+  display: inline-flex;
+  min-width: 172px;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 1px;
+  color: var(--terminal-heading);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--terminal-brand-accent) 13%, transparent);
+}
+
+.terminal-brand::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 0;
+  bottom: 6px;
+  width: 1px;
+  background: var(--terminal-rule);
+}
+
+.terminal-brand span {
+  position: relative;
+  transform: translateY(1.5px);
+  white-space: nowrap;
+}
+
+.terminal-brand-mark {
+  display: flex;
+  height: 24px;
+  width: 26px;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--terminal-heading) 86%, var(--terminal-brand-accent));
+  filter:
+    drop-shadow(0 0 3px color-mix(in srgb, var(--terminal-heading) 14%, transparent))
+    drop-shadow(0 0 9px color-mix(in srgb, var(--terminal-brand-accent) 28%, transparent));
+}
+
+.terminal-market-select {
+  --terminal-market-accent: var(--terminal-blue);
+
+  position: relative;
+  height: 22px;
+  min-width: 50px;
+  gap: 4px;
+  border-color: color-mix(in srgb, var(--terminal-market-accent) 56%, var(--terminal-control-border));
+  background: color-mix(in srgb, var(--terminal-market-accent) 7%, var(--terminal-bg-soft));
+  padding: 0 6px;
+  color: var(--terminal-heading);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  box-shadow:
+    var(--terminal-control-inset),
+    inset 0 0 0 1px color-mix(in srgb, var(--terminal-market-accent) 10%, transparent);
+  text-transform: uppercase;
+}
+
+.terminal-market-select::before {
+  content: none;
+}
+
+.terminal-market-select:hover,
+.terminal-market-select:focus-visible {
+  border-color: var(--terminal-market-accent);
+  background: color-mix(in srgb, var(--terminal-market-accent) 12%, var(--terminal-bg-soft));
+  color: var(--terminal-heading);
+  box-shadow:
+    var(--terminal-control-inset),
+    0 0 0 1px color-mix(in srgb, var(--terminal-market-accent) 18%, transparent),
+    0 0 8px color-mix(in srgb, var(--terminal-market-accent) 24%, transparent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--terminal-market-accent) 20%, transparent);
+}
+
+.terminal-market-select svg {
+  color: color-mix(in srgb, var(--terminal-market-accent) 72%, var(--terminal-muted));
+}
+
 .terminal-clean-tabs {
   position: relative;
   display: inline-flex;
@@ -742,16 +900,6 @@ html[data-theme='blueprint'] [role='combobox'] {
   gap: 2px;
   min-height: 24px;
   padding: 0;
-}
-
-.terminal-clean-tabs::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 1px;
-  background: var(--terminal-rule);
 }
 
 .terminal-clean-tab {
@@ -854,18 +1002,6 @@ html[data-theme='blueprint'] [role='combobox'] {
   line-height: 1;
   opacity: 0.86;
   text-shadow: 0 0 8px color-mix(in srgb, var(--terminal-green-strong) 48%, transparent);
-}
-
-.terminal-command-tabs::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: -4px;
-  left: 0;
-  z-index: -1;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--terminal-green-strong) 58%, transparent), transparent);
-  opacity: 0.38;
 }
 
 .terminal-command-tab {
@@ -1047,18 +1183,18 @@ html[data-theme='blueprint'] [role='combobox'] {
 }
 
 .level-proximity-flow--near {
-  --level-flow-rest-opacity: 0.095;
-  --level-flow-peak-opacity: 0.14;
+  --level-flow-rest-opacity: 0.055;
+  --level-flow-peak-opacity: 0.085;
 }
 
 .level-proximity-flow--pattern {
-  --level-flow-rest-opacity: 0.15;
-  --level-flow-peak-opacity: 0.22;
+  --level-flow-rest-opacity: 0.085;
+  --level-flow-peak-opacity: 0.13;
 }
 
 .level-proximity-flow--signature {
-  --level-flow-rest-opacity: 0.22;
-  --level-flow-peak-opacity: 0.32;
+  --level-flow-rest-opacity: 0.12;
+  --level-flow-peak-opacity: 0.18;
 }
 
 .level-proximity-flow--pattern::before {

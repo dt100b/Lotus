@@ -1,8 +1,6 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
-import { X } from 'lucide-react'
 import { WallSignificanceChart } from '@/components/terminal/WallSignificanceChart'
-import type { ExpiryContribution, ExpiryKind, ExpiryPositioningEvent, RankingRow, TerminalSnapshot } from '@/data/mockTerminal'
-import type { GexLevelSelection } from '@/components/terminal/RankingTable'
+import type { ExpiryKind, ExpiryPositioningEvent, TerminalSnapshot } from '@/data/mockTerminal'
 import { formatMillions, formatSignedPercent, formatStrike, formatUsd } from '@/lib/formatters'
 import { useTerminalStore, type LevelVisibilityKey } from '@/store/terminalStore'
 import { getSpotDistanceColor, levelColors } from '@/data/levelColors'
@@ -10,16 +8,10 @@ import { getSpotDistanceColor, levelColors } from '@/data/levelColors'
 type SidePanelsProps = {
   snapshot: TerminalSnapshot
   allExpirySnapshot?: TerminalSnapshot
-  zeroDteSnapshot?: TerminalSnapshot
-  selectedLevel?: GexLevelSelection | null
-  onCloseLevelInspector?: () => void
 }
 
 type LevelPanelTab = 'levels' | 'walls' | 'expiry'
 
-const spotProximityThresholdPercent = 0.5
-const lotusPatternThresholdPercent = 0.25
-const lotusSignatureThresholdPercent = 0.1
 const allLevelVisibilityKeys: LevelVisibilityKey[] = [
   'allExpiryHvl',
   'allExpiryCallResistance',
@@ -36,30 +28,16 @@ const allLevelVisibilityKeys: LevelVisibilityKey[] = [
 export function SidePanels({
   snapshot,
   allExpirySnapshot,
-  zeroDteSnapshot,
-  selectedLevel,
-  onCloseLevelInspector,
 }: SidePanelsProps) {
   const [levelPanelTab, setLevelPanelTab] = useState<LevelPanelTab>('levels')
   const theme = useTerminalStore((state) => state.theme)
   const levelVisibility = useTerminalStore((state) => state.levelVisibility)
   const setLevelVisibility = useTerminalStore((state) => state.setLevelVisibility)
-  const signatureRowId = getSignatureLevelRowId(snapshot)
   const allLevelsVisible = allLevelVisibilityKeys.every((level) => levelVisibility[level])
   const toggleAllLevels = () => {
     const nextVisible = !allLevelsVisible
 
     allLevelVisibilityKeys.forEach((level) => setLevelVisibility(level, nextVisible))
-  }
-
-  if (selectedLevel) {
-    return (
-      <LevelInspector
-        snapshot={selectedLevel.scope === 'zeroDte' ? zeroDteSnapshot ?? snapshot : allExpirySnapshot ?? snapshot}
-        selection={selectedLevel}
-        onClose={onCloseLevelInspector ?? (() => undefined)}
-      />
-    )
   }
 
   return (
@@ -71,14 +49,14 @@ export function SidePanels({
           {snapshot.marketSources.map((source) => (
             <div
               key={source.name}
-              className="grid grid-cols-[1fr_auto] items-center gap-4 px-1 py-2 text-[11px]"
+              className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-[var(--terminal-rule)] px-1 py-1.5 text-[10.5px] last:border-b-0"
             >
-              <div className="flex items-center gap-3 text-[var(--terminal-muted)]">
+              <div className="flex min-w-0 items-center gap-2.5 text-[var(--terminal-muted)]">
                 <SourceLogo sourceName={source.name} />
-                <span>{source.name}</span>
+                <span className="truncate">{source.name}</span>
               </div>
               <div className="text-right">
-                <div className="terminal-value font-semibold text-[var(--terminal-heading)]">{formatUsd(source.value)}</div>
+                <div className="terminal-value text-[11px] font-semibold leading-none text-[var(--terminal-heading)]">{formatUsd(source.value)}</div>
                 <div className={getPriceSourceNoteClassName(source.note)}>{source.note}</div>
               </div>
             </div>
@@ -110,7 +88,6 @@ export function SidePanels({
               items={snapshot.levels.allExpiry}
               levelVisibility={levelVisibility}
               setLevelVisibility={setLevelVisibility}
-              signatureRowId={signatureRowId}
               spot={snapshot.spot}
             />
 
@@ -120,7 +97,6 @@ export function SidePanels({
               items={snapshot.levels.zeroDte}
               levelVisibility={levelVisibility}
               setLevelVisibility={setLevelVisibility}
-              signatureRowId={signatureRowId}
               spot={snapshot.spot}
             />
 
@@ -128,7 +104,6 @@ export function SidePanels({
             <AdvancedRows
               items={snapshot.levels.advanced}
               levelVisibility={levelVisibility}
-              signatureRowId={signatureRowId}
               setLevelVisibility={setLevelVisibility}
               spot={snapshot.spot}
             />
@@ -149,7 +124,6 @@ type LevelPanelProps = {
   items: TerminalSnapshot['levels']['allExpiry']
   levelVisibility: Record<LevelVisibilityKey, boolean>
   setLevelVisibility: (level: LevelVisibilityKey, visible: boolean) => void
-  signatureRowId: string | null
   spot: number
 }
 
@@ -242,375 +216,6 @@ function LevelPanelTabButton({
   )
 }
 
-function LevelInspector({
-  snapshot,
-  selection,
-  onClose,
-}: {
-  snapshot: TerminalSnapshot
-  selection: GexLevelSelection
-  onClose: () => void
-}) {
-  const row = getCurrentRankingRow(snapshot, selection) ?? selection.row
-  const isZeroDteSelection = selection.scope === 'zeroDte'
-  const sourceLabel = selection.scope === 'zeroDte' ? '0DTE GEX' : 'All-Expiry GEX'
-  const gammaBar = snapshot.gammaBars.find((item) => item.strike === row.strike)
-  const callGexUsd = gammaBar?.callGammaExposureUsd ?? row.callGammaExposureUsd
-  const putGexUsd = gammaBar?.putGammaExposureUsd ?? row.putGammaExposureUsd
-  const totalSideAbs = Math.abs(callGexUsd) + Math.abs(putGexUsd)
-  const callShare = totalSideAbs === 0 ? 50 : (Math.abs(callGexUsd) / totalSideAbs) * 100
-  const putShare = totalSideAbs === 0 ? 50 : 100 - callShare
-  const expiryMix = getDisplayExpiryContributions(row, snapshot)
-  const topContribution = expiryMix[0]
-  const expiryTotalAbs = expiryMix.reduce((total, contribution) => total + Math.abs(contribution.gammaExposureUsd), 0)
-  const topContributionShare = expiryTotalAbs === 0 || !topContribution
-    ? 0
-    : (Math.abs(topContribution.gammaExposureUsd) / expiryTotalAbs) * 100
-  const profileAbsTotal = snapshot.gammaBars.reduce((total, item) => total + Math.abs(item.gammaExposureUsd), 0)
-  const profileShare = profileAbsTotal === 0 ? 0 : (Math.abs(row.gammaExposureUsd) / profileAbsTotal) * 100
-  const topTenOpenInterest = getTopTenOpenInterest(snapshot, selection.scope)
-  const openInterestShare = topTenOpenInterest === 0 ? 0 : (row.openInterest / topTenOpenInterest) * 100
-  const hedgeBias = row.gammaExposureUsd >= 0 ? 'Dampen' : 'Amplify'
-
-  return (
-    <aside className="terminal-panel terminal-rail grid h-full min-h-0">
-      <section className="terminal-rail-section flex min-h-0 flex-col overflow-hidden">
-        <div className="terminal-section-header">
-          <div className="min-w-0">
-            <h2 className="terminal-title whitespace-nowrap">Level Inspector</h2>
-            <div className="mt-1 text-[9px] font-semibold uppercase tracking-[0.11em] text-[var(--terminal-muted)]">
-              {sourceLabel}
-            </div>
-          </div>
-          <button
-            aria-label="Close level inspector"
-            className="ml-auto flex h-6 w-6 cursor-pointer items-center justify-center rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] text-[var(--terminal-muted)] transition-colors hover:border-[var(--terminal-border-strong)] hover:text-[var(--terminal-heading)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--terminal-border-strong)]"
-            type="button"
-            onClick={onClose}
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <div className="grid grid-cols-[1fr_auto] items-end gap-3 border-b border-[var(--terminal-rule)] pb-4">
-            <div className="min-w-0">
-              <div className="terminal-value text-[28px] font-semibold leading-none text-[var(--terminal-heading)]">
-                ${formatStrike(row.strike)}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <InspectorBadge tone={row.gammaExposureUsd >= 0 ? 'green' : 'red'}>
-                  {row.gammaExposureUsd >= 0 ? 'Positive GEX' : 'Negative GEX'}
-                </InspectorBadge>
-                <InspectorBadge tone={row.gammaExposureUsd >= 0 ? 'green' : 'red'}>{hedgeBias}</InspectorBadge>
-                {!isZeroDteSelection ? (
-                  <InspectorBadge tone={topContributionShare >= 70 ? 'amber' : 'muted'}>
-                    {formatWholePercent(topContributionShare)} concentrated
-                  </InspectorBadge>
-                ) : null}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className={row.gammaExposureUsd >= 0 ? 'terminal-value text-[17px] font-semibold text-[var(--terminal-green-strong)]' : 'terminal-value text-[17px] font-semibold text-[var(--terminal-red-strong)]'}>
-                {formatMillions(row.gammaExposureUsd)}
-              </div>
-              <div className="mt-1 text-[8.5px] font-semibold uppercase tracking-[0.1em] text-[var(--terminal-muted)]">
-                #{row.rank}
-              </div>
-            </div>
-          </div>
-
-          <InspectorSection title="7D GEX Trend">
-            <HistoricalGexChart points={row.gexHistory} />
-          </InspectorSection>
-
-          <InspectorSection title="Composition">
-            <div className="grid grid-cols-3 gap-2">
-              <InspectorStat
-                label="Spot Distance"
-                value={formatSignedPercent(row.distanceFromSpotPercent)}
-                tone="muted"
-                valueStyle={{ color: getSpotDistanceColor(row.distanceFromSpotPercent) }}
-              />
-              <InspectorStat label="Profile Share" value={formatWholePercent(profileShare)} tone="muted" />
-              <InspectorStat label="Top 10 OI" value={formatWholePercent(openInterestShare)} tone={getOpenInterestShareTone(openInterestShare)} />
-            </div>
-            <div className="mt-3 grid gap-2">
-              <GexCompositionBar
-                callGexUsd={callGexUsd}
-                putGexUsd={putGexUsd}
-                callShare={callShare}
-                putShare={putShare}
-              />
-              <OpenInterestCompositionBar
-                openInterest={row.openInterest}
-                totalOpenInterest={topTenOpenInterest}
-              />
-            </div>
-          </InspectorSection>
-
-          {!isZeroDteSelection ? (
-            <InspectorSection title="Expiry Mix">
-              <div className="grid gap-2">
-                {expiryMix.slice(0, 5).map((contribution) => (
-                  <ExpiryMixRow
-                    key={contribution.expiry}
-                    contribution={contribution}
-                    maxAbs={Math.max(...expiryMix.map((item) => Math.abs(item.gammaExposureUsd)))}
-                  />
-                ))}
-              </div>
-            </InspectorSection>
-          ) : null}
-
-          <InspectorSection title="Dealer Positioning">
-            <DealerPositioning row={row} />
-          </InspectorSection>
-        </div>
-      </section>
-    </aside>
-  )
-}
-
-function InspectorSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="border-b border-[var(--terminal-rule)] py-3.5 last:border-b-0">
-      <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-[9px] font-semibold uppercase leading-none tracking-[0.14em] text-[var(--terminal-muted)]">
-          {title}
-        </h3>
-        <span className="h-px flex-1 bg-[var(--terminal-rule)]" />
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function InspectorBadge({ tone, children }: { tone: 'green' | 'red' | 'amber' | 'muted'; children: ReactNode }) {
-  const toneClassName = {
-    green: 'border-[rgba(148,201,112,0.36)] bg-[rgba(117,153,84,0.13)] text-[var(--terminal-green-strong)]',
-    red: 'border-[rgba(238,95,102,0.36)] bg-[rgba(190,64,70,0.13)] text-[var(--terminal-red-strong)]',
-    amber: 'border-[rgba(208,188,98,0.38)] bg-[rgba(208,188,98,0.11)] text-[var(--terminal-yellow)]',
-    muted: 'border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] text-[var(--terminal-muted)]',
-  }[tone]
-
-  return (
-    <span className={`rounded-[var(--terminal-control-radius)] border px-1.5 py-1 text-[8.5px] font-semibold uppercase leading-none tracking-[0.1em] ${toneClassName}`}>
-      {children}
-    </span>
-  )
-}
-
-function InspectorStat({
-  label,
-  value,
-  tone,
-  valueStyle,
-}: {
-  label: string
-  value: string
-  tone: 'green' | 'red' | 'amber' | 'muted'
-  valueStyle?: CSSProperties
-}) {
-  const toneClassName = {
-    green: 'text-[var(--terminal-green-strong)]',
-    red: 'text-[var(--terminal-red-strong)]',
-    amber: 'text-[var(--terminal-yellow)]',
-    muted: 'text-[var(--terminal-heading)]',
-  }[tone]
-
-  return (
-    <div>
-      <div className="mb-1 text-[8px] font-semibold uppercase tracking-[0.1em] text-[var(--terminal-muted)]">{label}</div>
-      <div className={`terminal-value text-[10.5px] font-semibold ${toneClassName}`} style={valueStyle}>{value}</div>
-    </div>
-  )
-}
-
-function HistoricalGexChart({ points }: { points: RankingRow['gexHistory'] }) {
-  const dimensions = { width: 360, height: 132, left: 42, right: 8, top: 10, bottom: 22 }
-  const innerWidth = dimensions.width - dimensions.left - dimensions.right
-  const innerHeight = dimensions.height - dimensions.top - dimensions.bottom
-  const allValues = points.flatMap((point) => [point.netGexUsd, point.callGexUsd, point.putGexUsd])
-  const maxAbs = Math.max(...allValues.map((value) => Math.abs(value)), 1)
-  const x = (index: number) => dimensions.left + (index / Math.max(1, points.length - 1)) * innerWidth
-  const y = (value: number) => dimensions.top + ((maxAbs - value) / (maxAbs * 2)) * innerHeight
-  const pathFor = (key: 'netGexUsd' | 'callGexUsd' | 'putGexUsd') => points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${x(index).toFixed(1)} ${y(point[key]).toFixed(1)}`)
-    .join(' ')
-  const zeroY = y(0)
-
-  return (
-    <div>
-      <svg viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} className="h-[132px] w-full" role="img" aria-label="Seven day GEX trend">
-        <line
-          x1={dimensions.left}
-          x2={dimensions.width - dimensions.right}
-          y1={zeroY}
-          y2={zeroY}
-          stroke="var(--terminal-border-strong)"
-          strokeDasharray="4 5"
-          strokeOpacity="0.6"
-        />
-        {[0.25, 0.5, 0.75].map((tick) => {
-          const tickY = dimensions.top + tick * innerHeight
-
-          return (
-            <line
-              key={tick}
-              x1={dimensions.left}
-              x2={dimensions.width - dimensions.right}
-              y1={tickY}
-              y2={tickY}
-              stroke="var(--terminal-grid)"
-            />
-          )
-        })}
-        {points.map((point, index) => (
-          <line
-            key={point.label}
-            x1={x(index)}
-            x2={x(index)}
-            y1={dimensions.top}
-            y2={dimensions.height - dimensions.bottom}
-            stroke="var(--terminal-grid)"
-            strokeOpacity={index === points.length - 1 ? 0.55 : 0.32}
-          />
-        ))}
-        <path d={pathFor('callGexUsd')} fill="none" stroke="var(--terminal-green-strong)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        <path d={pathFor('putGexUsd')} fill="none" stroke="var(--terminal-red-strong)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        <path d={pathFor('netGexUsd')} fill="none" stroke="var(--terminal-yellow)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-        {points.map((point, index) => (
-          <circle
-            key={`${point.label}-net`}
-            cx={x(index)}
-            cy={y(point.netGexUsd)}
-            r={index === points.length - 1 ? 2.6 : 1.8}
-            fill="var(--terminal-yellow)"
-          />
-        ))}
-        <text x="2" y={y(maxAbs)} fill="var(--terminal-muted)" fontSize="9" dominantBaseline="middle">
-          {formatMillions(maxAbs)}
-        </text>
-        <text x="2" y={zeroY} fill="var(--terminal-muted)" fontSize="9" dominantBaseline="middle">
-          0
-        </text>
-        <text x="2" y={y(-maxAbs)} fill="var(--terminal-muted)" fontSize="9" dominantBaseline="middle">
-          {formatMillions(-maxAbs)}
-        </text>
-        <text x={dimensions.left} y={dimensions.height - 4} fill="var(--terminal-muted)" fontSize="9">
-          {points[0]?.label}
-        </text>
-        <text x={dimensions.width - dimensions.right} y={dimensions.height - 4} fill="var(--terminal-muted)" fontSize="9" textAnchor="end">
-          {points.at(-1)?.label}
-        </text>
-      </svg>
-      <div className="mt-2 flex items-center gap-4 text-[8.5px] font-semibold uppercase tracking-[0.1em] text-[var(--terminal-muted)]">
-        <ChartLegendItem color="var(--terminal-yellow)" label="Net" />
-        <ChartLegendItem color="var(--terminal-green-strong)" label="Call" />
-        <ChartLegendItem color="var(--terminal-red-strong)" label="Put" />
-      </div>
-    </div>
-  )
-}
-
-function ChartLegendItem({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="h-px w-4" style={{ background: color }} />
-      {label}
-    </span>
-  )
-}
-
-function GexCompositionBar({
-  callGexUsd,
-  putGexUsd,
-  callShare,
-  putShare,
-}: {
-  callGexUsd: number
-  putGexUsd: number
-  callShare: number
-  putShare: number
-}) {
-  const netGexUsd = callGexUsd + putGexUsd
-
-  return (
-    <div className="grid grid-cols-[78px_minmax(0,1fr)_64px] items-center gap-2 text-[10px]">
-      <div className="font-semibold uppercase tracking-[0.08em] text-[var(--terminal-muted)]">GEX Split</div>
-      <div
-        className="flex h-1.5 overflow-hidden border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)]"
-        title={`Call GEX ${formatMillions(callGexUsd)} / Put GEX ${formatMillions(putGexUsd)}`}
-      >
-        <div className="h-full bg-[var(--chart-positive)]" style={{ width: `${clamp(callShare, 2, 98)}%` }} />
-        <div className="h-full bg-[var(--chart-negative)]" style={{ width: `${clamp(putShare, 2, 98)}%` }} />
-      </div>
-      <div className={netGexUsd >= 0 ? 'terminal-value text-right text-[var(--terminal-green-strong)]' : 'terminal-value text-right text-[var(--terminal-red-strong)]'}>
-        {formatMillions(netGexUsd)}
-      </div>
-    </div>
-  )
-}
-
-function OpenInterestCompositionBar({
-  openInterest,
-  totalOpenInterest,
-}: {
-  openInterest: number
-  totalOpenInterest: number
-}) {
-  const share = totalOpenInterest === 0 ? 0 : (openInterest / totalOpenInterest) * 100
-
-  return (
-    <div className="grid grid-cols-[78px_minmax(0,1fr)_64px] items-center gap-2 text-[10px]">
-      <div className="font-semibold uppercase tracking-[0.08em] text-[var(--terminal-muted)]">Open Int</div>
-      <div
-        className="flex h-1.5 overflow-hidden border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)]"
-        title={`${formatOpenInterest(openInterest)} OI at this level / ${formatOpenInterest(totalOpenInterest)} Top 10 OI`}
-      >
-        <div className="h-full bg-[var(--terminal-blue)]" style={{ width: `${clamp(share, 2, 100)}%` }} />
-      </div>
-      <div className="terminal-value text-right text-[var(--terminal-heading)]">
-        {formatOpenInterest(openInterest)}
-      </div>
-    </div>
-  )
-}
-
-function ExpiryMixRow({ contribution, maxAbs }: { contribution: ExpiryContribution; maxAbs: number }) {
-  const positive = contribution.gammaExposureUsd >= 0
-  const width = maxAbs === 0 ? 0 : (Math.abs(contribution.gammaExposureUsd) / maxAbs) * 100
-
-  return (
-    <div className="grid grid-cols-[82px_minmax(0,1fr)_70px] items-center gap-2 text-[10px]">
-      <div className="truncate font-semibold uppercase tracking-[0.08em] text-[var(--terminal-text)]">
-        {formatExpiryLabel(contribution.expiry)}
-      </div>
-      <div className="h-1.5 border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)]">
-        <div
-          className={positive ? 'h-full bg-[var(--chart-positive)]' : 'h-full bg-[var(--chart-negative)]'}
-          style={{ width: `${clamp(width, 4, 100)}%` }}
-        />
-      </div>
-      <div className={positive ? 'terminal-value text-right text-[var(--terminal-green-strong)]' : 'terminal-value text-right text-[var(--terminal-red-strong)]'}>
-        {formatMillions(contribution.gammaExposureUsd)}
-      </div>
-    </div>
-  )
-}
-
-function DealerPositioning({ row }: { row: RankingRow }) {
-  const positive = row.gammaExposureUsd >= 0
-  const hedgeBias = positive ? 'Dampen' : 'Amplify'
-
-  return (
-    <div className="grid grid-cols-3 gap-2">
-      <InspectorStat label="Hedge Bias" value={hedgeBias} tone={positive ? 'green' : 'red'} />
-    </div>
-  )
-}
-
 function ToggleAllLevelsButton({
   allVisible,
   onToggle,
@@ -666,25 +271,20 @@ function PanelGroupTitle({ title }: { title: string }) {
   )
 }
 
-function LevelRows({ title, items, levelVisibility, setLevelVisibility, signatureRowId, spot }: LevelPanelProps) {
+function LevelRows({ title, items, levelVisibility, setLevelVisibility, spot }: LevelPanelProps) {
   return (
     <div className="grid gap-0">
       {items.map((item) => {
         const visibilityKey = getLevelVisibilityKey(title, item.label)
         const visible = levelVisibility[visibilityKey]
-        const rowId = getLevelRowId(title, item.label)
         const distanceFromSpotPercent = item.distanceFromSpotPercent ?? getDistanceFromSpotPercent(item.strike, spot)
-        const proximityTier = getSpotProximityTier(distanceFromSpotPercent, rowId, signatureRowId)
         const markerColor = getLevelMarkerColor(title, item.label)
-        const proximityStyle = getSpotProximityStyle(distanceFromSpotPercent, markerColor, proximityTier)
 
         return (
           <div
             key={item.label}
-            className={getLevelRowClassName(Boolean(proximityStyle))}
-            style={proximityStyle}
+            className={getLevelRowClassName()}
           >
-            <LevelProximityFlow color={markerColor} tier={proximityTier} />
             <div className="relative z-10 flex items-center gap-3 px-1 py-1.5 text-[var(--terminal-text)]">
               <MetricMarkerButton
                 color={markerColor}
@@ -695,7 +295,7 @@ function LevelRows({ title, items, levelVisibility, setLevelVisibility, signatur
               />
               {item.label}
             </div>
-            <div className="terminal-value relative z-10 border-l border-[var(--terminal-rule)] px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">${formatStrike(item.strike)}</div>
+            <div className="terminal-value relative z-10 px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">${formatStrike(item.strike)}</div>
             <div
               className="terminal-value relative z-10 px-1 py-1.5 text-right"
               style={{ color: getSpotDistanceColor(distanceFromSpotPercent) }}
@@ -713,13 +313,11 @@ function LevelRows({ title, items, levelVisibility, setLevelVisibility, signatur
 function AdvancedRows({
   items,
   levelVisibility,
-  signatureRowId,
   spot,
   setLevelVisibility,
 }: {
   items: TerminalSnapshot['levels']['advanced']
   levelVisibility: Record<LevelVisibilityKey, boolean>
-  signatureRowId: string | null
   setLevelVisibility: (level: LevelVisibilityKey, visible: boolean) => void
   spot: number
 }) {
@@ -729,20 +327,15 @@ function AdvancedRows({
         const expectedMoveRange = metric.label === 'Expected Move' ? splitExpectedMoveRange(metric.value) : null
         const visibilityKey = getAdvancedVisibilityKey(metric.label)
         const visible = levelVisibility[visibilityKey]
-        const rowId = getAdvancedRowId(metric.label)
-        const distanceFromSpotPercent = getAdvancedDistanceFromSpotPercent(metric, spot, expectedMoveRange)
-        const proximityTier = getSpotProximityTier(distanceFromSpotPercent, rowId, signatureRowId)
         const markerColor = getAdvancedMarkerColor(metric)
-        const proximityStyle = getSpotProximityStyle(distanceFromSpotPercent, markerColor, proximityTier)
+        const distanceFromSpotPercent = getAdvancedDistanceFromSpotPercent(metric, spot, expectedMoveRange)
         const distanceDisplay = distanceFromSpotPercent === undefined ? '-' : formatSignedPercent(distanceFromSpotPercent)
 
         return (
           <div
             key={metric.label}
-            className={getLevelRowClassName(Boolean(proximityStyle))}
-            style={proximityStyle}
+            className={getLevelRowClassName()}
           >
-            <LevelProximityFlow color={markerColor} tier={proximityTier} />
             <div className="relative z-10 flex items-center gap-3 px-1 py-1.5 text-[var(--terminal-text)]">
               <MetricMarkerButton
                 color={markerColor}
@@ -753,7 +346,7 @@ function AdvancedRows({
               />
               {metric.label}
             </div>
-            <div className="terminal-value relative z-10 border-l border-[var(--terminal-rule)] px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">
+            <div className="terminal-value relative z-10 px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">
               {expectedMoveRange?.lower ?? metric.value}
             </div>
             <div
@@ -769,71 +362,8 @@ function AdvancedRows({
   )
 }
 
-type SpotProximityTier = 'none' | 'near' | 'pattern' | 'signature'
-
-function LevelProximityFlow({ color, tier }: { color: string, tier: SpotProximityTier }) {
-  if (tier === 'none') {
-    return null
-  }
-
-  const flowStyle = {
-    '--level-flow-color': color,
-  } as CSSProperties
-
-  return <div aria-hidden="true" className={`level-proximity-flow level-proximity-flow--${tier}`} style={flowStyle} />
-}
-
-function getLevelRowClassName(highlighted: boolean) {
-  const baseClassName = 'relative grid grid-cols-[170px_120px_minmax(54px,1fr)] items-center overflow-hidden border-b border-[var(--terminal-rule)] text-[11px] transition-[background-color,filter,box-shadow] last:border-b-0 hover:bg-[var(--terminal-surface-2)]'
-
-  return highlighted ? `${baseClassName} hover:brightness-110` : baseClassName
-}
-
-function getSpotProximityStyle(
-  distanceFromSpotPercent: number | undefined,
-  color: string,
-  tier: SpotProximityTier,
-): CSSProperties | undefined {
-  if (distanceFromSpotPercent === undefined || !Number.isFinite(distanceFromSpotPercent)) {
-    return undefined
-  }
-
-  const distance = Math.abs(distanceFromSpotPercent)
-  if (distance > spotProximityThresholdPercent) {
-    return undefined
-  }
-
-  const intensity = 1 - distance / spotProximityThresholdPercent
-  const edgeMix = 24 + intensity * 34
-  const outlineMix = tier === 'signature' ? 18 : tier === 'pattern' ? 11 : 0
-
-  return {
-    boxShadow: [
-      `inset 2px 0 0 color-mix(in srgb, ${color} ${edgeMix}%, transparent)`,
-      outlineMix > 0 ? `inset 0 0 0 1px color-mix(in srgb, ${color} ${outlineMix}%, transparent)` : '',
-    ].filter(Boolean).join(', '),
-  }
-}
-
-function getSpotProximityTier(
-  distanceFromSpotPercent: number | undefined,
-  rowId: string,
-  signatureRowId: string | null,
-): SpotProximityTier {
-  if (distanceFromSpotPercent === undefined || !Number.isFinite(distanceFromSpotPercent)) {
-    return 'none'
-  }
-
-  const distance = Math.abs(distanceFromSpotPercent)
-  if (rowId === signatureRowId && distance <= lotusSignatureThresholdPercent) {
-    return 'signature'
-  }
-
-  if (distance <= lotusPatternThresholdPercent) {
-    return 'pattern'
-  }
-
-  return distance <= spotProximityThresholdPercent ? 'near' : 'none'
+function getLevelRowClassName() {
+  return 'relative grid grid-cols-[170px_120px_minmax(54px,1fr)] items-center overflow-hidden border-b border-[var(--terminal-rule)] text-[11px] transition-[background-color] last:border-b-0 hover:bg-[var(--terminal-surface-2)]'
 }
 
 function getAdvancedDistanceFromSpotPercent(
@@ -859,54 +389,6 @@ function getAdvancedDistanceFromSpotPercent(
   return Number.isFinite(strike) ? getDistanceFromSpotPercent(strike, spot) : undefined
 }
 
-function getSignatureLevelRowId(snapshot: TerminalSnapshot) {
-  const candidates: Array<{ rowId: string; distance: number }> = []
-  const addCandidate = (rowId: string, distanceFromSpotPercent: number | undefined) => {
-    if (distanceFromSpotPercent === undefined || !Number.isFinite(distanceFromSpotPercent)) {
-      return
-    }
-
-    const distance = Math.abs(distanceFromSpotPercent)
-    if (distance <= lotusSignatureThresholdPercent) {
-      candidates.push({ rowId, distance })
-    }
-  }
-
-  snapshot.levels.allExpiry.forEach((item) => {
-    addCandidate(
-      getLevelRowId('All-Expiry Levels', item.label),
-      item.distanceFromSpotPercent ?? getDistanceFromSpotPercent(item.strike, snapshot.spot),
-    )
-  })
-  snapshot.levels.zeroDte.forEach((item) => {
-    addCandidate(
-      getLevelRowId('0DTE Levels', item.label),
-      item.distanceFromSpotPercent ?? getDistanceFromSpotPercent(item.strike, snapshot.spot),
-    )
-  })
-  snapshot.levels.advanced.forEach((metric) => {
-    const isRangeMetric = metric.label === 'Expected Move' && splitExpectedMoveRange(metric.value)
-    if (isRangeMetric) {
-      return
-    }
-
-    addCandidate(
-      getAdvancedRowId(metric.label),
-      getAdvancedDistanceFromSpotPercent(metric, snapshot.spot, null),
-    )
-  })
-
-  return candidates.sort((a, b) => a.distance - b.distance)[0]?.rowId ?? null
-}
-
-function getLevelRowId(title: string, label: string) {
-  return `${title}:${label}`
-}
-
-function getAdvancedRowId(label: string) {
-  return `Advanced:${label}`
-}
-
 function parseLevelValue(value: string) {
   return Number(value.replace(/[^\d.-]/g, ''))
 }
@@ -921,7 +403,7 @@ function getDistanceFromSpotPercent(strike: number, spot: number) {
 
 function getPriceSourceNoteClassName(note: string) {
   const signedValue = note.match(/[+-]\s*\d+(?:\.\d+)?/)
-  const baseClassName = 'text-[10px]'
+  const baseClassName = 'mt-0.5 text-[9px] leading-none'
 
   if (!signedValue) {
     return `${baseClassName} text-[var(--terminal-muted)]`
@@ -1174,90 +656,68 @@ function splitExpectedMoveRange(value: string) {
   }
 }
 
-function getCurrentRankingRow(snapshot: TerminalSnapshot, selection: GexLevelSelection) {
-  const rows = selection.scope === 'zeroDte' ? snapshot.rankings.zeroDte : snapshot.rankings.allExpiry
-
-  return rows.find((row) => row.strike === selection.row.strike)
-}
-
-function getTopTenOpenInterest(snapshot: TerminalSnapshot, scope: GexLevelSelection['scope']) {
-  const rows = scope === 'zeroDte' ? snapshot.rankings.zeroDte : snapshot.rankings.allExpiry
-
-  return rows.reduce((total, row) => total + row.openInterest, 0)
-}
-
-function getDisplayExpiryContributions(row: RankingRow, snapshot: TerminalSnapshot): ExpiryContribution[] {
-  if (row.expiryContributions.length > 0) {
-    return row.expiryContributions
-  }
-
-  return [{
-    expiry: snapshot.expiry,
-    gammaExposureUsd: row.gammaExposureUsd,
-    callGammaExposureUsd: row.callGammaExposureUsd,
-    putGammaExposureUsd: row.putGammaExposureUsd,
-    openInterest: row.openInterest,
-    callOpenInterest: row.callOpenInterest,
-    putOpenInterest: row.putOpenInterest,
-  }]
-}
-
 function formatWholePercent(value: number) {
   return `${Math.round(value)}%`
 }
 
-function formatExpiryLabel(expiry: ExpiryContribution['expiry']) {
-  return expiry === 'ALL' ? 'All' : expiry
-}
-
-function formatOpenInterest(value: number) {
-  return Math.round(value).toLocaleString('en-US')
-}
-
-function getOpenInterestShareTone(share: number): 'green' | 'red' | 'amber' | 'muted' {
-  if (share >= 18) return 'green'
-  if (share >= 12) return 'amber'
-
-  return 'muted'
-}
-
 function GammaRegimeExtension({ snapshot }: { snapshot: TerminalSnapshot }) {
   const context = getRegimeContext(snapshot)
-  const score = context.score
-  const positive = score >= 0
-  const regimeLabel = positive ? 'Long Gamma' : 'Short Gamma'
-  const regimeToneClassName = positive ? 'text-[var(--terminal-green-strong)]' : 'text-[var(--terminal-red-strong)]'
   const spotDistanceDirection = context.flipDistance >= 0 ? 'above flip' : 'below flip'
+  const tradeToneClassName = getRegimeToneClassName(context.tradeRegimeTone)
 
   return (
-    <section className="mt-1 border-t border-[var(--terminal-rule)] pt-2.5" aria-label="Gamma regime corridor">
-      <div className="grid grid-cols-[1fr_auto] items-start gap-3">
+    <section className="mt-1.5 border-t border-[var(--terminal-border-strong)] pb-1 pt-2" aria-label="Regime">
+      <div className="grid grid-cols-[1fr_auto] items-start gap-3 border-b border-[var(--terminal-rule)] pb-2">
         <div className="min-w-0">
-          <PanelGroupTitle title="Gamma Regime" />
-          <div className={`mt-1.5 text-[16px] font-semibold uppercase leading-none tracking-normal ${regimeToneClassName}`}>
-            {regimeLabel}
+          <PanelGroupTitle title="Regime" />
+          <div className={`mt-1.5 text-[16px] font-semibold uppercase leading-none tracking-normal ${tradeToneClassName}`}>
+            {context.tradeRegimeLabel}
           </div>
           <div className="terminal-value mt-1.5 text-[9.5px] text-[var(--terminal-muted)]">
             {formatSignedUsd(context.flipDistance)} / {formatSignedPercent(context.flipDistancePercent)} {spotDistanceDirection}
           </div>
         </div>
         <div className="text-right">
-          <div className={`terminal-value text-[16px] font-semibold leading-none ${regimeToneClassName}`}>
-            {formatRegimeScore(score)}
+          <div className={`terminal-value text-[16px] font-semibold leading-none ${tradeToneClassName}`}>
+            {formatRegimeScore(context.dealerGammaScore)}
           </div>
           <div className="mt-1 text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">
-            Score
+            Gamma
           </div>
         </div>
       </div>
 
-      <div className="mt-4 px-1">
-        <div className="mb-1.5 grid grid-cols-[1fr_auto_1fr] items-end gap-2 text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">
+      <div className="mt-2 grid gap-1">
+        <RegimeSignalRow
+          label="Dealer Gamma"
+          value={context.dealerGammaLabel}
+          score={context.dealerGammaScore}
+          scoreDisplay={formatRegimeScore(context.dealerGammaScore)}
+          tone={context.dealerGammaTone}
+        />
+        <RegimeSignalRow
+          label="Pin Pressure"
+          value={context.pinPressureLabel}
+          score={context.pinPressureScore}
+          scoreDisplay={formatWholePercent(context.pinPressureScore)}
+          tone={context.pinPressureTone}
+        />
+        <RegimeSignalRow
+          label="Expansion Risk"
+          value={context.expansionRiskLabel}
+          score={context.expansionRiskScore}
+          scoreDisplay={formatWholePercent(context.expansionRiskScore)}
+          tone={context.expansionRiskTone}
+        />
+      </div>
+
+      <div className="mt-2 border-t border-[var(--terminal-rule)] px-1 pt-2">
+        <div className="mb-1 grid grid-cols-[1fr_auto_1fr] items-end gap-2 text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">
           <span>Short Γ</span>
           <span>Flip</span>
           <span className="text-right">Long Γ</span>
         </div>
-        <div className="relative h-[50px]">
+        <div className="relative h-[62px]">
           <div className="absolute left-0 right-0 top-4 h-2 overflow-hidden rounded-[2px] border border-[var(--terminal-border-strong)] bg-[var(--terminal-bg-soft)] shadow-[var(--terminal-control-inset)]">
             <div
               className="absolute inset-y-0 left-0 bg-gradient-to-r from-[color-mix(in_srgb,var(--terminal-red-strong)_82%,transparent)] to-[color-mix(in_srgb,var(--terminal-yellow)_78%,transparent)]"
@@ -1270,57 +730,92 @@ function GammaRegimeExtension({ snapshot }: { snapshot: TerminalSnapshot }) {
           </div>
 
           <div
-            className="absolute top-0.5 h-9 w-px bg-[var(--terminal-yellow)] opacity-80"
+            className="absolute top-0.5 h-10 w-px bg-[var(--terminal-yellow)] opacity-80"
             style={{ left: `${context.flipPosition}%` }}
           >
             <span className="absolute left-1/2 top-[34px] h-1.5 w-1.5 -translate-x-1/2 rotate-45 border border-[var(--terminal-yellow)] bg-[var(--terminal-bg-soft)]" />
           </div>
           <div
-            className="absolute top-0 h-11 w-px bg-[var(--terminal-heading)] shadow-[0_0_9px_rgba(228,232,223,0.4)]"
+            className="absolute top-0 h-12 w-px bg-[var(--terminal-heading)] shadow-[0_0_9px_rgba(228,232,223,0.4)]"
             style={{ left: `${context.spotPosition}%` }}
           >
             <span className="absolute left-1/2 top-[-1px] h-2 w-2 -translate-x-1/2 rotate-45 bg-[var(--terminal-heading)]" />
-            <span className="absolute left-1/2 top-[45px] -translate-x-1/2 whitespace-nowrap text-[8px] font-semibold uppercase leading-none text-[var(--terminal-heading)]">
+            <span className="absolute left-1/2 top-[48px] -translate-x-1/2 whitespace-nowrap text-[8px] font-semibold uppercase leading-none text-[var(--terminal-heading)]">
               Spot
             </span>
           </div>
+          {context.supportStrike !== undefined ? (
+            <span className="terminal-value absolute bottom-0 left-0 whitespace-nowrap text-[8.5px] font-semibold leading-none text-[var(--terminal-red-strong)]">
+              {formatUsd(context.supportStrike)}
+            </span>
+          ) : null}
+          {context.resistanceStrike !== undefined ? (
+            <span className="terminal-value absolute bottom-0 right-0 whitespace-nowrap text-[8.5px] font-semibold leading-none text-[var(--terminal-green-strong)]">
+              {formatUsd(context.resistanceStrike)}
+            </span>
+          ) : null}
         </div>
-      </div>
-
-      <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[var(--terminal-rule)] pt-2 text-[9px]">
-        <RegimeMiniStat label="Put Support" value={context.putSupport} tone="red" />
-        <RegimeMiniStat label="Gamma Flip" value={context.flipPoint} tone="amber" />
-        <RegimeMiniStat label="Call Resist" value={context.callResistance} tone="green" align="right" />
       </div>
     </section>
   )
 }
 
-function RegimeMiniStat({
+type RegimeTone = 'green' | 'red' | 'amber' | 'muted'
+
+function RegimeSignalRow({
   label,
   value,
+  score,
+  scoreDisplay,
   tone,
-  align = 'left',
 }: {
   label: string
-  value: number | undefined
-  tone: 'red' | 'amber' | 'green'
-  align?: 'left' | 'right'
+  value: string
+  score: number
+  scoreDisplay: string
+  tone: RegimeTone
 }) {
-  const toneClassName = {
-    red: 'text-[var(--terminal-red-strong)]',
-    amber: 'text-[var(--terminal-yellow)]',
-    green: 'text-[var(--terminal-green-strong)]',
-  }[tone]
+  const toneClassName = getRegimeToneClassName(tone)
+  const scoreWidth = label === 'Dealer Gamma'
+    ? Math.abs(score) * 100
+    : score
+  const barWidth = scoreWidth === 0 ? 0 : clamp(scoreWidth, 4, 100)
 
   return (
-    <div className={align === 'right' ? 'text-right' : ''}>
-      <div className="mb-1 text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">{label}</div>
-      <div className={`terminal-value text-[10.5px] font-semibold ${toneClassName}`}>
-        {value === undefined ? 'N/A' : formatUsd(value)}
+    <div className="grid grid-cols-[96px_minmax(0,1fr)_44px] items-center gap-2 border-b border-[var(--terminal-rule)] px-1 py-1 text-[9px] last:border-b-0">
+      <div className="min-w-0">
+        <div className="truncate text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">{label}</div>
+        <div className={`terminal-value mt-0.5 text-[10px] font-semibold uppercase ${toneClassName}`}>{value}</div>
+      </div>
+      <div className="h-1.5 overflow-hidden border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)]">
+        <div
+          className={getRegimeBarClassName(tone)}
+          style={{ width: `${barWidth}%` }}
+        />
+      </div>
+      <div className={`terminal-value text-right text-[9.5px] font-semibold ${toneClassName}`}>
+        {scoreDisplay}
       </div>
     </div>
   )
+}
+
+function getRegimeToneClassName(tone: RegimeTone) {
+  return {
+    green: 'text-[var(--terminal-green-strong)]',
+    red: 'text-[var(--terminal-red-strong)]',
+    amber: 'text-[var(--terminal-yellow)]',
+    muted: 'text-[var(--terminal-muted)]',
+  }[tone]
+}
+
+function getRegimeBarClassName(tone: RegimeTone) {
+  return {
+    green: 'h-full bg-[var(--terminal-green-strong)]',
+    red: 'h-full bg-[var(--terminal-red-strong)]',
+    amber: 'h-full bg-[var(--terminal-yellow)]',
+    muted: 'h-full bg-[var(--terminal-subtle)]',
+  }[tone]
 }
 
 function ExpiryImpactPanel({ snapshot }: { snapshot: TerminalSnapshot }) {
@@ -1614,11 +1109,11 @@ function formatCompactUsd(value: number) {
 }
 
 function getRegimeContext(snapshot: TerminalSnapshot) {
-  const score = getRegimeScore(snapshot)
-  const flipPoint = getAdvancedLevelValue(snapshot, 'Gamma Flip Zones') ?? getAdvancedLevelValue(snapshot, 'Zero Gamma')
-  const putSupport = getLevelStrike(snapshot, 'Put Support')
-  const callResistance = getLevelStrike(snapshot, 'Call Resistance')
-  const corridorValues = [putSupport, flipPoint, callResistance, snapshot.spot].filter((value): value is number => value !== undefined)
+  const dealerGammaScore = getRegimeScore(snapshot)
+  const flipStrike = getAdvancedLevelValue(snapshot, 'Gamma Flip Zones') ?? getAdvancedLevelValue(snapshot, 'Zero Gamma')
+  const supportStrike = getLevelStrike(snapshot, 'Put Support')
+  const resistanceStrike = getLevelStrike(snapshot, 'Call Resistance')
+  const corridorValues = [supportStrike, flipStrike, resistanceStrike, snapshot.spot].filter((value): value is number => value !== undefined)
   const corridorMin = corridorValues.length > 0 ? Math.min(...corridorValues) : snapshot.spot
   const corridorMax = corridorValues.length > 0 ? Math.max(...corridorValues) : snapshot.spot
   const corridorRange = corridorMax - corridorMin
@@ -1627,18 +1122,39 @@ function getRegimeContext(snapshot: TerminalSnapshot) {
 
     return clamp(((value - corridorMin) / corridorRange) * 100, 0, 100)
   }
-  const fallbackFlipPoint = flipPoint ?? snapshot.spot
-  const flipDistance = snapshot.spot - fallbackFlipPoint
-  const flipDistancePercent = fallbackFlipPoint === 0 ? 0 : (flipDistance / fallbackFlipPoint) * 100
+  const fallbackFlipStrike = flipStrike ?? snapshot.spot
+  const flipDistance = snapshot.spot - fallbackFlipStrike
+  const flipDistancePercent = fallbackFlipStrike === 0 ? 0 : (flipDistance / fallbackFlipStrike) * 100
+  const pinPressureScore = getPinPressureScore(snapshot)
+  const expansionRiskScore = getExpansionRiskScore(dealerGammaScore, flipDistancePercent, pinPressureScore)
+  const dealerGammaLabel = getDealerGammaLabel(dealerGammaScore)
+  const pinPressureLabel = getRegimeRiskLabel(pinPressureScore, [58, 32])
+  const expansionRiskLabel = getRegimeRiskLabel(expansionRiskScore, [60, 35])
+  const tradeRegime = getTradeRegime({
+    dealerGammaScore,
+    flipDistancePercent,
+    pinPressureLabel,
+    expansionRiskLabel,
+  })
 
   return {
-    score,
-    flipPoint,
-    putSupport,
-    callResistance,
+    dealerGammaScore,
+    dealerGammaLabel,
+    dealerGammaTone: getDealerGammaTone(dealerGammaScore),
+    pinPressureScore,
+    pinPressureLabel,
+    pinPressureTone: getPressureTone(pinPressureLabel),
+    expansionRiskScore,
+    expansionRiskLabel,
+    expansionRiskTone: getExpansionTone(expansionRiskLabel),
+    tradeRegimeLabel: tradeRegime.label,
+    tradeRegimeTone: tradeRegime.tone,
+    flipStrike,
+    supportStrike,
+    resistanceStrike,
     flipDistance,
     flipDistancePercent,
-    flipPosition: positionFor(flipPoint),
+    flipPosition: positionFor(flipStrike),
     spotPosition: positionFor(snapshot.spot),
   }
 }
@@ -1656,6 +1172,95 @@ function getRegimeScore(snapshot: TerminalSnapshot) {
   if (regimeRange === 0) return 0
 
   return clamp((snapshot.spot - flipPoint) / regimeRange, -1, 1)
+}
+
+function getPinPressureScore(snapshot: TerminalSnapshot) {
+  const validRows = snapshot.gammaBars.filter((row) => (
+    Number.isFinite(row.strike)
+    && Number.isFinite(row.gammaExposureUsd)
+    && Math.abs(row.gammaExposureUsd) > 0
+  ))
+  const totalAbsGexUsd = validRows.reduce((total, row) => total + Math.abs(row.gammaExposureUsd), 0)
+  if (totalAbsGexUsd === 0) return 0
+
+  const nearSpotRows = validRows.filter((row) => {
+    const distanceFromSpotPercent = getDistanceFromSpotPercent(row.strike, snapshot.spot)
+
+    return distanceFromSpotPercent !== undefined && Math.abs(distanceFromSpotPercent) <= 2.5
+  })
+  const nearSpotAbsGexUsd = nearSpotRows.reduce((total, row) => total + Math.abs(row.gammaExposureUsd), 0)
+  const largestNearSpotWallUsd = Math.max(0, ...nearSpotRows.map((row) => Math.abs(row.gammaExposureUsd)))
+  const nearSpotShare = (nearSpotAbsGexUsd / totalAbsGexUsd) * 100
+  const largestWallShare = (largestNearSpotWallUsd / totalAbsGexUsd) * 100
+
+  return clamp((nearSpotShare * 1.25) + (largestWallShare * 2.5), 0, 100)
+}
+
+function getExpansionRiskScore(dealerGammaScore: number, flipDistancePercent: number, pinPressureScore: number) {
+  const shortGammaPressure = clamp(-dealerGammaScore * 100, 0, 100)
+  const flipProximity = clamp((1 - (Math.abs(flipDistancePercent) / 2.5)) * 100, 0, 100)
+
+  return clamp((shortGammaPressure * 0.55) + (flipProximity * 0.25) + (pinPressureScore * 0.2), 0, 100)
+}
+
+function getDealerGammaLabel(score: number) {
+  if (score > 0.12) return 'Long Gamma'
+  if (score < -0.12) return 'Short Gamma'
+
+  return 'Transition'
+}
+
+function getDealerGammaTone(score: number): RegimeTone {
+  if (score > 0.12) return 'green'
+  if (score < -0.12) return 'red'
+
+  return 'amber'
+}
+
+function getRegimeRiskLabel(score: number, thresholds: [number, number]) {
+  if (score >= thresholds[0]) return 'High'
+  if (score >= thresholds[1]) return 'Medium'
+
+  return 'Low'
+}
+
+function getPressureTone(label: 'High' | 'Medium' | 'Low'): RegimeTone {
+  if (label === 'High') return 'amber'
+  if (label === 'Medium') return 'green'
+
+  return 'muted'
+}
+
+function getExpansionTone(label: 'High' | 'Medium' | 'Low'): RegimeTone {
+  if (label === 'High') return 'red'
+  if (label === 'Medium') return 'amber'
+
+  return 'muted'
+}
+
+function getTradeRegime({
+  dealerGammaScore,
+  flipDistancePercent,
+  pinPressureLabel,
+  expansionRiskLabel,
+}: {
+  dealerGammaScore: number
+  flipDistancePercent: number
+  pinPressureLabel: 'High' | 'Medium' | 'Low'
+  expansionRiskLabel: 'High' | 'Medium' | 'Low'
+}): { label: string; tone: RegimeTone } {
+  const nearFlip = Math.abs(dealerGammaScore) <= 0.12 || Math.abs(flipDistancePercent) <= 0.35
+  if (nearFlip) return { label: 'Transition', tone: 'amber' }
+
+  if (dealerGammaScore > 0) {
+    if (pinPressureLabel === 'High') return { label: 'Compression', tone: 'green' }
+
+    return { label: 'Mean Reversion', tone: 'green' }
+  }
+
+  if (expansionRiskLabel === 'High') return { label: 'Momentum', tone: 'red' }
+
+  return { label: 'Fragile', tone: 'amber' }
 }
 
 function getAdvancedLevelValue(snapshot: TerminalSnapshot, label: string) {

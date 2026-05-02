@@ -4,6 +4,7 @@ import type { ScaleLinear } from 'd3-scale'
 import { area, curveMonotoneX, line } from 'd3-shape'
 import { getGexChartTitle } from '@/components/terminal/gexModes'
 import { formatAxisMillions, formatMillions, formatStrike } from '@/lib/formatters'
+import { cn } from '@/lib/utils'
 
 export type GexMode = 'net' | 'split' | 'call' | 'put' | 'abs' | 'profile'
 
@@ -46,6 +47,7 @@ export type GexProfileChartProps = {
   levelMarkers?: GexLevelMarker[]
   titleAccessory?: ReactNode
   titleOverride?: string
+  minHeight?: number
 }
 
 type ChartDatum = {
@@ -111,7 +113,6 @@ type PositionedAreaLevelMarker = GexLevelMarker & {
 const defaultWidth = 1120
 const minChartWidth = 720
 const defaultChartHeight = 516
-const minChartHeight = 516
 const margin = { top: 60, right: 102, bottom: 54, left: 78 }
 const areaMargin = { top: 54, right: 30, bottom: 50, left: 104 }
 const areaYAxisLabelX = 22
@@ -134,10 +135,11 @@ export function GexProfileChart({
   levelMarkers = [],
   titleAccessory,
   titleOverride,
+  minHeight = defaultChartHeight,
 }: GexProfileChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const gradientIdPrefix = useId().replace(/:/g, '')
-  const { width: measuredWidth, height: measuredHeight } = useContainerSize(containerRef, defaultWidth, defaultChartHeight)
+  const { width: measuredWidth, height: measuredHeight } = useContainerSize(containerRef, defaultWidth, minHeight, minHeight)
   const areaMode = mode === 'abs' || mode === 'profile'
   const validLevelMarkers = useMemo(() => levelMarkers.filter((marker) => Number.isFinite(marker.strike)), [levelMarkers])
   const data = useMemo(
@@ -168,7 +170,7 @@ export function GexProfileChart({
   const [hovered, setHovered] = useState<HoverState | null>(null)
   if (areaMode) {
     return (
-      <div ref={containerRef} className="relative h-full min-h-[516px] w-full overflow-hidden">
+      <div ref={containerRef} className={cn('relative h-full w-full overflow-hidden')} style={{ minHeight }}>
         {titleAccessory ? (
           <div className="absolute right-[18px] top-[12px] z-20">
             {titleAccessory}
@@ -204,7 +206,7 @@ export function GexProfileChart({
   const barSpotLabelX = chartRight + barSpotLabelNormalOffsetX
 
   return (
-    <div ref={containerRef} className="relative h-full min-h-[516px] w-full overflow-hidden">
+    <div ref={containerRef} className={cn('relative h-full w-full overflow-hidden')} style={{ minHeight }}>
       {titleAccessory ? (
         <div className="absolute right-[18px] top-[12px] z-20">
           {titleAccessory}
@@ -848,7 +850,7 @@ function BarLevelMarker({
         width={labelRightX - chartLeft}
         height={levelHighlightBandSize}
         fill={marker.color}
-        opacity="0.075"
+        opacity={glyphs.length > 1 ? '0.052' : '0.067'}
         style={{ filter: glowFilter }}
       />
       <g transform={`translate(${labelX} ${labelY})`}>
@@ -860,7 +862,7 @@ function BarLevelMarker({
           rx="2"
           fill="var(--terminal-surface)"
           stroke={marker.color}
-          strokeOpacity="0.76"
+          strokeOpacity={glyphs.length > 1 ? '0.54' : '0.68'}
         />
         <LevelMarkerGlyphGroup glow scale={markerScale} glyphs={glyphs} x={labelWidth / 2} y={0} />
       </g>
@@ -949,7 +951,7 @@ function AreaLevelMarker({
         width={levelHighlightBandSize}
         height={chartBottom - chartTop}
         fill={marker.color}
-        opacity="0.075"
+        opacity={glyphs.length > 1 ? '0.052' : '0.067'}
         style={{ filter: glowFilter }}
       />
       <g transform={`translate(${labelX} ${labelY})`}>
@@ -961,7 +963,7 @@ function AreaLevelMarker({
           rx="2"
           fill="var(--terminal-surface)"
           stroke={marker.color}
-          strokeOpacity="0.76"
+          strokeOpacity={glyphs.length > 1 ? '0.54' : '0.68'}
         />
         <LevelMarkerGlyphGroup glow glyphs={glyphs} x={0} y={0} />
       </g>
@@ -974,7 +976,7 @@ function getLevelMarkerComponents(marker: GexLevelMarker) {
 }
 
 function getGlyphGroupWidth(glyphCount: number, scale = 1) {
-  return (22 + Math.max(0, glyphCount - 1) * 20) * scale
+  return (20 + Math.max(0, glyphCount - 1) * 15) * scale
 }
 
 function getGlyphGroupHeight(scale = 1) {
@@ -994,7 +996,7 @@ function LevelMarkerGlyphGroup({
   x: number
   y: number
 }) {
-  const gap = 20 * scale
+  const gap = 15 * scale
   const startX = x - ((glyphs.length - 1) * gap) / 2
 
   return (
@@ -1004,20 +1006,6 @@ function LevelMarkerGlyphGroup({
 
         return (
           <g key={glyph.id}>
-            {index > 0 ? (
-              <text
-                x={glyphX - gap / 2}
-                y={y + 1}
-                fill="var(--terminal-muted)"
-                fontSize={9 * scale}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fontFamily="var(--font-mono)"
-                fontWeight={700}
-              >
-                /
-              </text>
-            ) : null}
             <g
               transform={`translate(${glyphX} ${y}) scale(${scale})`}
               style={glow ? { filter: getLevelMarkerGlowFilter(glyph.color) } : undefined}
@@ -1228,7 +1216,12 @@ function getAreaGlyphLabelYById(markers: PositionedAreaLevelMarker[], dimensions
   }))
 }
 
-function useContainerSize(ref: React.RefObject<HTMLDivElement | null>, fallbackWidth: number, fallbackHeight: number) {
+function useContainerSize(
+  ref: React.RefObject<HTMLDivElement | null>,
+  fallbackWidth: number,
+  fallbackHeight: number,
+  minHeight: number,
+) {
   const [size, setSize] = useState({ width: fallbackWidth, height: fallbackHeight })
 
   useEffect(() => {
@@ -1246,7 +1239,7 @@ function useContainerSize(ref: React.RefObject<HTMLDivElement | null>, fallbackW
 
       setSize({
         width: Math.max(minChartWidth, Math.floor(Math.max(elementWidth, parentWidth))),
-        height: Math.max(minChartHeight, Math.floor(Math.max(elementHeight, parentHeight))),
+        height: Math.max(minHeight, Math.floor(Math.max(elementHeight, parentHeight))),
       })
     }
     updateSize()
@@ -1258,7 +1251,7 @@ function useContainerSize(ref: React.RefObject<HTMLDivElement | null>, fallbackW
     }
 
     return () => observer.disconnect()
-  }, [ref])
+  }, [minHeight, ref])
 
   return size
 }

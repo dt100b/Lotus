@@ -5,6 +5,8 @@ import { deribitOpexCutoffHourUtc, getNextDeribitExpiry } from '@/api/deribitExp
 import { terminalThemes, type TerminalThemeId } from '@/data/terminalThemes'
 import { useTerminalStore } from '@/store/terminalStore'
 
+const headerTabs = ['Home', 'GEX', 'Vol', 'Perps', 'Macro'] as const
+
 export function TopBar() {
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -47,46 +49,53 @@ export function TopBar() {
   }, [settingsOpen])
 
   return (
-    <header className="flex min-h-[40px] flex-wrap items-center gap-2.5 border-b border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-3 py-1 lg:flex-nowrap">
-      <div className="flex h-[28px] min-w-[166px] items-center gap-2">
-        <LotusMark />
-        <div className="flex h-[24px] translate-y-[0.5px] items-center text-[13.5px] font-semibold leading-none tracking-[0.16em] text-[var(--terminal-heading)]">
-          LOTUS DATA
+    <header className="flex min-h-[48px] flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-4 py-2 lg:flex-nowrap">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 lg:flex-nowrap">
+        <div className="terminal-brand">
+          <LotusMark />
+          <span>Lotus Data</span>
+        </div>
+
+        <HeaderTabs />
+
+        <div className="flex min-w-0 items-center gap-3">
+          <Button className="terminal-market-select">
+            <span>BTC</span>
+            <ChevronDown className="h-[11px] w-[11px]" />
+          </Button>
+
+          <div className="min-w-0 whitespace-nowrap text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[var(--terminal-muted)]">
+            Flow-Adjusted GEX
+          </div>
         </div>
       </div>
 
-      <Button className="h-[24px] min-w-[76px] gap-2 border-[var(--terminal-border-strong)] px-2.5 text-[11px] tracking-[0.14em] text-[var(--terminal-heading)]">
-        BTC
-        <ChevronDown className="h-3 w-3 text-[var(--terminal-muted)]" />
-      </Button>
-
-      <div className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.13em] text-[var(--terminal-muted)]">FLOW-ADJUSTED GEX</div>
-
-      <div className="flex flex-1 flex-wrap items-center gap-1.5 lg:ml-5 lg:flex-nowrap">
+      <div className="flex flex-wrap items-center gap-2 lg:ml-auto lg:flex-nowrap">
         {nextOpex ? (
           <div
-            className="flex h-[26px] w-fit min-w-0 items-center justify-center gap-1 rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-2 text-[9.5px] font-semibold text-[var(--terminal-text)] shadow-[var(--terminal-control-inset)] lg:ml-auto"
+            className="flex min-h-[28px] w-fit min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--terminal-control-radius)] border border-transparent bg-transparent px-1 text-[9.5px] font-semibold text-[var(--terminal-text)]"
             title={`Next listed expiry: ${nextOpex.label} at ${String(deribitOpexCutoffHourUtc).padStart(2, '0')}:00 UTC`}
           >
-            <span className="text-[var(--terminal-muted)]">NEXT OPEX:</span>
+            <span className="text-[var(--terminal-muted)]">Next OPEX</span>
             <span className="terminal-value text-[var(--terminal-heading)]">
               {formatCountdown(nextOpex.msRemaining)}
             </span>
             <span className="terminal-value text-[var(--terminal-text)]">{nextOpex.label}</span>
-            <span className="terminal-value text-[var(--terminal-subtle)]">
+            <span className="terminal-value hidden text-[var(--terminal-subtle)] sm:inline">
               {String(deribitOpexCutoffHourUtc).padStart(2, '0')}:00:00 UTC
             </span>
           </div>
         ) : null}
 
-        <div className="hidden h-7 w-px bg-[var(--terminal-border)] lg:block" />
+        <div className="hidden h-6 w-px bg-[var(--terminal-rule)] lg:block" />
 
-        <div className="flex items-center gap-2.5 whitespace-nowrap text-[10.5px] text-[var(--terminal-text)]">
+        <div className="flex min-h-[28px] items-center gap-2.5 whitespace-nowrap text-[10.5px] text-[var(--terminal-text)]">
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--terminal-green-strong)]" />
+          <span className="text-[var(--terminal-muted)]">Live</span>
           <span className="terminal-value">{nyTime}</span>
         </div>
 
-        <div className="h-7 w-px bg-[var(--terminal-border)]" />
+        <div className="h-6 w-px bg-[var(--terminal-rule)]" />
 
         <div ref={settingsRef} className="relative">
           <Button
@@ -111,6 +120,32 @@ export function TopBar() {
         </div>
       </div>
     </header>
+  )
+}
+
+function HeaderTabs() {
+  return (
+    <nav
+      aria-label="Primary"
+      className="terminal-clean-tabs min-w-0 flex-shrink-0 overflow-x-auto"
+    >
+      {headerTabs.map((tab) => {
+        const active = tab === 'GEX'
+
+        return (
+          <button
+            key={tab}
+            aria-current={active ? 'page' : undefined}
+            aria-disabled={active ? undefined : true}
+            className={active ? 'terminal-clean-tab terminal-clean-tab--active' : 'terminal-clean-tab'}
+            title={active ? 'GEX dashboard' : `${tab} coming soon`}
+            type="button"
+          >
+            <span>{tab}</span>
+          </button>
+        )
+      })}
+    </nav>
   )
 }
 
@@ -170,8 +205,8 @@ function SettingsMenu({
 
 function LotusMark() {
   return (
-    <div className="flex h-[28px] w-7 items-center justify-center text-[var(--terminal-heading)]">
-      <svg viewBox="0 0 70 54" className="h-[23px] w-7" aria-hidden="true">
+    <div className="terminal-brand-mark">
+      <svg viewBox="0 0 70 54" className="h-[20px] w-[26px]" aria-hidden="true">
         <path
           d="M35 49C22 37 19 24 35 5c16 19 13 32 0 44Z"
           fill="none"

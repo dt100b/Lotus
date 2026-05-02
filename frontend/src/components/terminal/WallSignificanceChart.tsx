@@ -180,6 +180,7 @@ export function WallSignificanceChart({ snapshot }: WallSignificanceChartProps) 
               strokeWidth={hovered?.datum.id === datum.id ? 1.6 : 1}
               onMouseEnter={() => setHovered(getHoverState(datum, layout))}
               onMouseMove={() => setHovered(getHoverState(datum, layout))}
+              onMouseLeave={() => setHovered(null)}
             >
               <title>
                 {`Strike ${formatStrike(datum.strike)}, OI ${formatOpenInterest(datum.openInterest)}, GEX ${formatMillions(datum.gammaExposureUsd)}`}
@@ -209,7 +210,7 @@ export function WallSignificanceChart({ snapshot }: WallSignificanceChartProps) 
         </text>
       </svg>
 
-      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[8.5px] text-[var(--terminal-muted)]">
+      <div className="mt-2 inline-grid grid-cols-[auto_auto] items-center gap-x-3 gap-y-1 self-start text-[8.5px] text-[var(--terminal-muted)]">
         <BubbleLegendItem color="var(--terminal-green-strong)" label="Positive GEX" />
         <BubbleLegendItem color="var(--terminal-red-strong)" label="Negative GEX" />
         <BubbleLegendItem color="var(--terminal-heading)" label="Size = |GEX|" />

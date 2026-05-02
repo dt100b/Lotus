@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { Columns2 } from 'lucide-react'
-import { GexProfileChart, type GexLevelMarker } from '@/components/terminal/GexProfileChart'
-import { RankingTable, type GexLevelSelection } from '@/components/terminal/RankingTable'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { ChevronDown, ChevronUp, Columns2, SlidersHorizontal } from 'lucide-react'
+import { GexProfileChart, type GexLevelMarker, type GexSnapshot } from '@/components/terminal/GexProfileChart'
+import { Panel } from '@/components/terminal/Panel'
+import { RankingTable, type RankingScope } from '@/components/terminal/RankingTable'
 import { SidePanels } from '@/components/terminal/SidePanels'
 import { TopBar } from '@/components/terminal/TopBar'
 import { Button } from '@/components/ui/button'
@@ -11,9 +12,12 @@ import { useTerminalSnapshot } from '@/hooks/useTerminalSnapshot'
 import { useTerminalStore, type DataWindowMode, type ExposureMode } from '@/store/terminalStore'
 import { getGexChartTitle, gexModeLabels, gexModes } from '@/components/terminal/gexModes'
 import { levelColors } from '@/data/levelColors'
+import type { RankingRow } from '@/data/mockTerminal'
 
 const defaultAutoDataWindowPct = 25
+const lowerChartMinHeight = 292
 type ChartPanelId = 'chart-1' | 'chart-2'
+type LowerPanelView = 'table' | 'chart'
 
 type ChartContextMenuState = {
   chartId: ChartPanelId
@@ -41,18 +45,32 @@ export function TerminalDashboard() {
   const setZeroDteDataWindowPct = useTerminalStore((state) => state.setZeroDteDataWindowPct)
   const [chartContextMenu, setChartContextMenu] = useState<ChartContextMenuState | null>(null)
   const [maximizedChart, setMaximizedChart] = useState<ChartPanelId | null>(null)
-  const [selectedLevel, setSelectedLevel] = useState<GexLevelSelection | null>(null)
   const [rankingsCollapsed, setRankingsCollapsed] = useState(false)
+  const [allExpiryLowerView, setAllExpiryLowerView] = useState<LowerPanelView>('table')
+  const [zeroDteLowerView, setZeroDteLowerView] = useState<LowerPanelView>('table')
   const zeroDteExpiry: GexExpiry = getOpexExpiries()[0] ?? 'ALL'
+  const [chartTwoExpiry, setChartTwoExpiry] = useState<GexExpiry>(zeroDteExpiry)
+  const [allExpiryLowerExpiry, setAllExpiryLowerExpiry] = useState<GexExpiry>('ALL')
+  const [zeroDteLowerExpiry, setZeroDteLowerExpiry] = useState<GexExpiry>(zeroDteExpiry)
+  const [allExpiryLowerMode, setAllExpiryLowerMode] = useState<ExposureMode>('abs')
+  const [zeroDteLowerMode, setZeroDteLowerMode] = useState<ExposureMode>('profile')
+  const [allExpiryLowerDataWindowMode, setAllExpiryLowerDataWindowMode] = useState<DataWindowMode>('percent')
+  const [allExpiryLowerDataWindowPct, setAllExpiryLowerDataWindowPct] = useState(defaultAutoDataWindowPct)
+  const [zeroDteLowerDataWindowMode, setZeroDteLowerDataWindowMode] = useState<DataWindowMode>('percent')
+  const [zeroDteLowerDataWindowPct, setZeroDteLowerDataWindowPct] = useState(defaultAutoDataWindowPct)
   const expiryOptions = useMemo<Array<{ value: GexExpiry; label: string }>>(() => [
     { value: 'ALL', label: 'All Expiries' },
     ...getOpexExpiries().map((listedExpiry) => ({ value: listedExpiry, label: listedExpiry })),
   ], [])
   const { data: snapshot } = useTerminalSnapshot(expiry)
   const { data: allExpirySnapshot } = useTerminalSnapshot('ALL')
-  const { data: zeroDteSnapshot } = useTerminalSnapshot(zeroDteExpiry)
+  const { data: chartTwoSnapshot } = useTerminalSnapshot(chartTwoExpiry)
+  const { data: allExpiryLowerSnapshot } = useTerminalSnapshot(allExpiryLowerExpiry)
+  const { data: zeroDteLowerSnapshot } = useTerminalSnapshot(zeroDteLowerExpiry)
   const chartWindow = dataWindowMode === 'full' ? defaultAutoDataWindowPct : dataWindowPct
   const zeroDteChartWindow = zeroDteDataWindowMode === 'full' ? defaultAutoDataWindowPct : zeroDteDataWindowPct
+  const allExpiryLowerChartWindow = allExpiryLowerDataWindowMode === 'full' ? defaultAutoDataWindowPct : allExpiryLowerDataWindowPct
+  const zeroDteLowerChartWindow = zeroDteLowerDataWindowMode === 'full' ? defaultAutoDataWindowPct : zeroDteLowerDataWindowPct
   const chartLevelMarkers = useMemo<GexLevelMarker[]>(() => {
     if (!snapshot) {
       return []
@@ -165,18 +183,13 @@ export function TerminalDashboard() {
         return
       }
 
-      if (selectedLevel) {
-        setSelectedLevel(null)
-        return
-      }
-
       setMaximizedChart(null)
     }
 
     window.addEventListener('keydown', handleKeyDown)
 
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [chartContextMenu, selectedLevel])
+  }, [chartContextMenu])
 
   useEffect(() => {
     if (!chartContextMenu) {
@@ -193,7 +206,7 @@ export function TerminalDashboard() {
     return null
   }
 
-  const showSplitChart = splitChartEnabled && Boolean(zeroDteSnapshot)
+  const showSplitChart = splitChartEnabled && Boolean(chartTwoSnapshot)
   const dashboardRowsClassName = rankingsCollapsed
     ? 'grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_44px] gap-2'
     : 'grid h-full min-h-0 min-w-0 grid-rows-[516px_minmax(292px,1fr)] gap-2'
@@ -201,11 +214,6 @@ export function TerminalDashboard() {
   const rankingsGridClassName = rankingsCollapsed
     ? 'grid h-[44px] min-h-0 gap-2 xl:grid-cols-2'
     : 'grid min-h-0 gap-2 xl:grid-cols-2'
-  const handleRankingRowSelect = (selection: GexLevelSelection) => {
-    setSelectedLevel((currentSelection) => (
-      currentSelection?.key === selection.key ? null : selection
-    ))
-  }
   const handleChartContextMenu = (event: ReactMouseEvent<HTMLElement>, chartId: ChartPanelId) => {
     event.preventDefault()
     setChartContextMenu({
@@ -214,12 +222,23 @@ export function TerminalDashboard() {
       y: Math.max(8, Math.min(event.clientY, window.innerHeight - 42)),
     })
   }
+  const handleSplitChartEnabledChange = (enabled: boolean) => {
+    if (enabled) {
+      setChartTwoExpiry(zeroDteExpiry)
+      setZeroDteExposureMode(exposureMode)
+      setZeroDteDataWindowMode(dataWindowMode)
+      setZeroDteDataWindowPct(dataWindowPct)
+    }
+
+    setSplitChartEnabled(enabled)
+  }
   const renderChartOne = () => (
     <GexProfileChart
       snapshot={snapshot}
       mode={exposureMode}
       dataWindowPct={chartWindow}
       levelMarkers={chartLevelMarkers}
+      titleOverride={getGammaChartTitle(exposureMode, expiry, zeroDteExpiry)}
       titleAccessory={(
         <ChartControls
           expiry={expiry}
@@ -230,25 +249,28 @@ export function TerminalDashboard() {
           splitChartEnabled={splitChartEnabled}
           onExpiryChange={setExpiry}
           onModeChange={setExposureMode}
-          onSplitChartEnabledChange={setSplitChartEnabled}
+          onSplitChartEnabledChange={handleSplitChartEnabledChange}
           onDataWindowModeChange={setDataWindowMode}
           onDataWindowPctChange={setDataWindowPct}
         />
       )}
     />
   )
-  const renderChartTwo = () => zeroDteSnapshot ? (
+  const renderChartTwo = () => chartTwoSnapshot ? (
     <GexProfileChart
-      snapshot={zeroDteSnapshot}
+      snapshot={chartTwoSnapshot}
       mode={zeroDteExposureMode}
       dataWindowPct={zeroDteChartWindow}
-      levelMarkers={zeroDteChartLevelMarkers}
-      titleOverride={`0DTE ${getGexChartTitle(zeroDteExposureMode)}`}
+      levelMarkers={chartTwoExpiry === zeroDteExpiry ? zeroDteChartLevelMarkers : chartLevelMarkers}
+      titleOverride={getGammaChartTitle(zeroDteExposureMode, chartTwoExpiry, zeroDteExpiry)}
       titleAccessory={(
         <ChartControls
+          expiry={chartTwoExpiry}
+          expiryOptions={expiryOptions}
           mode={zeroDteExposureMode}
           dataWindowMode={zeroDteDataWindowMode}
           dataWindowPct={zeroDteDataWindowPct}
+          onExpiryChange={setChartTwoExpiry}
           onModeChange={setZeroDteExposureMode}
           onDataWindowModeChange={setZeroDteDataWindowMode}
           onDataWindowPctChange={setZeroDteDataWindowPct}
@@ -256,6 +278,54 @@ export function TerminalDashboard() {
       )}
     />
   ) : null
+  const renderAllExpiryLowerPanel = () => (
+    <LowerGammaPanel
+      title="All-Expiry GEX Top 10 By Gamma Exposure"
+      chartTitle={getGammaChartTitle(allExpiryLowerMode, allExpiryLowerExpiry, zeroDteExpiry)}
+      scope="allExpiry"
+      rows={snapshot.rankings.allExpiry}
+      view={allExpiryLowerView}
+      expiry={allExpiryLowerExpiry}
+      expiryOptions={expiryOptions}
+      mode={allExpiryLowerMode}
+      snapshot={allExpiryLowerSnapshot ?? snapshot}
+      dataWindowMode={allExpiryLowerDataWindowMode}
+      dataWindowPct={allExpiryLowerDataWindowPct}
+      chartWindowPct={allExpiryLowerChartWindow}
+      levelMarkers={allExpiryLowerExpiry === zeroDteExpiry ? zeroDteChartLevelMarkers : chartLevelMarkers}
+      collapsed={rankingsCollapsed}
+      onViewChange={setAllExpiryLowerView}
+      onExpiryChange={setAllExpiryLowerExpiry}
+      onModeChange={setAllExpiryLowerMode}
+      onDataWindowModeChange={setAllExpiryLowerDataWindowMode}
+      onDataWindowPctChange={setAllExpiryLowerDataWindowPct}
+      onCollapsedChange={setRankingsCollapsed}
+    />
+  )
+  const renderZeroDteLowerPanel = () => (
+    <LowerGammaPanel
+      title="0DTE GEX Top 10 By Gamma Exposure"
+      chartTitle={getGammaChartTitle(zeroDteLowerMode, zeroDteLowerExpiry, zeroDteExpiry)}
+      scope="zeroDte"
+      rows={snapshot.rankings.zeroDte}
+      view={zeroDteLowerView}
+      expiry={zeroDteLowerExpiry}
+      expiryOptions={expiryOptions}
+      mode={zeroDteLowerMode}
+      snapshot={zeroDteLowerSnapshot ?? snapshot}
+      dataWindowMode={zeroDteLowerDataWindowMode}
+      dataWindowPct={zeroDteLowerDataWindowPct}
+      chartWindowPct={zeroDteLowerChartWindow}
+      levelMarkers={zeroDteLowerExpiry === zeroDteExpiry ? zeroDteChartLevelMarkers : chartLevelMarkers}
+      collapsed={rankingsCollapsed}
+      onViewChange={setZeroDteLowerView}
+      onExpiryChange={setZeroDteLowerExpiry}
+      onModeChange={setZeroDteLowerMode}
+      onDataWindowModeChange={setZeroDteLowerDataWindowMode}
+      onDataWindowPctChange={setZeroDteLowerDataWindowPct}
+      onCollapsedChange={setRankingsCollapsed}
+    />
+  )
 
   return (
     <div className="mx-auto flex h-screen w-full flex-col overflow-hidden bg-[var(--terminal-bg)]">
@@ -269,7 +339,7 @@ export function TerminalDashboard() {
             >
               {renderChartOne()}
             </section>
-            {showSplitChart && zeroDteSnapshot ? (
+            {showSplitChart && chartTwoSnapshot ? (
               <section
                 className={`terminal-frame ${chartDeckSizeClassName} min-w-0`}
                 onContextMenu={(event) => handleChartContextMenu(event, 'chart-2')}
@@ -279,32 +349,13 @@ export function TerminalDashboard() {
             ) : null}
           </div>
           <div className={rankingsGridClassName}>
-            <RankingTable
-              title="All-Expiry GEX Top 10 By Gamma Exposure"
-              scope="allExpiry"
-              rows={snapshot.rankings.allExpiry}
-              collapsed={rankingsCollapsed}
-              selectedKey={selectedLevel?.key}
-              onCollapsedChange={setRankingsCollapsed}
-              onRowSelect={handleRankingRowSelect}
-            />
-            <RankingTable
-              title="0DTE GEX Top 10 By Gamma Exposure"
-              scope="zeroDte"
-              rows={snapshot.rankings.zeroDte}
-              collapsed={rankingsCollapsed}
-              selectedKey={selectedLevel?.key}
-              onCollapsedChange={setRankingsCollapsed}
-              onRowSelect={handleRankingRowSelect}
-            />
+            {renderAllExpiryLowerPanel()}
+            {renderZeroDteLowerPanel()}
           </div>
         </div>
         <SidePanels
           snapshot={snapshot}
           allExpirySnapshot={allExpirySnapshot ?? snapshot}
-          zeroDteSnapshot={zeroDteSnapshot ?? undefined}
-          selectedLevel={selectedLevel}
-          onCloseLevelInspector={() => setSelectedLevel(null)}
         />
       </div>
       {maximizedChart ? (
@@ -336,6 +387,202 @@ export function TerminalDashboard() {
   )
 }
 
+function LowerGammaPanel({
+  title,
+  chartTitle,
+  scope,
+  rows,
+  view,
+  expiry,
+  expiryOptions,
+  mode,
+  snapshot,
+  dataWindowMode,
+  dataWindowPct,
+  chartWindowPct,
+  levelMarkers,
+  collapsed,
+  onViewChange,
+  onExpiryChange,
+  onModeChange,
+  onDataWindowModeChange,
+  onDataWindowPctChange,
+  onCollapsedChange,
+}: {
+  title: string
+  chartTitle: string
+  scope: RankingScope
+  rows: RankingRow[]
+  view: LowerPanelView
+  expiry: GexExpiry
+  expiryOptions: Array<{ value: GexExpiry; label: string }>
+  mode: ExposureMode
+  snapshot: GexSnapshot
+  dataWindowMode: DataWindowMode
+  dataWindowPct: number
+  chartWindowPct: number | 'full'
+  levelMarkers: GexLevelMarker[]
+  collapsed: boolean
+  onViewChange: (view: LowerPanelView) => void
+  onExpiryChange: (expiry: GexExpiry) => void
+  onModeChange: (mode: ExposureMode) => void
+  onDataWindowModeChange: (mode: DataWindowMode) => void
+  onDataWindowPctChange: (pct: number) => void
+  onCollapsedChange: (collapsed: boolean) => void
+}) {
+  const accessory = (
+    <LowerPanelControls
+      view={view}
+      expiry={expiry}
+      expiryOptions={expiryOptions}
+      mode={mode}
+      dataWindowMode={dataWindowMode}
+      dataWindowPct={dataWindowPct}
+      collapsed={collapsed}
+      onViewChange={onViewChange}
+      onExpiryChange={onExpiryChange}
+      onModeChange={onModeChange}
+      onDataWindowModeChange={onDataWindowModeChange}
+      onDataWindowPctChange={onDataWindowPctChange}
+      onCollapsedChange={onCollapsedChange}
+    />
+  )
+
+  if (collapsed) {
+    return (
+      <Panel
+        title={view === 'chart' ? chartTitle : title}
+        titleAccessory={accessory}
+        className="flex h-full min-h-0 flex-col justify-center py-2"
+      >
+        {null}
+      </Panel>
+    )
+  }
+
+  if (view === 'table') {
+    return (
+      <RankingTable
+        title={title}
+        scope={scope}
+        rows={rows}
+        collapsed={collapsed}
+        titleAccessory={accessory}
+      />
+    )
+  }
+
+  return (
+    <section className="terminal-frame h-full min-h-[292px] min-w-0">
+      <GexProfileChart
+        snapshot={snapshot}
+        mode={mode}
+        dataWindowPct={chartWindowPct}
+        levelMarkers={levelMarkers}
+        titleOverride={chartTitle}
+        titleAccessory={accessory}
+        minHeight={lowerChartMinHeight}
+      />
+    </section>
+  )
+}
+
+function LowerPanelControls({
+  view,
+  expiry,
+  expiryOptions,
+  mode,
+  dataWindowMode,
+  dataWindowPct,
+  collapsed,
+  onViewChange,
+  onExpiryChange,
+  onModeChange,
+  onDataWindowModeChange,
+  onDataWindowPctChange,
+  onCollapsedChange,
+}: {
+  view: LowerPanelView
+  expiry: GexExpiry
+  expiryOptions: Array<{ value: GexExpiry; label: string }>
+  mode: ExposureMode
+  dataWindowMode: DataWindowMode
+  dataWindowPct: number
+  collapsed: boolean
+  onViewChange: (view: LowerPanelView) => void
+  onExpiryChange: (expiry: GexExpiry) => void
+  onModeChange: (mode: ExposureMode) => void
+  onDataWindowModeChange: (mode: DataWindowMode) => void
+  onDataWindowPctChange: (pct: number) => void
+  onCollapsedChange: (collapsed: boolean) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-1">
+      <LowerPanelViewSelect view={view} onViewChange={onViewChange} />
+      {view === 'chart' ? (
+        <>
+          <ExpirySelect
+            expiry={expiry}
+            expiryOptions={expiryOptions}
+            onExpiryChange={onExpiryChange}
+          />
+          <DataWindowControl
+            dataWindowMode={dataWindowMode}
+            dataWindowPct={dataWindowPct}
+            onDataWindowModeChange={onDataWindowModeChange}
+            onDataWindowPctChange={onDataWindowPctChange}
+          />
+          <ChartModeSelect mode={mode} onModeChange={onModeChange} />
+        </>
+      ) : null}
+      <Button
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? 'Expand lower panels' : 'Collapse lower panels'}
+        title={collapsed ? 'Expand lower panels' : 'Collapse lower panels'}
+        variant={collapsed ? 'active' : 'default'}
+        size="icon"
+        className="h-[20px] w-[20px] px-0"
+        onClick={() => onCollapsedChange(!collapsed)}
+      >
+        {collapsed ? <ChevronDown className="h-[12px] w-[12px]" /> : <ChevronUp className="h-[12px] w-[12px]" />}
+      </Button>
+    </div>
+  )
+}
+
+function LowerPanelViewSelect({
+  view,
+  onViewChange,
+}: {
+  view: LowerPanelView
+  onViewChange: (view: LowerPanelView) => void
+}) {
+  return (
+    <Select value={view} onValueChange={(value) => onViewChange(value as LowerPanelView)}>
+      <SelectTrigger
+        aria-label="Lower panel display"
+        className="h-[20px] min-w-[76px] gap-1 px-2 text-[8.5px] leading-none tracking-[0.07em] [&>span]:text-[8.5px] [&>span]:leading-none [&_svg]:h-2.5 [&_svg]:w-2.5"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="min-w-[92px]">
+        <SelectItem
+          value="table"
+          className="py-1.5 pl-5 pr-2 text-[8.5px] leading-none tracking-[0.07em] [&_svg]:h-3 [&_svg]:w-3"
+        >
+          Table
+        </SelectItem>
+        <SelectItem
+          value="chart"
+          className="py-1.5 pl-5 pr-2 text-[8.5px] leading-none tracking-[0.07em] [&_svg]:h-3 [&_svg]:w-3"
+        >
+          Chart
+        </SelectItem>
+      </SelectContent>
+    </Select>
+  )
+}
+
 function ChartContextMenu({
   menu,
   isMaximized,
@@ -364,6 +611,12 @@ function ChartContextMenu({
       </button>
     </div>
   )
+}
+
+function getGammaChartTitle(mode: ExposureMode, expiry: GexExpiry, zeroDteExpiry: GexExpiry) {
+  const title = getGexChartTitle(mode)
+
+  return expiry === zeroDteExpiry ? `0DTE ${title}` : title
 }
 
 function ChartControls({
@@ -451,7 +704,7 @@ function ExpirySelect({
   return (
     <Select value={expiry} onValueChange={(value) => onExpiryChange(value as GexExpiry)}>
       <SelectTrigger
-        aria-label="Chart 1 expiry"
+        aria-label="Chart expiry"
         className="h-[20px] min-w-[116px] max-w-[124px] gap-1 px-2 text-[8.5px] leading-none tracking-[0.07em] [&>span]:truncate [&>span]:text-[8.5px] [&>span]:leading-none [&_svg]:h-2.5 [&_svg]:w-2.5"
       >
         <SelectValue />
@@ -512,46 +765,87 @@ function DataWindowControl({
   onDataWindowModeChange: (mode: DataWindowMode) => void
   onDataWindowPctChange: (pct: number) => void
 }) {
-  const [filterInput, setFilterInput] = useState(() => formatFilterInput(dataWindowMode, dataWindowPct))
-  const [isFilterFocused, setIsFilterFocused] = useState(false)
-  const displayedFilterInput = isFilterFocused ? filterInput : formatFilterInput(dataWindowMode, dataWindowPct)
+  const [isOpen, setIsOpen] = useState(false)
+  const controlRef = useRef<HTMLDivElement>(null)
+  const sliderPct = dataWindowMode === 'full' ? defaultAutoDataWindowPct : dataWindowPct
+  const buttonLabel = `${formatPercentInput(sliderPct)}%`
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (controlRef.current?.contains(event.target as Node)) {
+        return
+      }
+
+      setIsOpen(false)
+    }
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    document.addEventListener('keydown', closeOnEscape)
+
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [isOpen])
+
+  const handleSliderChange = (value: string) => {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) {
+      return
+    }
+
+    onDataWindowModeChange('percent')
+    onDataWindowPctChange(parsed)
+  }
 
   return (
-    <div className="flex h-[20px] min-w-[72px] items-center justify-center gap-1 rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-1.5 text-[8.5px] font-semibold text-[var(--terminal-text)] shadow-[var(--terminal-control-inset)] transition-colors hover:border-[var(--terminal-border-strong)]">
-      <span className="text-[var(--terminal-heading)]">± %</span>
-      <input
-        aria-label="Chart data window filter percent"
-        className="h-[15px] w-[30px] rounded-[1px] border border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-1 text-center text-[8.5px] leading-[15px] text-[var(--terminal-heading)] outline-none focus:border-[var(--terminal-border-strong)]"
-        type="text"
-        value={displayedFilterInput}
-        onFocus={() => {
-          setIsFilterFocused(true)
-          setFilterInput(displayedFilterInput)
-        }}
-        onChange={(event) => {
-          const nextValue = event.currentTarget.value
-          setFilterInput(nextValue)
-
-          const parsed = parseFilterInput(nextValue)
-          if (parsed === 'full') {
-            onDataWindowModeChange('full')
-          } else if (typeof parsed === 'number') {
-            onDataWindowModeChange('percent')
-            onDataWindowPctChange(parsed)
-          }
-        }}
-        onBlur={() => {
-          setIsFilterFocused(false)
-          const parsed = parseFilterInput(filterInput)
-          if (parsed === 'full' || parsed === null) {
-            onDataWindowModeChange('full')
-            setFilterInput('any')
-            return
-          }
-
-          setFilterInput(formatPercentInput(parsed))
-        }}
-      />
+    <div ref={controlRef} className="relative flex h-[20px] items-center">
+      <Button
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label="Adjust chart data window"
+        title="Adjust chart data window"
+        variant="default"
+        size="compact"
+        className="h-[20px] w-[58px] gap-0.5 px-1 text-[7.5px] leading-none tracking-[0.035em]"
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <SlidersHorizontal className="h-2 w-2 shrink-0" />
+        <span className="translate-y-px text-[7.5px] text-[var(--terminal-heading)]">±</span>
+        <span className="terminal-value translate-y-px text-center text-[7.5px] text-[var(--terminal-heading)]">{buttonLabel}</span>
+      </Button>
+      {isOpen ? (
+        <div
+          className="absolute left-1/2 top-[calc(100%+5px)] z-40 w-[132px] -translate-x-1/2 rounded-[var(--terminal-radius-sm)] border border-[var(--terminal-border)] bg-[var(--terminal-surface)] px-2 py-1.5 shadow-xl"
+          role="dialog"
+          aria-label="Chart data window"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="mb-1 flex items-center justify-center">
+            <span className="terminal-value text-[9px] font-semibold leading-none text-[var(--terminal-heading)]">±{formatPercentInput(sliderPct)}%</span>
+          </div>
+          <input
+            aria-label="Chart data window percentage"
+            className="terminal-window-slider"
+            type="range"
+            min={1}
+            max={100}
+            step={1}
+            value={sliderPct}
+            onChange={(event) => handleSliderChange(event.currentTarget.value)}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -570,20 +864,6 @@ function parseExpectedMoveRange(value: string) {
   }
 }
 
-function formatFilterInput(dataWindowMode: DataWindowMode, dataWindowPct: number) {
-  return dataWindowMode === 'full' ? 'any' : formatPercentInput(dataWindowPct)
-}
-
 function formatPercentInput(value: number) {
   return Number.isInteger(value) ? String(value) : String(value)
-}
-
-function parseFilterInput(value: string): number | 'full' | null {
-  const normalized = value.trim().toLowerCase()
-  if (normalized === '' || normalized === 'any') return 'full'
-
-  const numericValue = Number(normalized.replace(/[+±%\s]/g, ''))
-  if (!Number.isFinite(numericValue)) return null
-
-  return Math.min(100, Math.max(1, Math.abs(numericValue)))
 }
