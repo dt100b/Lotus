@@ -8,6 +8,10 @@ from collector.config import Settings
 from collector.deribit_client import DeribitPublicClient
 from ledger.raw_store import RawStore
 
+# Synthetic resume token for hosts (history.deribit.com) that return has_more
+# without a native continuation cursor. Format: "ts:<next_start_timestamp_ms>".
+_TS_ADVANCE_PREFIX = "ts:"
+
 
 def parse_iso_to_ms(value: str) -> int:
     normalized = value.strip().replace("Z", "+00:00")
@@ -36,25 +40,52 @@ class Phase1SyncService:
         client: DeribitPublicClient,
         store: RawStore,
         settings: Settings,
+        history_client: DeribitPublicClient | None = None,
     ) -> None:
         self.client = client
+        self.history_client = history_client
         self.store = store
         self.settings = settings
 
+    @property
+    def trade_client(self) -> DeribitPublicClient:
+        """Client used for trade backfill and remote trade validation."""
+        return self.history_client or self.client
+
+    @property
+    def trade_page_size(self) -> int:
+        if self.history_client is not None:
+            return self.settings.history_page_size
+        return self.settings.page_size
+
     def sync_instruments(self) -> int:
+        """
+        Sync instrument metadata for normalization.
+
+        The main Deribit host only retains a short window of *expired* options.
+        For YTD/full-history trade backfills, also pull expired (and active)
+        catalogs from the history host when a history_client is configured.
+        """
         merged: dict[str, dict[str, Any]] = {}
 
-        for kind in self.INSTRUMENT_KINDS:
-            for expired in (False, True):
-                instruments = self.client.get_instruments(
-                    currency="BTC",
-                    kind=kind,
-                    expired=expired,
-                )
-                for item in instruments:
-                    instrument_name = item.get("instrument_name")
-                    if instrument_name:
-                        merged[str(instrument_name)] = item
+        sources: list[DeribitPublicClient] = [self.client]
+        if self.history_client is not None:
+            sources.append(self.history_client)
+
+        for source in sources:
+            for kind in self.INSTRUMENT_KINDS:
+                for expired in (False, True):
+                    instruments = source.get_instruments(
+                        currency="BTC",
+                        kind=kind,
+                        expired=expired,
+                    )
+                    for item in instruments:
+                        instrument_name = item.get("instrument_name")
+                        if instrument_name:
+                            # Prefer later sources' payloads for the same name;
+                            # history expired catalog is the deep source of truth.
+                            merged[str(instrument_name)] = item
 
         return self.store.upsert_instruments(merged.values())
 
@@ -71,6 +102,8 @@ class Phase1SyncService:
             "chunks_completed": 0,
             "pages_fetched": 0,
             "trade_rows_inserted": 0,
+            "trade_host": self.trade_client.base_url,
+            "trade_page_size": self.trade_page_size,
         }
 
         self.store.upsert_backfill_job(
@@ -104,18 +137,13 @@ class Phase1SyncService:
                 fetched_rows = 0 if cursor is None else int(cursor["fetched_rows"])
 
                 while True:
-                    result = self.client.get_last_trades_by_currency_and_time(
-                        currency="BTC",
-                        kind=trade_kind,
-                        start_timestamp=chunk_start_ms,
-                        end_timestamp=chunk_end_ms,
-                        count=self.settings.page_size,
-                        sorting="asc",
+                    trades, has_more, next_continuation = self._fetch_trade_page(
+                        trade_kind=trade_kind,
+                        chunk_start_ms=chunk_start_ms,
+                        chunk_end_ms=chunk_end_ms,
                         continuation=continuation,
-                        include_old=True,
                     )
 
-                    trades = result.get("trades", [])
                     inserted = self.store.insert_trades(trades, source_run_id=run_id)
 
                     page_count += 1
@@ -123,16 +151,13 @@ class Phase1SyncService:
                     summary["pages_fetched"] += 1
                     summary["trade_rows_inserted"] += inserted
 
-                    next_continuation = result.get("continuation")
-                    has_more = bool(result.get("has_more", False))
-
-                    if has_more and not next_continuation:
-                        raise RuntimeError(
-                            f"Deribit returned has_more=True without continuation "
-                            f"for chunk=[{chunk_start_ms},{chunk_end_ms}] kind={trade_kind}"
-                        )
-
                     if has_more:
+                        if not next_continuation:
+                            raise RuntimeError(
+                                f"Trade host returned has_more=True without a resume cursor "
+                                f"for chunk=[{chunk_start_ms},{chunk_end_ms}] kind={trade_kind} "
+                                f"host={self.trade_client.base_url}"
+                            )
                         self.store.upsert_backfill_cursor(
                             job_name=job_name,
                             chunk_start_ms=chunk_start_ms,
@@ -212,6 +237,69 @@ class Phase1SyncService:
 
         return rows
 
+    def _fetch_trade_page(
+        self,
+        *,
+        trade_kind: str,
+        chunk_start_ms: int,
+        chunk_end_ms: int,
+        continuation: str | None,
+    ) -> tuple[list[dict[str, Any]], bool, str | None]:
+        """
+        Fetch one page of trades.
+
+        Supports:
+        - Native Deribit `continuation` tokens (main API).
+        - Synthetic `ts:<ms>` resume tokens for history.deribit.com, which returns
+          has_more without a continuation field. Advance by last_timestamp + 1.
+        """
+        native_continuation: str | None = None
+        effective_start = chunk_start_ms
+
+        if continuation is not None:
+            cont = str(continuation)
+            if cont.startswith(_TS_ADVANCE_PREFIX):
+                effective_start = int(cont[len(_TS_ADVANCE_PREFIX) :])
+            else:
+                native_continuation = cont
+
+        if effective_start > chunk_end_ms:
+            return [], False, None
+
+        result = self.trade_client.get_last_trades_by_currency_and_time(
+            currency="BTC",
+            kind=trade_kind,
+            start_timestamp=effective_start,
+            end_timestamp=chunk_end_ms,
+            count=self.trade_page_size,
+            sorting="asc",
+            continuation=native_continuation,
+            include_old=True,
+        )
+
+        trades = list(result.get("trades") or [])
+        has_more = bool(result.get("has_more", False))
+        next_continuation = result.get("continuation")
+
+        if has_more and next_continuation:
+            return trades, True, str(next_continuation)
+
+        if has_more:
+            # History host: no native continuation — advance by timestamp.
+            if not trades:
+                return trades, False, None
+            next_start = int(trades[-1]["timestamp"]) + 1
+            if next_start > chunk_end_ms:
+                return trades, False, None
+            # Guard against a no-progress loop if timestamps never advance.
+            if next_start <= effective_start:
+                next_start = effective_start + 1
+                if next_start > chunk_end_ms:
+                    return trades, False, None
+            return trades, True, f"{_TS_ADVANCE_PREFIX}{next_start}"
+
+        return trades, False, None
+
     def _collect_trade_keys(self, start_ms: int, end_ms: int) -> set[tuple[str, str]]:
         keys: set[tuple[str, str]] = set()
 
@@ -219,32 +307,27 @@ class Phase1SyncService:
             continuation: str | None = None
 
             while True:
-                result = self.client.get_last_trades_by_currency_and_time(
-                    currency="BTC",
-                    kind=trade_kind,
-                    start_timestamp=start_ms,
-                    end_timestamp=end_ms,
-                    count=self.settings.page_size,
-                    sorting="asc",
+                trades, has_more, next_continuation = self._fetch_trade_page(
+                    trade_kind=trade_kind,
+                    chunk_start_ms=start_ms,
+                    chunk_end_ms=end_ms,
                     continuation=continuation,
-                    include_old=True,
                 )
 
-                trades = result.get("trades", [])
                 keys |= {
                     (str(trade["instrument_name"]), str(trade["trade_id"]))
                     for trade in trades
                     if "instrument_name" in trade and "trade_id" in trade
                 }
 
-                if not bool(result.get("has_more", False)):
+                if not has_more:
                     break
 
-                next_continuation = result.get("continuation")
                 if not next_continuation:
                     raise RuntimeError(
-                        f"Deribit returned has_more=True without continuation "
-                        f"for validation window=[{start_ms},{end_ms}] kind={trade_kind}"
+                        f"Trade host returned has_more=True without a resume cursor "
+                        f"for validation window=[{start_ms},{end_ms}] kind={trade_kind} "
+                        f"host={self.trade_client.base_url}"
                     )
                 continuation = str(next_continuation)
 

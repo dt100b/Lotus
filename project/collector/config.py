@@ -32,10 +32,19 @@ def _env_csv_ints(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
 @dataclass(frozen=True)
 class Settings:
     deribit_base_url: str = os.getenv("DERIBIT_BASE_URL", "https://www.deribit.com/api/v2")
+    # Deep public trade history (older than ~24h). Live/hot store stays on deribit_base_url.
+    deribit_history_base_url: str = os.getenv(
+        "DERIBIT_HISTORY_BASE_URL",
+        "https://history.deribit.com/api/v2",
+    )
     db_path: Path = Path(os.getenv("PHASE1_DB_PATH", "project/data/phase1.sqlite3"))
     request_timeout_s: float = _env_float("DERIBIT_TIMEOUT_S", 20.0)
 
     page_size: int = _env_int("DERIBIT_PAGE_SIZE", 1000)
+    # History host accepts larger pages (probed up to 10000).
+    history_page_size: int = _env_int("DERIBIT_HISTORY_PAGE_SIZE", 10000)
+    # When true, historical backfill scripts route trades through the history host.
+    use_history_for_backfill: bool = _env_bool("DERIBIT_USE_HISTORY_FOR_BACKFILL", True)
     max_retries: int = _env_int("PHASE1_MAX_RETRIES", 4)
     retry_backoff_s: float = _env_float("PHASE1_RETRY_BACKOFF_S", 1.5)
 

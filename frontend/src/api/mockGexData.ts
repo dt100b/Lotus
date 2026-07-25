@@ -30,7 +30,12 @@ export type MockGexSnapshot = {
   totalPutGexUsd: number
   maxPositiveGammaStrike: number
   maxNegativeGammaStrike: number
-  zeroGamma: number
+  /** Gamma Flip level, or null when no mass-valid cumulative zero-cross. */
+  zeroGamma: number | null
+  gammaFlip: number | null
+  gammaFlipStatus: 'ok' | 'no_cross'
+  /** Locked empty-state copy when status is no_cross. */
+  gammaFlipNote: string | null
 }
 
 type ExpiryProfile = {
@@ -153,11 +158,13 @@ function buildExpiryProfile(expiry: OpexExpiry): ExpiryProfile {
 }
 
 function buildStrike(strike: number, profile: ExpiryProfile): MockGexStrike {
+  // Mock clusters remain call-positive / put-negative for readable walls, but do not
+  // clamp signs — dealer inventory can produce either sign on either leg.
   const callCluster = sum(profile.callClusters.map((cluster) => gaussian(strike, cluster.strike, cluster.width) * cluster.value))
   const putCluster = -sum(profile.putClusters.map((cluster) => gaussian(strike, cluster.strike, cluster.width) * cluster.value))
   const localTexture = deterministicTexture(strike) * profile.textureScale
-  const callGexUsd = roundUsd(Math.max(0, callCluster + Math.max(localTexture, 0)))
-  const putGexUsd = roundUsd(Math.min(0, putCluster + Math.min(localTexture, 0)))
+  const callGexUsd = roundUsd(callCluster + localTexture * 0.35)
+  const putGexUsd = roundUsd(putCluster + localTexture * -0.35)
   const netGexUsd = roundUsd(callGexUsd + putGexUsd)
 
   return toStrikeRow(strike, callGexUsd, putGexUsd, netGexUsd)
@@ -199,7 +206,15 @@ function summarizeSnapshot(expiry: GexExpiry, gammaBars: MockGexStrike[]): MockG
     totalPutGexUsd,
     maxPositiveGammaStrike: maxPositive.strike,
     maxNegativeGammaStrike: maxNegative.strike,
-    zeroGamma: estimateZeroGamma(gammaBars),
+    ...(() => {
+      const flip = estimateGammaFlip(gammaBars, spot)
+      return {
+        zeroGamma: flip.level,
+        gammaFlip: flip.level,
+        gammaFlipStatus: flip.status,
+        gammaFlipNote: flip.note,
+      }
+    })(),
   }
 }
 
@@ -218,27 +233,120 @@ function addRange(strikes: Set<number>, start: number, end: number, step: number
   }
 }
 
-function estimateZeroGamma(rows: MockGexStrike[]) {
+/**
+ * Mass filter for Gamma Flip cumulative zero-crossings.
+ * Softened from 2.0% → 1.5% of Σ|net_gex| (parity with backend
+ * GAMMA_FLIP_MIN_MASS_FRACTION). Failed crosses are discarded — never
+ * resurrected as Flip via flattest |net_gex| fallback.
+ */
+const GAMMA_FLIP_MIN_MASS_FRACTION = 0.015 // 1.5%
+/**
+ * Near-spot eligibility window (parity with backend
+ * GAMMA_FLIP_MAX_DISTANCE_FRAC). Mass-valid crosses outside spot ± 15%
+ * yield no_cross — never publish a far wing zero as Flip.
+ * Separate from Regime profile corridor (display-only, spot ± 8%).
+ */
+const GAMMA_FLIP_MAX_DISTANCE_FRAC = 0.15 // ±15% of spot
+
+/** Locked empty-state copy (parity with backend GAMMA_FLIP_EMPTY_*). */
+const GAMMA_FLIP_EMPTY_NEUTRAL = 'No local flip · GEX one-sided'
+const GAMMA_FLIP_EMPTY_SHORT = 'No local flip · GEX one-sided (short)'
+const GAMMA_FLIP_EMPTY_LONG = 'No local flip · GEX one-sided (long)'
+/** Clean one-sided polarity threshold (parity with backend). */
+const GAMMA_FLIP_ONE_SIDED_MIN_FRAC = 0.05
+
+/**
+ * Cumulative net-GEX zero-cross nearest spot with meaningful mass,
+ * restricted to the spot ± 15% eligibility window.
+ * Mirrors backend `_estimate_gamma_flip` (shared Gamma Flip definition).
+ * Returns null level + no_cross when no mass-valid in-window cross exists.
+ */
+function estimateGammaFlip(
+  rows: MockGexStrike[],
+  spotPrice = spot,
+): { level: number | null; status: 'ok' | 'no_cross'; note: string | null } {
+  if (rows.length === 0) {
+    return { level: null, status: 'no_cross', note: GAMMA_FLIP_EMPTY_NEUTRAL }
+  }
+
   const sorted = [...rows].sort((a, b) => a.strike - b.strike)
+  const ref = spotPrice > 0 ? spotPrice : sorted[Math.floor(sorted.length / 2)]!.strike
+  const totalAbs = sorted.reduce((sum, row) => sum + Math.abs(row.netGexUsd), 0)
+  const minMass = Math.max(totalAbs * GAMMA_FLIP_MIN_MASS_FRACTION, 1e-12)
 
-  for (let index = 1; index < sorted.length; index += 1) {
-    const previous = sorted[index - 1]
-    const current = sorted[index]
+  type Crossing = { level: number; mass: number }
+  let crossings: Crossing[] = []
+  let previousStrike: number | null = null
+  let previousCumulative: number | null = null
+  let cumulative = 0
 
-    if (previous.netGexUsd === 0) {
-      return previous.strike
+  for (const row of sorted) {
+    const nextCumulative = cumulative + row.netGexUsd
+
+    if (previousCumulative !== null && previousStrike !== null) {
+      const prev = previousCumulative
+      const next = nextCumulative
+
+      if (prev === 0 && next === 0) {
+        // still at zero
+      } else if (next === 0 && prev !== 0) {
+        const mass = Math.abs(prev) + Math.abs(next)
+        if (mass >= minMass) crossings.push({ level: row.strike, mass })
+      } else if (prev !== 0 && next !== 0 && Math.sign(prev) !== Math.sign(next)) {
+        const mass = Math.abs(prev) + Math.abs(next)
+        if (mass >= minMass) {
+          const ratio = Math.abs(prev) / mass
+          crossings.push({
+            level: previousStrike + (row.strike - previousStrike) * ratio,
+            mass,
+          })
+        }
+      }
     }
 
-    if (Math.sign(previous.netGexUsd) !== Math.sign(current.netGexUsd)) {
-      const distance = current.strike - previous.strike
-      const interpolation = Math.abs(previous.netGexUsd) / (Math.abs(previous.netGexUsd) + Math.abs(current.netGexUsd))
-      return Math.round(previous.strike + distance * interpolation)
+    cumulative = nextCumulative
+    previousStrike = row.strike
+    previousCumulative = cumulative
+  }
+
+  // Near-spot eligibility: discard mass-valid crosses outside spot ± 15%.
+  if (ref > 0) {
+    const maxDist = ref * GAMMA_FLIP_MAX_DISTANCE_FRAC
+    crossings = crossings.filter((item) => Math.abs(item.level - ref) <= maxDist)
+  }
+
+  if (crossings.length === 0) {
+    return {
+      level: null,
+      status: 'no_cross',
+      note: formatGammaFlipEmptyNote(rows, ref),
     }
   }
 
-  return sorted.reduce((closest, row) => {
-    return Math.abs(row.netGexUsd) < Math.abs(closest.netGexUsd) ? row : closest
-  }).strike
+  crossings.sort((a, b) => {
+    const da = Math.abs(a.level - ref)
+    const db = Math.abs(b.level - ref)
+    if (da !== db) return da - db
+    return b.mass - a.mass
+  })
+  return { level: Math.round(crossings[0]!.level), status: 'ok', note: null }
+}
+
+/** One-sided polarity from local book in eligibility window (sign read only). */
+function formatGammaFlipEmptyNote(rows: MockGexStrike[], ref: number): string {
+  let windowRows = rows
+  if (ref > 0) {
+    const maxDist = ref * GAMMA_FLIP_MAX_DISTANCE_FRAC
+    const inWindow = rows.filter((row) => Math.abs(row.strike - ref) <= maxDist)
+    if (inWindow.length > 0) windowRows = inWindow
+  }
+  const net = windowRows.reduce((sum, row) => sum + row.netGexUsd, 0)
+  const abs = windowRows.reduce((sum, row) => sum + Math.abs(row.netGexUsd), 0)
+  if (!(abs > 0)) return GAMMA_FLIP_EMPTY_NEUTRAL
+  const score = net / abs
+  if (score <= -GAMMA_FLIP_ONE_SIDED_MIN_FRAC) return GAMMA_FLIP_EMPTY_SHORT
+  if (score >= GAMMA_FLIP_ONE_SIDED_MIN_FRAC) return GAMMA_FLIP_EMPTY_LONG
+  return GAMMA_FLIP_EMPTY_NEUTRAL
 }
 
 function gaussian(value: number, center: number, width: number) {

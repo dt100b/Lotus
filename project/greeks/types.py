@@ -24,6 +24,11 @@ class GreekSnapshot:
     gamma: float
     spot_price: float
     snapshot_ts: int
+    open_interest: float | None = None
+    mark_iv: float | None = None
+    # Deribit ticker greeks.delta when available (call > 0, put < 0). Optional for
+    # backward-compatible snapshots; skew falls back to BS |Δ| from mark_iv.
+    delta: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +41,8 @@ class GEXInstrumentRow:
     contract_multiplier: float
     gamma: float
     spot_price: float
+    open_interest: float | None
+    mark_iv: float | None
     position_gamma: float
     dollar_gamma_per_1pct: float
     snapshot_ts: int

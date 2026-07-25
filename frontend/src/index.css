@@ -33,8 +33,14 @@
   --terminal-yellow: #d0bc62;
   --terminal-body-gradient: linear-gradient(180deg, rgba(10, 12, 12, 0.98), rgba(5, 6, 6, 1) 30rem);
   --terminal-body-scanline: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.008) 0 1px, transparent 1px 4px);
-  --terminal-panel-gradient: linear-gradient(180deg, rgba(15, 18, 18, 0.94), rgba(8, 10, 10, 0.98));
-  --terminal-panel-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), inset 0 -12px 30px rgba(0, 0, 0, 0.18);
+  /* Shared with chart panels — near-flat micro-gradient (option D) */
+  --terminal-panel-gradient: linear-gradient(
+    180deg,
+    var(--chart-panel-fill-top) 0%,
+    var(--chart-panel-fill-mid) 42%,
+    var(--chart-panel-fill-bottom) 100%
+  );
+  --terminal-panel-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02), inset 0 -10px 22px rgba(0, 0, 0, 0.12);
   --terminal-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.025);
   --terminal-active-bg: rgba(101, 136, 76, 0.22);
   --terminal-active-toggle-bg: rgba(101, 136, 76, 0.28);
@@ -48,25 +54,92 @@
   --terminal-radius-sm: 2px;
   --terminal-control-radius: 2px;
   --terminal-space: 12px;
-  --terminal-table-row: 23px;
+  --terminal-table-row: 24px;
   --terminal-font-ui: var(--font-mono);
   --terminal-font-value: var(--font-mono);
   --terminal-font-display: var(--font-mono);
-  --terminal-font-weight-strong: 700;
+  --terminal-font-weight-strong: 600;
   --terminal-font-weight-medium: 600;
   --terminal-type-glow: none;
-  --chart-positive: #789f5b;
-  --chart-positive-edge: #91bd70;
-  --chart-negative: #bf4b52;
-  --chart-negative-edge: #df5c63;
-  --chart-panel-fill-top: #0f1212;
-  --chart-panel-fill-mid: #0a0d0d;
-  --chart-panel-fill-bottom: #070909;
+
+  /*
+   * Quiet-desk language (from Polarity) — whole terminal UI.
+   * Desaturated labels, soft polarity text, restrained accents.
+   */
+  --desk-label: color-mix(in srgb, var(--terminal-muted) 70%, var(--terminal-subtle) 30%);
+  --desk-value: color-mix(in srgb, var(--terminal-heading) 68%, var(--terminal-muted) 32%);
+  --desk-value-soft: color-mix(in srgb, var(--terminal-muted) 78%, var(--terminal-subtle) 22%);
+  --desk-long: color-mix(in srgb, var(--terminal-green) 42%, transparent);
+  --desk-short: color-mix(in srgb, var(--terminal-red) 40%, transparent);
+  --desk-long-text: color-mix(in srgb, var(--terminal-green) 72%, var(--terminal-heading) 28%);
+  --desk-short-text: color-mix(in srgb, var(--terminal-red) 72%, var(--terminal-heading) 28%);
+  --desk-flip-text: color-mix(in srgb, var(--terminal-yellow) 70%, var(--terminal-heading) 30%);
+  --desk-move-text: color-mix(in srgb, var(--terminal-blue) 68%, var(--terminal-heading) 32%);
+  --desk-warn-text: color-mix(in srgb, var(--terminal-yellow) 66%, var(--terminal-muted) 34%);
+  --desk-rule: color-mix(in srgb, var(--terminal-rule) 88%, transparent);
+  --regime-tone-green: var(--desk-long-text);
+  --regime-tone-red: var(--desk-short-text);
+  --regime-tone-amber: var(--desk-flip-text);
+  --regime-accent-blue: var(--desk-move-text);
+  --regime-accent-violet: color-mix(in srgb, #9b8ec4 66%, var(--terminal-heading) 34%);
+  --desk-wall-pos: color-mix(in srgb, var(--chart-positive-edge) 62%, var(--terminal-muted) 38%);
+  --desk-wall-neg: color-mix(in srgb, var(--chart-negative-edge) 60%, var(--terminal-muted) 40%);
+  --chart-positive: #6f9458;
+  --chart-positive-edge: #82a96a;
+  --chart-negative: #b04e54;
+  --chart-negative-edge: #c9656c;
+  /* D: near-flat micro-gradient — ~1 step lift at top, mid ≈ shell, slight depth at bottom */
+  --chart-panel-fill-top: #090b0b;
+  --chart-panel-fill-mid: #060808;
+  --chart-panel-fill-bottom: #040505;
   --chart-positive-start: #6f8f55;
   --chart-negative-end: #9a3e43;
   --chart-profile-fill-start: #6f7772;
   --chart-profile-fill-mid: #aeb6af;
   --chart-profile-fill-end: #6f7772;
+  /* Quiet inset well — depth without a lifted card surface */
+  --chart-well-fill: color-mix(in srgb, #000 14%, transparent);
+  --chart-well-edge: color-mix(in srgb, var(--terminal-border) 22%, transparent);
+  --chart-zero-line: color-mix(in srgb, var(--terminal-heading) 58%, transparent);
+  /*
+   * Live Deribit index marker — universal champagne gold (same on every theme)
+   * so spot never fights theme green/red polarity colors.
+   */
+  --chart-spot-line: rgba(201, 168, 76, 0.52);
+  --chart-spot-solid: #c9a84c;
+  --chart-spot-glow: rgba(201, 168, 76, 0.08);
+  --chart-spot-label-bg: color-mix(in srgb, var(--terminal-surface) 92%, #000 8%);
+  --chart-spot-label-border: rgba(201, 168, 76, 0.28);
+  --chart-hover-band: color-mix(in srgb, var(--terminal-surface-2) 70%, transparent);
+  --chart-bar-specular: rgba(255, 255, 255, 0.14);
+  --chart-glow-positive: color-mix(in srgb, var(--chart-positive-edge) 22%, transparent);
+  --chart-glow-negative: color-mix(in srgb, var(--chart-negative-edge) 20%, transparent);
+  /*
+   * ARCHIVED: Include-OTC prints palette (not used on live desk).
+   * Muted purple (pos) / amber (neg). See project/docs/archived_include_otc_prints.md
+   */
+  --chart-otc-positive: #8b7ec8;
+  --chart-otc-positive-edge: #a89be0;
+  --chart-otc-positive-start: #6f63a8;
+  --chart-otc-negative: #c9a04a;
+  --chart-otc-negative-edge: #e0bc6a;
+  --chart-otc-negative-end: #a07e38;
+  /* Absolute GEX concentration — sign-agnostic wall gold (not polarity green/red) */
+  --chart-abs-fill: #c4a35a;
+  --chart-abs-edge: #e4cf7e;
+  --chart-tooltip-bg: color-mix(in srgb, var(--terminal-surface) 97%, transparent);
+  --chart-tooltip-border: color-mix(in srgb, var(--terminal-border-strong) 78%, transparent);
+  --chart-tooltip-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.42),
+    0 0 0 1px color-mix(in srgb, var(--terminal-border) 32%, transparent);
+  /*
+   * Chart pane header accent — title, active segments, GEX slider.
+   * Per-theme overrides keep chrome consistent with the desk palette.
+   * Ember amber (#d4a24a) is the reference Bloomberg-style default.
+   */
+  --chart-header-accent: #94c970;
+  --chart-header-accent-soft: #b5df8a;
+  --chart-header-accent-ink: #0c1208;
   color-scheme: var(--terminal-color-scheme);
   background: var(--terminal-bg);
   color: var(--terminal-text);
@@ -104,8 +177,13 @@ html[data-theme='graphite'] {
   --terminal-yellow: #e4cf7e;
   --terminal-body-gradient: linear-gradient(180deg, rgba(11, 14, 18, 0.98), rgba(7, 8, 11, 1) 30rem);
   --terminal-body-scanline: repeating-linear-gradient(0deg, rgba(128, 224, 209, 0.016) 0 1px, transparent 1px 4px);
-  --terminal-panel-gradient: linear-gradient(180deg, rgba(17, 22, 28, 0.96), rgba(9, 12, 15, 0.98));
-  --terminal-panel-shadow: inset 0 1px 0 rgba(194, 228, 232, 0.05), inset 0 -14px 34px rgba(0, 0, 0, 0.22);
+  --terminal-panel-gradient: linear-gradient(
+    180deg,
+    var(--chart-panel-fill-top) 0%,
+    var(--chart-panel-fill-mid) 42%,
+    var(--chart-panel-fill-bottom) 100%
+  );
+  --terminal-panel-shadow: inset 0 1px 0 rgba(194, 228, 232, 0.03), inset 0 -10px 22px rgba(0, 0, 0, 0.14);
   --terminal-control-inset: inset 0 1px 0 rgba(210, 241, 244, 0.035);
   --terminal-active-bg: rgba(54, 163, 137, 0.2);
   --terminal-active-toggle-bg: rgba(54, 163, 137, 0.27);
@@ -119,67 +197,90 @@ html[data-theme='graphite'] {
   --chart-positive-edge: #67e2c1;
   --chart-negative: #c94f63;
   --chart-negative-edge: #ff7387;
-  --chart-panel-fill-top: #10151b;
-  --chart-panel-fill-mid: #0b1015;
-  --chart-panel-fill-bottom: #080a0d;
+  --chart-panel-fill-top: #0a0d11;
+  --chart-panel-fill-mid: #080a0e;
+  --chart-panel-fill-bottom: #060709;
   --chart-positive-start: #2c8f75;
   --chart-negative-end: #9d4050;
   --chart-profile-fill-start: #6e7d85;
   --chart-profile-fill-mid: #c0ced3;
   --chart-profile-fill-end: #6e7d85;
+  --chart-header-accent: #66dfbd;
+  --chart-header-accent-soft: #8aefd4;
+  --chart-header-accent-ink: #061210;
 }
 
+/*
+ * Ember — Bloomberg-adjacent warm desk.
+ * Amber chrome (chart headers, active controls) + cool teal for up-moves /
+ * phosphor data; red for down. Keep changes restrained: denser amber UI,
+ * not a full CRT skin.
+ */
 html[data-theme='ember'] {
-  --terminal-bg: #090806;
-  --terminal-bg-soft: #100e0b;
-  --terminal-surface: #14110d;
-  --terminal-surface-2: #1c1711;
-  --terminal-surface-3: #251e15;
-  --terminal-border: rgba(196, 159, 102, 0.22);
-  --terminal-border-strong: rgba(225, 183, 117, 0.4);
-  --terminal-control-border: rgba(213, 174, 116, 0.32);
-  --terminal-active-border: rgba(112, 228, 206, 0.72);
-  --terminal-rule: rgba(199, 158, 96, 0.16);
-  --terminal-grid: rgba(209, 167, 103, 0.14);
-  --terminal-text: #d9d1c5;
-  --terminal-heading: #fff0d6;
-  --terminal-muted: #9d907d;
-  --terminal-subtle: #6d6150;
+  --terminal-bg: #080706;
+  --terminal-bg-soft: #0e0c09;
+  --terminal-surface: #12100c;
+  --terminal-surface-2: #1a1610;
+  --terminal-surface-3: #221c14;
+  --terminal-border: rgba(196, 159, 102, 0.2);
+  --terminal-border-strong: rgba(212, 162, 74, 0.42);
+  --terminal-control-border: rgba(212, 162, 74, 0.3);
+  --terminal-active-border: rgba(212, 162, 74, 0.78);
+  --terminal-rule: rgba(199, 158, 96, 0.14);
+  --terminal-grid: rgba(209, 167, 103, 0.12);
+  --terminal-text: #d6cec0;
+  --terminal-heading: #f7ebd4;
+  --terminal-muted: #95897a;
+  --terminal-subtle: #665a4c;
+  /* Up-move / live data stays cool teal; chrome is amber */
   --terminal-green: #4fc0ad;
   --terminal-green-strong: #70e4ce;
-  --terminal-green-soft: rgba(79, 192, 173, 0.13);
+  --terminal-green-soft: rgba(79, 192, 173, 0.12);
   --terminal-red: #d85a4f;
   --terminal-red-strong: #ff7166;
   --terminal-red-soft: rgba(216, 90, 79, 0.13);
   --terminal-blue: #78a7d8;
-  --terminal-yellow: #f0bd63;
-  --terminal-body-gradient: linear-gradient(180deg, rgba(15, 12, 8, 0.98), rgba(9, 8, 6, 1) 30rem);
-  --terminal-body-scanline: repeating-linear-gradient(0deg, rgba(255, 185, 99, 0.012) 0 1px, transparent 1px 4px);
-  --terminal-panel-gradient: linear-gradient(180deg, rgba(23, 18, 13, 0.96), rgba(12, 10, 8, 0.98));
-  --terminal-panel-shadow: inset 0 1px 0 rgba(255, 221, 178, 0.04), inset 0 -14px 34px rgba(0, 0, 0, 0.24);
-  --terminal-control-inset: inset 0 1px 0 rgba(255, 224, 183, 0.035);
-  --terminal-active-bg: rgba(58, 157, 140, 0.21);
-  --terminal-active-toggle-bg: rgba(58, 157, 140, 0.28);
-  --terminal-active-shadow: inset 0 0 0 1px rgba(112, 228, 206, 0.32);
-  --terminal-selected-row-bg: linear-gradient(90deg, rgba(240, 189, 99, 0.16), rgba(112, 228, 206, 0.07) 44%, rgba(28, 23, 17, 0.2));
-  --terminal-selected-row-shadow: inset 0 0 0 1px rgba(240, 189, 99, 0.22), inset 0 0 22px rgba(112, 228, 206, 0.06), 0 0 16px rgba(240, 189, 99, 0.035);
-  --terminal-selection-bg: rgba(240, 189, 99, 0.26);
-  --terminal-scrollbar-thumb: #4a3f31;
-  --terminal-scrollbar-track: #0f0d0a;
+  --terminal-yellow: #d4a24a;
+  --terminal-body-gradient: linear-gradient(180deg, rgba(14, 12, 8, 0.99), rgba(8, 7, 6, 1) 30rem);
+  --terminal-body-scanline: repeating-linear-gradient(0deg, rgba(212, 162, 74, 0.014) 0 1px, transparent 1px 4px);
+  --terminal-panel-gradient: linear-gradient(
+    180deg,
+    var(--chart-panel-fill-top) 0%,
+    var(--chart-panel-fill-mid) 42%,
+    var(--chart-panel-fill-bottom) 100%
+  );
+  --terminal-panel-shadow: inset 0 1px 0 rgba(255, 221, 178, 0.03), inset 0 -10px 22px rgba(0, 0, 0, 0.18);
+  --terminal-control-inset: inset 0 1px 0 rgba(255, 224, 183, 0.04);
+  --terminal-active-bg: rgba(212, 162, 74, 0.16);
+  --terminal-active-toggle-bg: rgba(212, 162, 74, 0.24);
+  --terminal-active-shadow: inset 0 0 0 1px rgba(212, 162, 74, 0.36);
+  --terminal-selected-row-bg: linear-gradient(90deg, rgba(212, 162, 74, 0.14), rgba(212, 162, 74, 0.04) 48%, rgba(26, 22, 16, 0.22));
+  --terminal-selected-row-shadow: inset 0 0 0 1px rgba(212, 162, 74, 0.24), inset 0 0 20px rgba(212, 162, 74, 0.05), 0 0 14px rgba(212, 162, 74, 0.03);
+  --terminal-selection-bg: rgba(212, 162, 74, 0.24);
+  --terminal-scrollbar-thumb: #453a2e;
+  --terminal-scrollbar-track: #0c0a08;
+  --terminal-radius: 2px;
+  --terminal-radius-sm: 2px;
+  --terminal-control-radius: 2px;
   --chart-positive: #3fa996;
   --chart-positive-edge: #70e4ce;
   --chart-negative: #bd4d44;
   --chart-negative-edge: #ff7166;
-  --chart-panel-fill-top: #17120d;
-  --chart-panel-fill-mid: #100d0a;
-  --chart-panel-fill-bottom: #0b0907;
+  --chart-panel-fill-top: #0c0a07;
+  --chart-panel-fill-mid: #090807;
+  --chart-panel-fill-bottom: #060504;
   --chart-positive-start: #338f7f;
   --chart-negative-end: #8f3933;
   --chart-profile-fill-start: #7b6e5d;
   --chart-profile-fill-mid: #d2b98e;
   --chart-profile-fill-end: #7b6e5d;
+  /* Reference Bloomberg amber — keep for Ember only as the default header look */
+  --chart-header-accent: #d4a24a;
+  --chart-header-accent-soft: #f0c46a;
+  --chart-header-accent-ink: #1a1208;
 }
 
+/* ARCHIVED theme (Settings cull 2026-07-25) — restore via terminalThemes.ts */
 html[data-theme='daybreak'] {
   --terminal-color-scheme: light;
   --terminal-bg: #f2efe6;
@@ -207,8 +308,13 @@ html[data-theme='daybreak'] {
   --terminal-yellow: #9b6f12;
   --terminal-body-gradient: linear-gradient(180deg, rgba(255, 251, 241, 0.96), rgba(242, 239, 230, 1) 28rem);
   --terminal-body-scanline: repeating-linear-gradient(0deg, rgba(50, 55, 45, 0.035) 0 1px, transparent 1px 4px);
-  --terminal-panel-gradient: linear-gradient(180deg, rgba(255, 250, 240, 0.98), rgba(241, 235, 223, 0.98));
-  --terminal-panel-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68), inset 0 -14px 30px rgba(68, 55, 36, 0.06);
+  --terminal-panel-gradient: linear-gradient(
+    180deg,
+    var(--chart-panel-fill-top) 0%,
+    var(--chart-panel-fill-mid) 42%,
+    var(--chart-panel-fill-bottom) 100%
+  );
+  --terminal-panel-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 -10px 20px rgba(68, 55, 36, 0.04);
   --terminal-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.62);
   --terminal-active-bg: rgba(35, 122, 93, 0.13);
   --terminal-active-toggle-bg: rgba(35, 122, 93, 0.19);
@@ -222,16 +328,19 @@ html[data-theme='daybreak'] {
   --chart-positive-edge: #168d64;
   --chart-negative: #a93b50;
   --chart-negative-edge: #ca485f;
-  --chart-panel-fill-top: #fffaf0;
-  --chart-panel-fill-mid: #f4eddd;
-  --chart-panel-fill-bottom: #ebe3d2;
+  --chart-panel-fill-top: #f5f1e6;
+  --chart-panel-fill-mid: #f1ede2;
+  --chart-panel-fill-bottom: #ebe6d9;
   --chart-positive-start: #4b9a7c;
   --chart-negative-end: #8f3347;
   --chart-profile-fill-start: #879082;
   --chart-profile-fill-mid: #353b36;
   --chart-profile-fill-end: #879082;
+  --chart-well-fill: color-mix(in srgb, #000 4%, transparent);
+  --chart-well-edge: color-mix(in srgb, var(--terminal-border) 28%, transparent);
 }
 
+/* ARCHIVED theme (Settings cull 2026-07-25) — restore via terminalThemes.ts */
 html[data-theme='blueprint'] {
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "Share Tech Mono", monospace;
@@ -273,13 +382,18 @@ html[data-theme='blueprint'] {
     linear-gradient(rgba(102, 220, 255, 0.095) 1px, transparent 1px),
     linear-gradient(90deg, rgba(102, 220, 255, 0.075) 1px, transparent 1px);
   --terminal-panel-gradient:
-    linear-gradient(180deg, rgba(15, 43, 70, 0.94), rgba(7, 22, 39, 0.98)),
-    linear-gradient(rgba(102, 220, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(102, 220, 255, 0.04) 1px, transparent 1px);
+    linear-gradient(
+      180deg,
+      var(--chart-panel-fill-top) 0%,
+      var(--chart-panel-fill-mid) 42%,
+      var(--chart-panel-fill-bottom) 100%
+    ),
+    linear-gradient(rgba(102, 220, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(102, 220, 255, 0.025) 1px, transparent 1px);
   --terminal-panel-shadow:
-    inset 0 1px 0 rgba(218, 248, 255, 0.08),
-    inset 0 0 0 1px rgba(102, 220, 255, 0.035),
-    0 0 18px rgba(102, 220, 255, 0.03);
+    inset 0 1px 0 rgba(218, 248, 255, 0.045),
+    inset 0 0 0 1px rgba(102, 220, 255, 0.025),
+    0 0 12px rgba(102, 220, 255, 0.02);
   --terminal-control-inset: inset 0 1px 0 rgba(218, 248, 255, 0.055);
   --terminal-active-bg: rgba(242, 193, 78, 0.14);
   --terminal-active-toggle-bg: rgba(242, 193, 78, 0.2);
@@ -296,9 +410,9 @@ html[data-theme='blueprint'] {
   --chart-positive-edge: #72f0c9;
   --chart-negative: #cf4e73;
   --chart-negative-edge: #ff7596;
-  --chart-panel-fill-top: #0e2945;
-  --chart-panel-fill-mid: #0a1b30;
-  --chart-panel-fill-bottom: #071423;
+  --chart-panel-fill-top: #0a1a2e;
+  --chart-panel-fill-mid: #081625;
+  --chart-panel-fill-bottom: #06101c;
   --chart-positive-start: #35a98c;
   --chart-negative-end: #a13b58;
   --chart-profile-fill-start: #306c8d;
@@ -343,12 +457,17 @@ html[data-theme='command'] {
     linear-gradient(180deg, rgba(2, 9, 7, 0.98), rgba(1, 4, 3, 1) 30rem);
   --terminal-body-scanline: repeating-linear-gradient(0deg, rgba(92, 255, 188, 0.026) 0 1px, transparent 1px 4px);
   --terminal-panel-gradient:
-    linear-gradient(180deg, rgba(7, 26, 19, 0.96), rgba(2, 10, 8, 0.99)),
-    repeating-linear-gradient(90deg, rgba(92, 255, 188, 0.026) 0 1px, transparent 1px 11px);
+    linear-gradient(
+      180deg,
+      var(--chart-panel-fill-top) 0%,
+      var(--chart-panel-fill-mid) 42%,
+      var(--chart-panel-fill-bottom) 100%
+    ),
+    repeating-linear-gradient(90deg, rgba(92, 255, 188, 0.02) 0 1px, transparent 1px 11px);
   --terminal-panel-shadow:
-    inset 0 1px 0 rgba(168, 255, 222, 0.07),
-    inset 0 0 0 1px rgba(92, 255, 188, 0.035),
-    0 0 20px rgba(92, 255, 188, 0.035);
+    inset 0 1px 0 rgba(168, 255, 222, 0.04),
+    inset 0 0 0 1px rgba(92, 255, 188, 0.025),
+    0 0 14px rgba(92, 255, 188, 0.02);
   --terminal-control-inset: inset 0 1px 0 rgba(168, 255, 222, 0.055);
   --terminal-active-bg: rgba(92, 255, 188, 0.13);
   --terminal-active-toggle-bg: rgba(92, 255, 188, 0.22);
@@ -365,18 +484,160 @@ html[data-theme='command'] {
   --chart-positive-edge: #5cffbc;
   --chart-negative: #cf315f;
   --chart-negative-edge: #ff4f79;
-  --chart-panel-fill-top: #071a13;
-  --chart-panel-fill-mid: #03100c;
-  --chart-panel-fill-bottom: #020705;
+  --chart-panel-fill-top: #04110c;
+  --chart-panel-fill-mid: #030a07;
+  --chart-panel-fill-bottom: #020504;
   --chart-positive-start: #1ca778;
   --chart-negative-end: #9c2446;
   --chart-profile-fill-start: #315f52;
   --chart-profile-fill-mid: #d1ffef;
   --chart-profile-fill-end: #315f52;
+  --chart-header-accent: #5cffbc;
+  --chart-header-accent-soft: #8affd4;
+  --chart-header-accent-ink: #02140c;
   font-synthesis: weight;
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: unset;
+}
+
+/* ARCHIVED theme (Settings cull 2026-07-25) — restore via terminalThemes.ts */
+html[data-theme='neon'] {
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Share Tech Mono", monospace;
+  --terminal-font-ui: var(--font-mono);
+  --terminal-font-value: var(--font-mono);
+  --terminal-font-display: var(--font-sans);
+  --terminal-font-weight-strong: 700;
+  --terminal-font-weight-medium: 600;
+  --terminal-type-glow: 0 0 9px rgba(33, 247, 255, 0.22);
+  --terminal-bg: #05020b;
+  --terminal-bg-soft: #0c0617;
+  --terminal-surface: #120920;
+  --terminal-surface-2: #1b1030;
+  --terminal-surface-3: #261644;
+  --terminal-border: rgba(33, 247, 255, 0.22);
+  --terminal-border-strong: rgba(255, 61, 242, 0.44);
+  --terminal-control-border: rgba(33, 247, 255, 0.34);
+  --terminal-active-border: rgba(255, 215, 92, 0.82);
+  --terminal-rule: rgba(151, 111, 255, 0.18);
+  --terminal-grid: rgba(33, 247, 255, 0.13);
+  --terminal-text: #d9eaff;
+  --terminal-heading: #fff9ff;
+  --terminal-muted: #9c8dbe;
+  --terminal-subtle: #65547f;
+  --terminal-green: #18d9a8;
+  --terminal-green-strong: #24ffc8;
+  --terminal-green-soft: rgba(36, 255, 200, 0.13);
+  --terminal-red: #ff4f95;
+  --terminal-red-strong: #ff6aa9;
+  --terminal-red-soft: rgba(255, 79, 149, 0.13);
+  --terminal-blue: #21f7ff;
+  --terminal-yellow: #ffd75c;
+  --terminal-body-gradient:
+    linear-gradient(135deg, rgba(255, 61, 242, 0.08), transparent 36%),
+    linear-gradient(180deg, rgba(9, 3, 19, 0.99), rgba(5, 2, 11, 1) 34rem);
+  --terminal-body-scanline: repeating-linear-gradient(0deg, rgba(33, 247, 255, 0.024) 0 1px, transparent 1px 5px);
+  --terminal-panel-gradient:
+    linear-gradient(
+      180deg,
+      var(--chart-panel-fill-top) 0%,
+      var(--chart-panel-fill-mid) 42%,
+      var(--chart-panel-fill-bottom) 100%
+    ),
+    repeating-linear-gradient(90deg, rgba(255, 61, 242, 0.02) 0 1px, transparent 1px 18px);
+  --terminal-panel-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    inset 0 0 0 1px rgba(33, 247, 255, 0.025),
+    0 0 12px rgba(255, 61, 242, 0.03);
+  --terminal-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --terminal-active-bg: rgba(255, 215, 92, 0.14);
+  --terminal-active-toggle-bg: rgba(255, 215, 92, 0.22);
+  --terminal-active-shadow: inset 0 0 0 1px rgba(255, 215, 92, 0.35), 0 0 12px rgba(255, 61, 242, 0.12);
+  --terminal-selected-row-bg: linear-gradient(90deg, rgba(33, 247, 255, 0.14), rgba(255, 61, 242, 0.08) 48%, rgba(27, 16, 48, 0.24));
+  --terminal-selected-row-shadow: inset 0 0 0 1px rgba(33, 247, 255, 0.24), inset 0 0 22px rgba(255, 61, 242, 0.08), 0 0 16px rgba(33, 247, 255, 0.05);
+  --terminal-selection-bg: rgba(255, 61, 242, 0.28);
+  --terminal-scrollbar-thumb: #3d2b66;
+  --terminal-scrollbar-track: #070310;
+  --chart-positive: #18d9a8;
+  --chart-positive-edge: #24ffc8;
+  --chart-negative: #df3e88;
+  --chart-negative-edge: #ff6aa9;
+  --chart-panel-fill-top: #090415;
+  --chart-panel-fill-mid: #06030e;
+  --chart-panel-fill-bottom: #040209;
+  --chart-positive-start: #13ad8a;
+  --chart-negative-end: #9f2b67;
+  --chart-profile-fill-start: #4a3f8e;
+  --chart-profile-fill-mid: #f4e8ff;
+  --chart-profile-fill-end: #21f7ff;
+}
+
+html[data-theme='paper'] {
+  --terminal-color-scheme: light;
+  --terminal-bg: #f7f3e8;
+  --terminal-bg-soft: #efe7d4;
+  --terminal-surface: #fffaf0;
+  --terminal-surface-2: #f0eadb;
+  --terminal-surface-3: #e7dec9;
+  --terminal-border: rgba(65, 78, 86, 0.24);
+  --terminal-border-strong: rgba(42, 58, 68, 0.48);
+  --terminal-control-border: rgba(42, 58, 68, 0.34);
+  --terminal-active-border: rgba(31, 79, 109, 0.72);
+  --terminal-rule: rgba(63, 69, 66, 0.18);
+  --terminal-grid: rgba(31, 79, 109, 0.12);
+  --terminal-text: #30312d;
+  --terminal-heading: #151918;
+  --terminal-muted: #6b6b61;
+  --terminal-subtle: #9a9588;
+  --terminal-green: #2b765e;
+  --terminal-green-strong: #237c61;
+  --terminal-green-soft: rgba(43, 118, 94, 0.12);
+  --terminal-red: #b5453d;
+  --terminal-red-strong: #c44a3d;
+  --terminal-red-soft: rgba(196, 74, 61, 0.12);
+  --terminal-blue: #1f4f6d;
+  --terminal-yellow: #a36f18;
+  --terminal-body-gradient:
+    linear-gradient(rgba(31, 79, 109, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 79, 109, 0.03) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 251, 241, 0.98), rgba(247, 243, 232, 1) 32rem);
+  --terminal-body-scanline: repeating-linear-gradient(0deg, rgba(40, 40, 34, 0.018) 0 1px, transparent 1px 6px);
+  --terminal-panel-gradient:
+    linear-gradient(
+      180deg,
+      var(--chart-panel-fill-top) 0%,
+      var(--chart-panel-fill-mid) 42%,
+      var(--chart-panel-fill-bottom) 100%
+    ),
+    linear-gradient(90deg, rgba(31, 79, 109, 0.02) 1px, transparent 1px);
+  --terminal-panel-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48), inset 0 -10px 20px rgba(79, 63, 41, 0.035);
+  --terminal-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --terminal-active-bg: rgba(31, 79, 109, 0.11);
+  --terminal-active-toggle-bg: rgba(31, 79, 109, 0.18);
+  --terminal-active-shadow: inset 0 0 0 1px rgba(31, 79, 109, 0.22);
+  --terminal-selected-row-bg: linear-gradient(90deg, rgba(31, 79, 109, 0.12), rgba(196, 74, 61, 0.06) 46%, rgba(231, 222, 201, 0.34));
+  --terminal-selected-row-shadow: inset 0 0 0 1px rgba(31, 79, 109, 0.2), inset 0 0 20px rgba(31, 79, 109, 0.055);
+  --terminal-selection-bg: rgba(31, 79, 109, 0.2);
+  --terminal-scrollbar-thumb: #bdb39f;
+  --terminal-scrollbar-track: #eee6d3;
+  --chart-positive: #2b765e;
+  --chart-positive-edge: #237c61;
+  --chart-negative: #ad4139;
+  --chart-negative-edge: #c44a3d;
+  --chart-panel-fill-top: #f8f4e9;
+  --chart-panel-fill-mid: #f5f1e5;
+  --chart-panel-fill-bottom: #efe9da;
+  --chart-positive-start: #4a9276;
+  --chart-negative-end: #8d342f;
+  --chart-profile-fill-start: #8b9183;
+  --chart-profile-fill-mid: #202a2f;
+  --chart-profile-fill-end: #1f4f6d;
+  --chart-well-fill: color-mix(in srgb, #000 4%, transparent);
+  --chart-well-edge: color-mix(in srgb, var(--terminal-border) 28%, transparent);
+  --chart-header-accent: #1f4f6d;
+  --chart-header-accent-soft: #3a7a9e;
+  --chart-header-accent-ink: #f7f3e8;
 }
 
 * {
@@ -392,6 +653,8 @@ body,
 body {
   margin: 0;
   min-width: 320px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  color: var(--desk-value, var(--terminal-text));
   background:
     var(--terminal-body-gradient),
     var(--terminal-body-scanline),
@@ -545,7 +808,7 @@ input[type="range"].terminal-window-slider:focus-visible::-moz-range-thumb {
   border: 1px solid var(--terminal-border);
   background:
     var(--terminal-panel-gradient),
-    var(--terminal-surface);
+    var(--chart-panel-fill-bottom);
   border-radius: var(--terminal-radius);
   box-shadow: var(--terminal-panel-shadow);
 }
@@ -626,6 +889,68 @@ html[data-theme='blueprint'] .terminal-rail-section > * {
   box-shadow: none;
 }
 
+.levels-copy-btn {
+  color: var(--desk-label);
+}
+
+.levels-copy-btn:hover,
+.levels-copy-btn:focus-visible {
+  color: var(--desk-value);
+}
+
+/* Price strip — same quiet row language as Levels */
+.rail-price {
+  display: grid;
+  gap: 0;
+}
+
+.rail-price__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--desk-rule);
+}
+
+.rail-price__row:last-child {
+  border-bottom: 0;
+}
+
+.rail-price__name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  font: 600 8.5px / 1.15 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  color: var(--desk-label);
+}
+
+.rail-price__value {
+  font: 600 10px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--desk-value);
+  text-align: right;
+}
+
+.rail-price__note {
+  margin-top: 3px;
+  font: 500 8.5px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--desk-value-soft);
+  text-align: right;
+}
+
+.rail-price__note--pos {
+  color: var(--desk-long-text);
+}
+
+.rail-price__note--neg {
+  color: var(--desk-short-text);
+}
+
 .terminal-rail-section {
   overflow: hidden;
   padding: 9px 12px 10px;
@@ -633,7 +958,57 @@ html[data-theme='blueprint'] .terminal-rail-section > * {
   border-radius: var(--terminal-radius);
   background:
     var(--terminal-panel-gradient),
-    var(--terminal-surface);
+    var(--chart-panel-fill-bottom);
+}
+
+/* Ember — quiet Bloomberg desk: amber rule under top chrome + section titles */
+html[data-theme='ember'] header {
+  background:
+    linear-gradient(90deg, rgba(212, 162, 74, 0.06), transparent 22%, rgba(212, 162, 74, 0.02)),
+    var(--terminal-bg);
+  box-shadow:
+    inset 0 -1px 0 rgba(212, 162, 74, 0.22),
+    0 6px 18px rgba(0, 0, 0, 0.2);
+}
+
+html[data-theme='ember'] .terminal-title {
+  color: color-mix(in srgb, var(--chart-header-accent) 72%, var(--terminal-muted));
+  letter-spacing: 0.14em;
+}
+
+html[data-theme='ember'] .terminal-section-header {
+  border-bottom: 1px solid rgba(212, 162, 74, 0.1);
+  padding-bottom: 6px;
+}
+
+html[data-theme='ember'] .chart-pane-header,
+html[data-theme='ember'] .price-gamma-header {
+  border-bottom-color: color-mix(in srgb, var(--chart-header-accent) 28%, var(--terminal-border));
+  background: color-mix(in srgb, var(--terminal-surface) 92%, #0a0907);
+  box-shadow: inset 0 1px 0 rgba(212, 162, 74, 0.04);
+}
+
+html[data-theme='ember'] .terminal-rail-section {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 221, 178, 0.03),
+    inset 0 -10px 22px rgba(0, 0, 0, 0.16);
+}
+
+/* Nav + rail underlines track amber chrome (not cool blue) */
+html[data-theme='ember'] .terminal-clean-tab {
+  --terminal-clean-accent: var(--chart-header-accent);
+}
+
+html[data-theme='ember'] .terminal-clean-tab--active {
+  color: color-mix(in srgb, var(--chart-header-accent) 55%, var(--terminal-heading));
+}
+
+html[data-theme='ember'] .terminal-market-select {
+  --terminal-market-accent: var(--chart-header-accent);
+}
+
+html[data-theme='ember'] .terminal-add-panel:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--chart-header-accent) 45%, var(--terminal-control-border));
 }
 
 html[data-theme='command'] header {
@@ -765,17 +1140,1495 @@ html[data-theme='blueprint'] [role='combobox'] {
 .terminal-value {
   font-family: var(--terminal-font-value);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
+  letter-spacing: 0.01em;
+  color: var(--desk-value);
 }
 
 .terminal-title {
-  color: var(--terminal-heading);
+  color: var(--terminal-muted);
   font-family: var(--terminal-font-display);
-  font-size: 10.5px;
-  font-weight: var(--terminal-font-weight-strong);
-  letter-spacing: 0.14em;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   line-height: 1;
   text-transform: uppercase;
+}
+
+/* Quiet micro-label utility (Polarity STRUCTURE / NY SESSION language) */
+.terminal-label {
+  font: 600 8.5px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--desk-label);
+}
+
+.terminal-meta {
+  font: 500 8.5px / 1.2 var(--font-mono), ui-monospace, monospace;
+  color: var(--desk-value-soft);
+}
+
+/* Shared GEX profile chart chrome (bars + area) */
+/* Legacy class kept for any residual mounts — prefer .gex-hover-card */
+.gex-chart-tooltip {
+  pointer-events: none;
+  position: absolute;
+  z-index: 20;
+  min-width: 9.75rem;
+  border-radius: var(--terminal-radius-sm);
+  border: 1px solid var(--desk-rule, var(--chart-tooltip-border));
+  background: var(--chart-tooltip-bg);
+  padding: 0.45rem 0.65rem 0.5rem;
+  text-align: left;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--desk-value);
+  box-shadow: var(--chart-tooltip-shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.gex-chart-tooltip__title {
+  margin-bottom: 0.28rem;
+  color: var(--desk-label);
+  font-family: var(--terminal-font-value);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gex-chart-tooltip__row {
+  font-family: var(--terminal-font-value);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+/*
+ * Desk hover card — Net / Positive / Negative GEX readout.
+ * Used by Strike, Profile, Walls (and any other non-price chart).
+ */
+.gex-hover-card {
+  pointer-events: none;
+  position: absolute;
+  z-index: 20;
+  min-width: 11.25rem;
+  max-width: 14rem;
+  padding: 0.48rem 0.62rem 0.5rem;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--terminal-border-strong) 72%, transparent);
+  background:
+    linear-gradient(
+      165deg,
+      color-mix(in srgb, var(--terminal-surface-2) 55%, transparent) 0%,
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--terminal-surface) 94%, #000 6%);
+  color: var(--terminal-text);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--terminal-border) 22%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.gex-hover-card__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-bottom: 0.28rem;
+}
+
+.gex-hover-card__kicker {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--terminal-font-value), var(--font-mono), monospace;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--desk-label, var(--terminal-muted));
+}
+
+.gex-hover-card__strike-label {
+  opacity: 0.85;
+}
+
+.gex-hover-card__strike {
+  font-family: var(--terminal-font-value), var(--font-mono), monospace;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--terminal-heading);
+  line-height: 1.15;
+}
+
+.gex-hover-card__rule {
+  height: 1px;
+  margin: 0.15rem 0 0.32rem;
+  background: color-mix(in srgb, var(--terminal-rule) 88%, transparent);
+}
+
+.gex-hover-card__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.14rem;
+}
+
+.gex-hover-card__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--terminal-font-value), var(--font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.gex-hover-card__row--net {
+  margin-bottom: 0.06rem;
+}
+
+.gex-hover-card__row--net .gex-hover-card__label {
+  color: color-mix(in srgb, var(--terminal-heading) 70%, var(--terminal-muted));
+  font-weight: 600;
+}
+
+.gex-hover-card__row--net .gex-hover-card__value {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.gex-hover-card__label {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--desk-label, var(--terminal-muted));
+}
+
+.gex-hover-card__value {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--desk-value, var(--terminal-text));
+  text-align: right;
+}
+
+.gex-hover-card__value--pos {
+  color: var(--desk-long-text, var(--terminal-green-strong));
+}
+
+.gex-hover-card__value--neg {
+  color: var(--desk-short-text, var(--terminal-red-strong));
+}
+
+.gex-hover-card__value--muted {
+  color: var(--terminal-muted);
+  font-weight: 500;
+}
+
+/* Top-N wall callouts on Strike / Profile plots */
+.gex-wall-callout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  transform: translate(-50%, -100%);
+  padding: 1px 5px 2px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--terminal-border-strong) 55%, transparent);
+  background: color-mix(in srgb, var(--terminal-surface) 90%, transparent);
+  font-family: var(--terminal-font-value), var(--font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+}
+
+.gex-wall-callout--above {
+  transform: translate(-50%, calc(-100% - 10px));
+}
+
+.gex-wall-callout--below {
+  transform: translate(-50%, 12px);
+}
+
+.gex-wall-callout__strike {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--desk-label, var(--terminal-muted));
+}
+
+.gex-wall-callout__val {
+  font-size: 9.5px;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.gex-wall-callout__val--pos {
+  color: var(--desk-long-text, var(--terminal-green-strong));
+}
+
+.gex-wall-callout__val--neg {
+  color: var(--desk-short-text, var(--terminal-red-strong));
+}
+
+/* Ranking table — chart-well language aligned with GEX profile / heatmap panels */
+.gex-ranking-well {
+  margin-top: 2px;
+  padding: 6px 4px 4px;
+  border: 1px solid var(--chart-well-edge);
+  border-radius: var(--terminal-radius-sm);
+  background: var(--chart-well-fill);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--terminal-border) 18%, transparent);
+}
+
+.gex-ranking-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-rule) 88%, transparent);
+}
+
+.gex-ranking-row {
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-rule) 72%, transparent);
+}
+
+.gex-ranking-row:last-child {
+  border-bottom: 0;
+}
+
+.gex-ranking-row:hover {
+  background: var(--chart-hover-band);
+}
+
+.gex-ranking-row--prox:hover {
+  background: color-mix(in srgb, var(--chart-hover-band) 78%, transparent);
+}
+
+.gex-ranking-bar {
+  position: relative;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--terminal-border) 42%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--terminal-border) 22%, transparent);
+}
+
+.gex-ranking-bar__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 1px;
+  box-shadow:
+    0 0 10px color-mix(in srgb, currentColor 32%, transparent),
+    inset 0 1px 0 var(--chart-bar-specular);
+}
+
+.gex-ranking-bar__fill--pos {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--chart-positive-start) 72%, transparent),
+    var(--chart-positive-edge)
+  );
+  color: var(--chart-positive-edge);
+}
+
+.gex-ranking-bar__fill--neg {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--chart-negative-end) 72%, transparent),
+    var(--chart-negative-edge)
+  );
+  color: var(--chart-negative-edge);
+}
+
+/* Ranking keeps quiet-desk mono sizing; colors stay full-strength for scan. */
+.gex-ranking-header {
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.gex-ranking-well {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+/* Levels instrument board — quiet-desk (tokens inherit from .terminal-rail) */
+
+.levels-desk__group-title {
+  margin: 2px 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.levels-desk__group-title:first-child {
+  margin-top: 0;
+}
+
+.levels-desk__group-title-text {
+  font: 600 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--terminal-muted);
+  white-space: nowrap;
+}
+
+/* Expiry date for Weekly / Monthly / Quarterly group headers (e.g. 25JUL26) */
+.levels-desk__group-title-scope {
+  font: 500 8.5px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--terminal-subtle);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.levels-desk__group-title-rule {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--desk-rule);
+}
+
+.levels-board {
+  display: grid;
+  gap: 0;
+}
+
+.levels-board__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(68px, 0.9fr) minmax(46px, 0.65fr);
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 6px 4px 10px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--desk-rule);
+  transition: background-color 140ms ease;
+}
+
+.levels-board__row:last-child {
+  border-bottom: 0;
+}
+
+/* Soft role rail — faded fill, no bloom (Polarity meter language) */
+.levels-board__row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--level-role-accent, var(--terminal-subtle));
+  opacity: 0.72;
+  box-shadow: none;
+}
+
+.levels-board__row:hover {
+  background: color-mix(in srgb, var(--terminal-surface-2) 42%, transparent);
+}
+
+.levels-board__row--nearest {
+  background: color-mix(in srgb, var(--terminal-surface-2) 38%, transparent);
+}
+
+.levels-board__row--nearest:hover {
+  background: color-mix(in srgb, var(--terminal-surface-2) 52%, transparent);
+}
+
+.levels-board__label {
+  position: relative;
+  z-index: 1;
+  padding-right: 6px;
+  min-width: 0;
+  font: 600 8.5px / 1.15 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--desk-label);
+}
+
+.levels-board__label-scope {
+  font: 600 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--terminal-subtle);
+  opacity: 0.9;
+}
+
+.levels-board__value,
+.levels-board__dist {
+  position: relative;
+  z-index: 1;
+  font: 600 10px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--desk-value);
+}
+
+.levels-board__dist {
+  color: var(--desk-value-soft);
+}
+
+/* Role-tinted values stay faded (same mix recipe as Polarity scores) */
+.levels-board__row--pos .levels-board__value {
+  color: var(--desk-long-text);
+}
+
+.levels-board__row--neg .levels-board__value {
+  color: var(--desk-short-text);
+}
+
+.levels-board__row--flip .levels-board__value {
+  color: var(--desk-flip-text);
+}
+
+/* Expected Move band — both bounds same quiet gray (no blue accent) */
+.levels-board__row--move .levels-board__value,
+.levels-board__row--move .levels-board__dist {
+  color: var(--desk-value);
+}
+
+
+
+/**
+ * Heatmap OHLC / timeframe chips.
+ * Scale avoids browser min-font-size floors while keeping controls compact.
+ */
+/**
+ * Heatmap hover card — minimal terminal readout (aligned with gex-chart-tooltip).
+ * Only mounted while the pointer is over a strike level.
+ */
+.heatmap-hover-card {
+  pointer-events: none;
+  position: absolute;
+  z-index: 20;
+  min-width: 8.75rem;
+  padding: 0.4rem 0.55rem 0.42rem;
+  border-radius: var(--terminal-radius-sm);
+  border: 1px solid var(--chart-tooltip-border, var(--terminal-border-strong));
+  background: var(--chart-tooltip-bg, color-mix(in srgb, var(--terminal-surface) 95%, transparent));
+  color: var(--terminal-text);
+  font-size: 10.5px;
+  text-align: left;
+  box-shadow: var(--chart-tooltip-shadow, 0 8px 20px rgba(0, 0, 0, 0.35));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.heatmap-hover-card__title {
+  margin-bottom: 0.22rem;
+  color: var(--terminal-heading);
+  font-family: var(--terminal-font-value), var(--font-mono), monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.heatmap-hover-card__row {
+  font-family: var(--terminal-font-value), var(--font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+.heatmap-hover-card__row--net {
+  font-weight: 600;
+}
+
+.heatmap-hover-card__label {
+  display: none;
+}
+
+.heatmap-hover-card__value {
+  font-weight: inherit;
+}
+
+/*
+ * Chart right-click context — compact desk chip (not a full OS menu).
+ * Matches empty-pane density: mono micro-type, tight row, soft glass surface.
+ */
+.heatmap-chart-ctx {
+  position: absolute;
+  z-index: 50;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--terminal-border-strong) 70%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--terminal-surface) 92%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--terminal-border) 28%, transparent),
+    0 8px 22px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  user-select: none;
+}
+
+.heatmap-chart-ctx__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  min-width: 0;
+  height: 22px;
+  padding: 0 7px 0 6px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: color-mix(in srgb, var(--terminal-muted) 92%, var(--terminal-heading));
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.heatmap-chart-ctx__item:hover,
+.heatmap-chart-ctx__item:focus-visible {
+  background: color-mix(in srgb, var(--terminal-heading) 8%, var(--terminal-surface-2));
+  color: var(--terminal-heading);
+  outline: none;
+}
+
+.heatmap-chart-ctx__item--active {
+  color: color-mix(in srgb, var(--terminal-heading) 88%, var(--terminal-muted));
+}
+
+.heatmap-chart-ctx__glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  opacity: 0.72;
+  color: inherit;
+}
+
+.heatmap-chart-ctx__item:hover .heatmap-chart-ctx__glyph,
+.heatmap-chart-ctx__item--active .heatmap-chart-ctx__glyph {
+  opacity: 0.95;
+}
+
+.heatmap-chart-ctx__label {
+  font-family: var(--terminal-font-value), var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 550;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+/* Quiet TradingView-style legend — sits on the plot surface, not chrome. */
+.heatmap-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.22rem 0.32rem;
+  max-width: min(52%, 360px);
+  font-family: var(--terminal-font-value), var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  color: color-mix(in srgb, var(--terminal-muted) 78%, transparent);
+  /* Keep readable over TRACE / candles without a solid pill. */
+  text-shadow:
+    0 0 8px color-mix(in srgb, var(--terminal-bg) 85%, transparent),
+    0 1px 2px color-mix(in srgb, var(--terminal-bg) 90%, transparent);
+  user-select: none;
+}
+
+.heatmap-chart-legend__pair {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--terminal-heading) 72%, var(--terminal-muted));
+}
+
+.heatmap-chart-legend__meta {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--terminal-muted) 85%, transparent);
+}
+
+.heatmap-chart-legend__sep {
+  font-weight: 400;
+  opacity: 0.5;
+  color: var(--terminal-subtle);
+}
+
+/*
+ * Shared chart pane header — candlestick, net, profile, rankings.
+ *
+ * Accent colors come from theme tokens:
+ *   --chart-header-accent / --chart-header-accent-soft / --chart-header-accent-ink
+ * Ember keeps Bloomberg amber (#d4a24a) as the reference look.
+ *
+ * Layout:
+ *   primary row  — title + view modes | EXP + actions
+ *   toolbar row  — mode tools (TF / GEX) so split panes never crush one line
+ *
+ * Density (ResizeObserver on header width):
+ *   full  >620px · mid 420–620 · tight <420
+ */
+.chart-pane-header,
+.price-gamma-header {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  flex-shrink: 0;
+  /* Primary row (~28) + toolbar band (29) — all modes share this stack */
+  min-height: 57px;
+  padding: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-border) 70%, transparent);
+  background: color-mix(in srgb, var(--terminal-surface) 88%, var(--terminal-bg));
+  user-select: none;
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+/* Light theme: active header pills need stronger ink contrast */
+html[data-theme='paper'] .chart-pane-header__segment--active,
+html[data-theme='paper'] .price-gamma-header__tf--active {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--chart-header-accent) 40%, transparent);
+}
+
+.chart-pane-header__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  min-width: 0;
+  padding: 4px 10px 3px;
+}
+
+.chart-pane-header__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  /*
+   * Fixed height so Net / Profile / Table / Heatmap headers always match.
+   * Fits TF segments (20px) + bottom pad + top rule.
+   */
+  height: 29px;
+  min-height: 29px;
+  max-height: 29px;
+  padding: 0 10px 5px;
+  border-top: 1px solid color-mix(in srgb, var(--terminal-rule, var(--terminal-border)) 70%, transparent);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.chart-pane-header__toolbar--empty {
+  /* Reserve the band; no interactive chrome when mode has no second-row tools */
+  pointer-events: none;
+}
+
+.chart-pane-header__left,
+.chart-pane-header__right,
+.price-gamma-header__left,
+.price-gamma-header__right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chart-pane-header__left {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.chart-pane-header__right,
+.price-gamma-header__right {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  margin-left: auto;
+  gap: 6px;
+}
+
+.chart-pane-header__title,
+.price-gamma-header__title {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  color: color-mix(in srgb, var(--chart-header-accent) 88%, var(--terminal-heading));
+  white-space: nowrap;
+}
+
+.chart-pane-header__segments,
+.price-gamma-header__tfs {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 1px;
+  height: 20px;
+  padding: 1px;
+  border-radius: var(--terminal-control-radius, 3px);
+  background: color-mix(in srgb, var(--terminal-bg-soft) 90%, transparent);
+  box-shadow: var(--terminal-control-inset, inset 0 0 0 1px rgba(255, 255, 255, 0.03));
+  transition: opacity 0.16s ease;
+}
+
+.chart-pane-header__segments--pending,
+.price-gamma-header__tfs--pending {
+  opacity: 0.72;
+}
+
+.chart-pane-header__segment,
+.price-gamma-header__tf {
+  appearance: none;
+  border: none;
+  background: transparent;
+  height: 18px;
+  min-width: 0;
+  padding: 0 7px;
+  border-radius: 2px;
+  font: 600 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  color: var(--desk-label, var(--terminal-muted));
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 0.14s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    opacity 0.14s ease;
+}
+
+.chart-pane-header__segment-short {
+  display: none;
+}
+
+.chart-pane-header__segment:hover:not(:disabled),
+.price-gamma-header__tf:hover:not(:disabled) {
+  color: var(--desk-value, var(--terminal-heading));
+}
+
+.chart-pane-header__segment:disabled,
+.price-gamma-header__tf:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.chart-pane-header__segment--active,
+.price-gamma-header__tf--active {
+  color: var(--chart-header-accent-ink) !important;
+  background: color-mix(in srgb, var(--chart-header-accent) 92%, var(--chart-header-accent-soft));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--chart-header-accent) 55%, transparent);
+  opacity: 1 !important;
+}
+
+.chart-pane-header__segment--active:disabled,
+.price-gamma-header__tf--active:disabled {
+  opacity: 1 !important;
+}
+
+.chart-pane-header__gex,
+.price-gamma-header__gex {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 20px;
+  padding-left: 2px;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.chart-pane-header__gex-slider:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Overlay settings (bands + strike lines) */
+.chart-pane-header__overlay-wrap {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.chart-pane-header__overlay-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  min-width: 0;
+  max-width: 168px;
+  padding: 0 6px 0 7px;
+  border: none;
+  border-radius: var(--terminal-control-radius, 3px);
+  background: color-mix(in srgb, var(--terminal-bg-soft) 90%, transparent);
+  box-shadow: var(--terminal-control-inset, inset 0 0 0 1px rgba(255, 255, 255, 0.03));
+  font: 600 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  color: var(--desk-label, var(--terminal-muted));
+  cursor: pointer;
+  transition:
+    color 0.14s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.chart-pane-header__overlay-btn:hover {
+  color: var(--desk-value, var(--terminal-heading));
+  background: color-mix(in srgb, var(--terminal-surface-2) 88%, var(--terminal-bg-soft));
+}
+
+.chart-pane-header__overlay-btn--open,
+.chart-pane-header__overlay-btn:focus-visible {
+  color: var(--desk-value, var(--terminal-heading));
+  background: color-mix(in srgb, var(--terminal-surface-2) 92%, var(--terminal-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--terminal-border-strong) 80%, transparent);
+  outline: none;
+}
+
+.chart-pane-header__overlay-btn--active {
+  color: color-mix(in srgb, var(--chart-header-accent) 88%, var(--terminal-heading));
+}
+
+.chart-pane-header__overlay-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.chart-pane-header__overlay-label {
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 8.5px;
+}
+
+.chart-pane-header__overlay-summary {
+  min-width: 0;
+  max-width: 4.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.72;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.chart-pane-header__overlay-caret {
+  flex-shrink: 0;
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0.7;
+  transform: translateY(-0.5px);
+}
+
+.chart-pane-header__overlay-menu {
+  position: fixed;
+  z-index: 110;
+  width: 196px;
+  padding: 8px 8px 9px;
+  border-radius: var(--terminal-radius-sm, 4px);
+  border: 1px solid var(--terminal-border-strong);
+  background: color-mix(in srgb, var(--terminal-surface) 97%, var(--terminal-bg));
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.chart-pane-header__overlay-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chart-pane-header__overlay-section-title {
+  font: 700 8.5px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--desk-label, var(--terminal-muted));
+}
+
+.chart-pane-header__overlay-hint {
+  margin: 0;
+  font: 500 9px / 1.35 var(--font-sans, system-ui, sans-serif);
+  color: color-mix(in srgb, var(--terminal-muted) 82%, transparent);
+}
+
+.chart-pane-header__overlay-divider {
+  height: 1px;
+  margin: 9px 0;
+  background: color-mix(in srgb, var(--terminal-rule, var(--terminal-border)) 80%, transparent);
+}
+
+.chart-pane-header__overlay-seg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--terminal-control-radius, 3px);
+  background: color-mix(in srgb, var(--terminal-bg-soft) 92%, transparent);
+  box-shadow: var(--terminal-control-inset, inset 0 0 0 1px rgba(255, 255, 255, 0.03));
+}
+
+.chart-pane-header__overlay-seg-btn {
+  appearance: none;
+  height: 22px;
+  border: none;
+  border-radius: calc(var(--terminal-control-radius, 3px) - 1px);
+  background: transparent;
+  font: 600 9.5px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.03em;
+  color: var(--desk-label, var(--terminal-muted));
+  cursor: pointer;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+.chart-pane-header__overlay-seg-btn:hover {
+  color: var(--desk-value, var(--terminal-heading));
+  background: color-mix(in srgb, var(--terminal-surface-2) 55%, transparent);
+}
+
+.chart-pane-header__overlay-seg-btn--active {
+  color: var(--desk-value, var(--terminal-heading));
+  background: color-mix(in srgb, var(--chart-header-accent) 22%, var(--terminal-surface-2));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chart-header-accent) 35%, transparent);
+}
+
+.chart-pane-header__overlay-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 4px;
+  border: none;
+  border-radius: var(--terminal-control-radius, 3px);
+  background: color-mix(in srgb, var(--terminal-bg-soft) 70%, transparent);
+  color: var(--desk-label, var(--terminal-muted));
+  cursor: pointer;
+  text-align: left;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+.chart-pane-header__overlay-toggle:hover {
+  color: var(--desk-value, var(--terminal-heading));
+  background: color-mix(in srgb, var(--terminal-surface-2) 55%, transparent);
+}
+
+.chart-pane-header__overlay-toggle--on {
+  color: var(--desk-value, var(--terminal-heading));
+}
+
+.chart-pane-header__overlay-toggle-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 15px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--terminal-muted) 28%, var(--terminal-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--terminal-border) 70%, transparent);
+  transition: background 0.16s ease;
+}
+
+.chart-pane-header__overlay-toggle--on .chart-pane-header__overlay-toggle-track {
+  background: color-mix(in srgb, var(--chart-header-accent) 55%, var(--terminal-bg-soft));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chart-header-accent) 40%, transparent);
+}
+
+.chart-pane-header__overlay-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--terminal-heading) 88%, white);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 0.16s ease;
+}
+
+.chart-pane-header__overlay-toggle--on .chart-pane-header__overlay-toggle-thumb {
+  transform: translateX(13px);
+}
+
+.chart-pane-header__overlay-toggle-text {
+  font: 600 10px / 1.2 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.02em;
+}
+
+.chart-pane-header--tight .chart-pane-header__overlay-label,
+.chart-pane-header--tight .chart-pane-header__overlay-summary {
+  display: none;
+}
+
+.chart-pane-header--tight .chart-pane-header__overlay-btn {
+  max-width: none;
+  padding: 0 6px;
+  gap: 3px;
+}
+
+.chart-pane-header__meta-label,
+.price-gamma-header__gex-label {
+  flex-shrink: 0;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  color: var(--desk-label, var(--terminal-muted));
+  text-transform: uppercase;
+}
+
+.chart-pane-header__gex-slider,
+.price-gamma-header__gex-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 88px;
+  max-width: 30vw;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* ── Density: mid (split panes, ~half width) ─────────────────────────────── */
+.chart-pane-header--mid .chart-pane-header__row {
+  gap: 6px;
+  padding: 3px 8px 2px;
+}
+
+.chart-pane-header--mid .chart-pane-header__toolbar {
+  gap: 8px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 0 8px 4px;
+}
+
+.chart-pane-header--mid .chart-pane-header__left {
+  gap: 6px;
+}
+
+.chart-pane-header--mid .chart-pane-header__title {
+  max-width: 7.5em;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.chart-pane-header--mid .chart-pane-header__segment {
+  padding: 0 5px;
+  font-size: 8.5px;
+}
+
+.chart-pane-header--mid .chart-pane-header__expiry-btn {
+  min-width: 0;
+  max-width: 118px;
+  padding: 0 5px 0 6px;
+}
+
+.chart-pane-header--mid .chart-pane-header__gex-slider {
+  width: 64px;
+}
+
+/* ── Density: tight (narrow pane / 3-col) ────────────────────────────────── */
+.chart-pane-header--tight .chart-pane-header__row {
+  gap: 4px;
+  padding: 3px 6px 2px;
+  min-height: 26px;
+}
+
+.chart-pane-header--tight .chart-pane-header__toolbar {
+  gap: 6px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 0 6px 4px;
+}
+
+.chart-pane-header--tight .chart-pane-header__left {
+  gap: 4px;
+}
+
+.chart-pane-header--tight .chart-pane-header__title {
+  display: none;
+}
+
+.chart-pane-header--tight .chart-pane-header__segment {
+  padding: 0 4px;
+  font-size: 8px;
+  letter-spacing: 0.02em;
+}
+
+.chart-pane-header--tight .chart-pane-header__segment--has-short .chart-pane-header__segment-full {
+  display: none;
+}
+
+.chart-pane-header--tight .chart-pane-header__segment--has-short .chart-pane-header__segment-short {
+  display: inline;
+}
+
+.chart-pane-header--tight .chart-pane-header__expiry-value--full {
+  display: none;
+}
+
+.chart-pane-header--tight .chart-pane-header__expiry-value--short {
+  display: inline;
+}
+
+.chart-pane-header--tight .chart-pane-header__expiry-btn {
+  min-width: 0;
+  max-width: 88px;
+  padding: 0 4px 0 5px;
+  gap: 3px;
+}
+
+.chart-pane-header--tight .chart-pane-header__gex-slider {
+  width: 48px;
+}
+
+.chart-pane-header--tight .chart-pane-header__meta-label {
+  font-size: 8px;
+}
+
+.chart-pane-header__gex-slider:focus,
+.price-gamma-header__gex-slider:focus {
+  outline: none;
+}
+
+.chart-pane-header__gex-slider:focus-visible,
+.price-gamma-header__gex-slider:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--terminal-border-strong) 80%, transparent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.chart-pane-header__gex-slider::-webkit-slider-runnable-track,
+.price-gamma-header__gex-slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--terminal-muted) 28%, transparent),
+    color-mix(in srgb, var(--chart-header-accent) 55%, var(--terminal-muted))
+  );
+}
+
+.chart-pane-header__gex-slider::-webkit-slider-thumb,
+.price-gamma-header__gex-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -4px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--chart-header-accent-ink) 35%, var(--chart-header-accent));
+  background: var(--chart-header-accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.chart-pane-header__gex-slider::-moz-range-track,
+.price-gamma-header__gex-slider::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--terminal-muted) 28%, transparent),
+    color-mix(in srgb, var(--chart-header-accent) 55%, var(--terminal-muted))
+  );
+}
+
+.chart-pane-header__gex-slider::-moz-range-thumb,
+.price-gamma-header__gex-slider::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--chart-header-accent-ink) 35%, var(--chart-header-accent));
+  background: var(--chart-header-accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+/* Expiry — quiet pill. No amber fill on open/hover (avoids flash + text washout). */
+.chart-pane-header__expiry-wrap,
+.price-gamma-header__expiry-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  min-width: 0;
+}
+
+.chart-pane-header__expiry-btn,
+.price-gamma-header__expiry-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  min-width: 0;
+  max-width: 148px;
+  padding: 0 7px 0 8px;
+  border: none;
+  border-radius: var(--terminal-control-radius, 3px);
+  background: color-mix(in srgb, var(--terminal-bg-soft) 90%, transparent);
+  box-shadow: var(--terminal-control-inset, inset 0 0 0 1px rgba(255, 255, 255, 0.03));
+  font: 600 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.05em;
+  color: var(--desk-label, var(--terminal-muted));
+  cursor: pointer;
+  transition:
+    color 0.14s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.chart-pane-header__expiry-btn:hover,
+.price-gamma-header__expiry-btn:hover {
+  color: var(--desk-value, var(--terminal-heading));
+  background: color-mix(in srgb, var(--terminal-surface-2) 88%, var(--terminal-bg-soft));
+}
+
+.chart-pane-header__expiry-btn--open,
+.chart-pane-header__expiry-btn:focus-visible,
+.price-gamma-header__expiry-btn--open,
+.price-gamma-header__expiry-btn:focus-visible {
+  color: var(--desk-value, var(--terminal-heading));
+  background: color-mix(in srgb, var(--terminal-surface-2) 92%, var(--terminal-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--terminal-border-strong) 80%, transparent);
+  outline: none;
+}
+
+.chart-pane-header__expiry-value,
+.price-gamma-header__expiry-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+}
+
+.chart-pane-header__expiry-value--short {
+  display: none;
+}
+
+.chart-pane-header__expiry-caret,
+.price-gamma-header__expiry-caret {
+  flex-shrink: 0;
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0.7;
+  transform: translateY(-0.5px);
+  color: inherit;
+}
+
+.chart-pane-header__expiry-menu,
+.price-gamma-header__expiry-menu {
+  position: fixed;
+  z-index: 100;
+  max-height: min(280px, 50vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 3px;
+  border-radius: var(--terminal-radius-sm, 4px);
+  border: 1px solid var(--terminal-border-strong);
+  background: color-mix(in srgb, var(--terminal-surface) 96%, var(--terminal-bg));
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.chart-pane-header__expiry-option,
+.price-gamma-header__expiry-option {
+  appearance: none;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  min-height: 22px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  font: 600 9px / 1.2 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.05em;
+  color: var(--desk-label, var(--terminal-muted));
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.chart-pane-header__expiry-option:hover,
+.price-gamma-header__expiry-option:hover {
+  color: var(--desk-value, var(--terminal-heading));
+  background: color-mix(in srgb, var(--terminal-surface-2) 88%, transparent);
+}
+
+.chart-pane-header__expiry-option--active,
+.price-gamma-header__expiry-option--active {
+  color: var(--desk-value, var(--terminal-heading)) !important;
+  background: color-mix(in srgb, var(--terminal-surface-2) 95%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--terminal-border) 80%, transparent);
+}
+
+.chart-pane-header__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+/* Soft hold during TF backfill — previous candles stay visible underneath. */
+.price-gamma-plot {
+  transition: opacity 0.2s ease;
+  will-change: opacity;
+}
+
+.price-gamma-plot--switching {
+  opacity: 0.48;
+}
+
+.price-gamma-plot__tf-hint {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: color-mix(in srgb, var(--chart-header-accent) 80%, var(--terminal-muted));
+  text-shadow:
+    0 0 8px color-mix(in srgb, var(--terminal-bg) 85%, transparent),
+    0 1px 2px color-mix(in srgb, var(--terminal-bg) 90%, transparent);
+  opacity: 0.85;
+  animation: price-gamma-tf-pulse 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes price-gamma-tf-pulse {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 0.95;
+  }
+}
+
+@media (max-width: 720px) {
+  .chart-pane-header__row {
+    gap: 6px;
+    padding: 3px 8px 2px;
+  }
+
+  .chart-pane-header__toolbar {
+    gap: 8px;
+    padding: 0 8px 4px;
+  }
+
+  .chart-pane-header__gex-slider,
+  .price-gamma-header__gex-slider {
+    width: 64px;
+  }
+}
+
+/*
+ * Chart header chrome — hard-lock every control to a single 20px baseline.
+ * Selects / palette / close / OHLC all share these so nothing sits high/low.
+ */
+/**
+ * ARCHIVED: Secondary Net GEX palette for include-OTC mode (not mounted on desk).
+ * Remaps production polarity tokens → muted purple (pos) / amber (neg).
+ * See project/docs/archived_include_otc_prints.md
+ */
+.gex-palette-otc {
+  --chart-positive: var(--chart-otc-positive);
+  --chart-positive-edge: var(--chart-otc-positive-edge);
+  --chart-positive-start: var(--chart-otc-positive-start);
+  --chart-negative: var(--chart-otc-negative);
+  --chart-negative-edge: var(--chart-otc-negative-edge);
+  --chart-negative-end: var(--chart-otc-negative-end);
+  --chart-glow-positive: color-mix(in srgb, var(--chart-otc-positive-edge) 38%, transparent);
+  --chart-glow-negative: color-mix(in srgb, var(--chart-otc-negative-edge) 34%, transparent);
+}
+
+.chart-chrome-controls {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  gap: 4px;
+  line-height: 1;
+}
+
+.chart-chrome-controls > * {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  max-height: 20px;
+  flex-shrink: 0;
+}
+
+.chart-chrome-control,
+.chart-chrome-controls button,
+.chart-chrome-controls [role='combobox'] {
+  box-sizing: border-box !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  max-height: 20px !important;
+  line-height: 1 !important;
+  font-family: var(--font-mono), ui-monospace, monospace !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  color: var(--desk-label) !important;
+}
+
+.chart-chrome-control:hover,
+.chart-chrome-controls button:hover,
+.chart-chrome-controls [role='combobox']:hover {
+  color: var(--desk-value) !important;
+}
+
+.heatmap-ohlc-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+}
+
+.heatmap-ohlc-controls button {
+  font: 600 8.5px / 1 var(--font-mono), ui-monospace, monospace !important;
+  letter-spacing: 0.06em;
+  height: 20px !important;
+  min-height: 20px !important;
+  max-height: 20px !important;
+  padding: 0 7px !important;
+  border-radius: var(--terminal-control-radius);
+  line-height: 1 !important;
+  text-transform: none;
+  white-space: nowrap;
+  box-sizing: border-box;
+  color: var(--desk-label) !important;
+}
+
+.heatmap-ohlc-controls button:hover {
+  color: var(--desk-value) !important;
+}
+
+.heatmap-ohlc-controls__toggle {
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  background: var(--terminal-bg-soft);
+  box-shadow: var(--terminal-control-inset);
+}
+
+.heatmap-ohlc-controls__tf {
+  border: none !important;
+  background: transparent;
+  min-width: 1.75rem;
+  height: 20px !important;
+  padding: 0 6px !important;
+  border-radius: 0 !important;
 }
 
 .terminal-divider {
@@ -796,6 +2649,23 @@ html[data-theme='blueprint'] [role='combobox'] {
   opacity: 0.42;
 }
 
+/* Levels Copy — scale avoids browser min-font-size floors (same idea as heatmap-ohlc-controls). */
+.levels-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.levels-copy-btn__label {
+  display: inline-block;
+  font: 600 11px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transform: scale(0.78);
+  transform-origin: right center;
+}
+
 .terminal-section-action {
   margin-left: auto;
   display: inline-flex;
@@ -807,20 +2677,22 @@ html[data-theme='blueprint'] [role='combobox'] {
 
   position: relative;
   display: inline-flex;
-  min-width: 172px;
-  height: 28px;
+  min-width: 190px;
+  height: 32px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
-  padding: 0 12px 0 1px;
+  gap: 10px;
+  padding: 0 15px 0 1px;
   color: var(--terminal-heading);
-  font-family: var(--font-mono);
-  font-size: 13.5px;
+  font-family: var(--font-sans);
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
-  text-shadow: 0 0 8px color-mix(in srgb, var(--terminal-brand-accent) 13%, transparent);
+  text-shadow:
+    0 0 8px color-mix(in srgb, var(--terminal-heading) 12%, transparent),
+    0 0 14px color-mix(in srgb, var(--terminal-brand-accent) 18%, transparent);
 }
 
 .terminal-brand::after {
@@ -833,43 +2705,49 @@ html[data-theme='blueprint'] [role='combobox'] {
   background: var(--terminal-rule);
 }
 
-.terminal-brand span {
-  position: relative;
-  transform: translateY(1.5px);
-  white-space: nowrap;
+.terminal-brand--mark-only {
+  min-width: 44px;
+  width: 44px;
+  gap: 0;
+  padding: 0 12px 0 0;
+  justify-content: flex-start;
+}
+
+.terminal-brand--mark-only::after {
+  content: '';
 }
 
 .terminal-brand-mark {
   display: flex;
-  height: 24px;
-  width: 26px;
+  height: 28px;
+  width: 30px;
   align-items: center;
   justify-content: center;
-  color: color-mix(in srgb, var(--terminal-heading) 86%, var(--terminal-brand-accent));
+  color: color-mix(in srgb, var(--desk-value) 78%, var(--terminal-brand-accent));
   filter:
-    drop-shadow(0 0 3px color-mix(in srgb, var(--terminal-heading) 14%, transparent))
-    drop-shadow(0 0 9px color-mix(in srgb, var(--terminal-brand-accent) 28%, transparent));
+    drop-shadow(0 0 2px color-mix(in srgb, var(--terminal-heading) 8%, transparent))
+    drop-shadow(0 0 6px color-mix(in srgb, var(--terminal-brand-accent) 16%, transparent));
 }
 
 .terminal-market-select {
-  --terminal-market-accent: var(--terminal-blue);
+  --terminal-market-accent: var(--desk-move-text, var(--terminal-blue));
 
   position: relative;
   height: 22px;
   min-width: 50px;
   gap: 4px;
-  border-color: color-mix(in srgb, var(--terminal-market-accent) 56%, var(--terminal-control-border));
-  background: color-mix(in srgb, var(--terminal-market-accent) 7%, var(--terminal-bg-soft));
+  border-color: color-mix(in srgb, var(--terminal-market-accent) 40%, var(--terminal-control-border));
+  background: color-mix(in srgb, var(--terminal-market-accent) 5%, var(--terminal-bg-soft));
   padding: 0 6px;
-  color: var(--terminal-heading);
+  color: var(--desk-value);
   font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.07em;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   line-height: 1;
   box-shadow:
     var(--terminal-control-inset),
-    inset 0 0 0 1px color-mix(in srgb, var(--terminal-market-accent) 10%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--terminal-market-accent) 8%, transparent);
   text-transform: uppercase;
 }
 
@@ -879,67 +2757,70 @@ html[data-theme='blueprint'] [role='combobox'] {
 
 .terminal-market-select:hover,
 .terminal-market-select:focus-visible {
-  border-color: var(--terminal-market-accent);
-  background: color-mix(in srgb, var(--terminal-market-accent) 12%, var(--terminal-bg-soft));
-  color: var(--terminal-heading);
-  box-shadow:
-    var(--terminal-control-inset),
-    0 0 0 1px color-mix(in srgb, var(--terminal-market-accent) 18%, transparent),
-    0 0 8px color-mix(in srgb, var(--terminal-market-accent) 24%, transparent);
-  text-shadow: 0 0 8px color-mix(in srgb, var(--terminal-market-accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--terminal-market-accent) 55%, var(--terminal-control-border));
+  background: color-mix(in srgb, var(--terminal-market-accent) 9%, var(--terminal-bg-soft));
+  color: var(--desk-value);
+  box-shadow: var(--terminal-control-inset);
+  text-shadow: none;
 }
 
 .terminal-market-select svg {
   color: color-mix(in srgb, var(--terminal-market-accent) 72%, var(--terminal-muted));
 }
 
+/*
+ * Clean tabs — shared institutional base.
+ * Context overrides below: header primary nav vs right-rail desk tabs.
+ */
 .terminal-clean-tabs {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  min-height: 24px;
+  gap: 0;
+  min-height: 22px;
   padding: 0;
 }
 
 .terminal-clean-tab {
-  --terminal-clean-accent: var(--terminal-blue);
+  --terminal-clean-accent: var(--desk-move-text, var(--terminal-blue));
 
   position: relative;
   z-index: 1;
   display: inline-flex;
-  height: 23px;
-  min-width: 62px;
+  height: 22px;
+  min-width: 0;
   cursor: pointer;
   align-items: center;
   justify-content: center;
   border: 0;
   background: transparent;
-  padding: 0 8px 4px;
-  color: var(--terminal-muted);
+  /* Even horizontal padding; lighter bottom so underline sits tighter */
+  padding: 0 6px 2px;
+  color: var(--desk-label);
   font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
   line-height: 1;
   text-transform: uppercase;
-  transition: color 150ms ease, text-shadow 150ms ease;
+  transition: color 150ms ease;
 }
 
 .terminal-clean-tab:first-of-type {
-  --terminal-clean-accent: var(--terminal-yellow);
+  --terminal-clean-accent: var(--desk-flip-text, var(--terminal-yellow));
 }
 
 .terminal-clean-tab:last-of-type {
-  --terminal-clean-accent: var(--terminal-blue);
+  --terminal-clean-accent: var(--desk-move-text, var(--terminal-blue));
 }
 
 .terminal-clean-tab::before {
   content: '';
   position: absolute;
-  right: 8px;
+  /* Inset matches horizontal padding so underline aligns with label mass */
+  right: 6px;
   bottom: 0;
-  left: 8px;
+  left: 6px;
   height: 1px;
   background: var(--terminal-clean-accent);
   opacity: 0;
@@ -953,43 +2834,90 @@ html[data-theme='blueprint'] [role='combobox'] {
 }
 
 .terminal-clean-tab:hover {
-  color: var(--terminal-heading);
+  color: var(--desk-value);
 }
 
 .terminal-clean-tab:hover::before {
-  opacity: 0.42;
+  opacity: 0.5;
   transform: scaleX(1);
 }
 
 .terminal-clean-tab:focus-visible {
   outline: none;
-  color: var(--terminal-heading);
+  color: var(--desk-value);
 }
 
 .terminal-clean-tab:focus-visible span {
-  outline: 1px solid color-mix(in srgb, var(--terminal-clean-accent) 45%, transparent);
-  outline-offset: 4px;
+  outline: 1px solid color-mix(in srgb, var(--terminal-clean-accent) 40%, transparent);
+  outline-offset: 3px;
 }
 
 .terminal-clean-tab--active {
-  color: var(--terminal-heading);
-  text-shadow: 0 0 8px color-mix(in srgb, var(--terminal-clean-accent) 18%, transparent);
+  color: var(--desk-value);
+  text-shadow: none;
 }
 
 .terminal-clean-tab--active::before {
-  opacity: 1;
+  opacity: 0.9;
   transform: scaleX(1);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--terminal-clean-accent) 34%, transparent);
+  box-shadow: none;
 }
 
+/* Primary header nav (HOME · GEX · VOL · PERPS · MACRO) — match BTC / status chrome */
+header .terminal-clean-tabs {
+  min-height: 22px;
+  gap: 1px;
+}
+
+header .terminal-clean-tab {
+  height: 22px;
+  padding: 0 7px 2px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+header .terminal-clean-tab::before {
+  right: 7px;
+  left: 7px;
+}
+
+/* Right-rail desk tabs (REGIME · LEVELS · WALLS · OPEX) — quieter than body hierarchy */
+.terminal-rail .terminal-clean-tabs {
+  min-height: 20px;
+  gap: 0;
+}
+
+.terminal-rail .terminal-clean-tab {
+  height: 20px;
+  min-height: 20px;
+  padding: 0 5px 2px;
+  /* Keep label readable; hierarchy vs header is spacing + 9px header step-up */
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+}
+
+.terminal-rail .terminal-clean-tab::before {
+  right: 5px;
+  left: 5px;
+}
+
+.terminal-rail .terminal-clean-tab--active {
+  /* Active stays clear via value color + underline; no extra weight/glow */
+  color: var(--desk-value);
+}
+
+/*
+ * Command-theme tabs — shared base + rail context.
+ * Header always uses clean tabs; command variant is right-rail only.
+ */
 .terminal-command-tabs {
   position: relative;
   isolation: isolate;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  min-height: 25px;
-  padding: 2px 0;
+  gap: 1px;
+  min-height: 22px;
+  padding: 1px 0;
 }
 
 .terminal-command-tabs::before {
@@ -997,7 +2925,7 @@ html[data-theme='blueprint'] [role='combobox'] {
   margin-right: 2px;
   color: var(--terminal-green-strong);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   line-height: 1;
   opacity: 0.86;
@@ -1009,19 +2937,19 @@ html[data-theme='blueprint'] [role='combobox'] {
 
   position: relative;
   display: inline-flex;
-  height: 19px;
-  min-width: 68px;
+  height: 18px;
+  min-width: 0;
   cursor: pointer;
   align-items: center;
   justify-content: center;
   border: 0;
   background: transparent;
-  padding: 0 8px;
+  padding: 0 4px;
   color: var(--terminal-muted);
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 650;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   line-height: 1;
   text-transform: lowercase;
   transition: color 150ms ease, text-shadow 150ms ease, transform 150ms ease;
@@ -1044,12 +2972,12 @@ html[data-theme='blueprint'] [role='combobox'] {
 
 .terminal-command-tab::before {
   content: '[';
-  margin-right: 3px;
+  margin-right: 2px;
 }
 
 .terminal-command-tab::after {
   content: ']';
-  margin-left: 3px;
+  margin-left: 2px;
 }
 
 .terminal-command-tab span {
@@ -1061,7 +2989,7 @@ html[data-theme='blueprint'] [role='combobox'] {
   content: '';
   position: absolute;
   right: 0;
-  bottom: -4px;
+  bottom: -3px;
   left: 0;
   height: 1px;
   background: var(--terminal-command-accent);
@@ -1097,7 +3025,7 @@ html[data-theme='blueprint'] [role='combobox'] {
 
 .terminal-command-tab:focus-visible span {
   outline: 1px solid color-mix(in srgb, var(--terminal-command-accent) 54%, transparent);
-  outline-offset: 4px;
+  outline-offset: 3px;
 }
 
 .terminal-command-tab--active {
@@ -1126,13 +3054,32 @@ html[data-theme='blueprint'] [role='combobox'] {
 .terminal-command-tab--active span::after {
   content: '';
   display: inline-block;
-  width: 5px;
-  height: 10px;
-  margin-left: 5px;
+  width: 4px;
+  height: 9px;
+  margin-left: 4px;
   background: var(--terminal-command-accent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--terminal-command-accent) 62%, transparent);
   vertical-align: -1px;
   animation: terminal-command-cursor 1.15s steps(2, end) infinite;
+}
+
+/* Right-rail command tabs — denser so they stay chrome, not content */
+.terminal-rail .terminal-command-tabs {
+  min-height: 20px;
+  gap: 0;
+  padding: 0;
+}
+
+.terminal-rail .terminal-command-tab {
+  height: 18px;
+  padding: 0 3px;
+  font-size: 8.5px;
+  letter-spacing: 0.03em;
+}
+
+.terminal-rail .terminal-command-tabs::before {
+  font-size: 8.5px;
+  margin-right: 1px;
 }
 
 @keyframes terminal-command-cursor {
@@ -1232,7 +3179,1518 @@ html[data-theme='blueprint'] [role='combobox'] {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Desk body — size container so Regime IV/RV can match workspace bottom row  */
+/* Default workspace rowHeights = [62, 38] → bottom row = 38% of desk body.    */
+/* -------------------------------------------------------------------------- */
+.terminal-desk-body {
+  container-type: size;
+  container-name: desk-body;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Regime panel — net-GEX profile + metrics + vol chips + IV/RV               */
+/* Structure/NY Session polarity archived (see archived/RegimePolarityBlock). */
+/* Upper stack stretches; IV/RV height ≈ workspace bottom-row fraction.       */
+/* -------------------------------------------------------------------------- */
+.regime-panel {
+  /* Fill remaining Levels-desk height under Reference */
+  flex: 1 1 0;
+  min-height: 0;
+  border-color: var(--desk-rule);
+
+  /*
+   * IV vs RV vol-compare — non-GEX accents, quiet-desk saturation.
+   */
+  --regime-vol-dvol: color-mix(in srgb, #4ec4d4 62%, var(--terminal-muted) 38%);
+  --regime-vol-rv: color-mix(in srgb, #e0a040 58%, var(--terminal-muted) 42%);
+  --regime-vol-ref: color-mix(in srgb, var(--terminal-heading) 14%, transparent);
+  --regime-vol-current: color-mix(in srgb, #4ec4d4 70%, var(--terminal-muted) 30%);
+  --regime-vol-rule: var(--desk-rule);
+  --regime-vol-spread-pos: color-mix(in srgb, #6b8cae 48%, var(--terminal-muted) 52%);
+  --regime-vol-spread-neg: color-mix(in srgb, #a67c52 48%, var(--terminal-muted) 52%);
+
+  /* ARCHIVED polarity tokens — kept for re-enable of RegimePolarityBlock */
+  --regime-polarity-long: var(--desk-long);
+  --regime-polarity-short: var(--desk-short);
+  --regime-polarity-long-text: var(--desk-long-text);
+  --regime-polarity-short-text: var(--desk-short-text);
+  --regime-polarity-label: var(--desk-label);
+}
+
+/*
+ * Upper Regime stack sits above the pinned IV/RV zone.
+ * Top-aligned with even gaps — leftover air falls just above the chart
+ * (not a hole between metrics and Tail risk).
+ */
+.regime-panel__upper {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 7px;
+  overflow: hidden;
+  /* Small side pad so edge labels / right flags don’t kiss the rail border */
+  padding-inline: 1px;
+}
+
+.regime-panel__header {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.regime-panel__headline-row {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.regime-panel__title {
+  font: 600 9.5px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--terminal-muted);
+}
+
+.regime-panel__scope {
+  font: 500 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--terminal-subtle);
+}
+
+.regime-panel__headline {
+  font: 600 13px / 1.1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.regime-panel__score {
+  font: 600 14px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.regime-panel__sub {
+  margin-top: 4px;
+  font: 500 9px / 1.3 var(--font-mono), ui-monospace, monospace;
+  color: var(--desk-value-soft);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Walls tab — quiet bubble map chrome                                         */
+/* -------------------------------------------------------------------------- */
+.walls-desk {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  position: relative;
+}
+
+.walls-desk__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.walls-desk__title {
+  font: 600 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--terminal-muted);
+}
+
+.walls-desk__subtitle {
+  margin-top: 4px;
+  font: 500 8.5px / 1.2 var(--font-mono), ui-monospace, monospace;
+  color: var(--desk-value-soft);
+}
+
+.walls-desk__top-strike {
+  font: 600 11px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.walls-desk__top-strike--pos {
+  color: var(--desk-long-text);
+}
+
+.walls-desk__top-strike--neg {
+  color: var(--desk-short-text);
+}
+
+.walls-desk__top-label {
+  margin-top: 4px;
+  font: 600 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--desk-label);
+  text-align: right;
+}
+
+.walls-desk__legend {
+  margin-top: 8px;
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 4px 12px;
+  align-self: start;
+  font: 500 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--desk-label);
+}
+
+/* -------------------------------------------------------------------------- */
+/* OPEX tab — quiet expiry desk                                                */
+/* -------------------------------------------------------------------------- */
+.opex-desk {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.opex-desk__section-title {
+  font: 600 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--terminal-muted);
+}
+
+.opex-desk__meta {
+  font: 500 8.5px / 1 var(--font-mono), ui-monospace, monospace;
+  color: var(--terminal-subtle);
+}
+
+.opex-desk__countdown {
+  font: 600 10px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--desk-value);
+}
+
+.opex-desk__expiry {
+  font: 600 16px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--desk-value);
+}
+
+.opex-desk__expiry--sm {
+  font-size: 13px;
+}
+
+.opex-desk__mode {
+  font: 600 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.opex-desk__mode--pin {
+  color: var(--desk-warn-text);
+}
+
+.opex-desk__mode--twoway {
+  color: var(--desk-move-text);
+}
+
+.opex-desk__mode--flow {
+  color: var(--desk-label);
+}
+
+.opex-desk__stat {
+  min-width: 0;
+  border-radius: var(--terminal-radius-sm);
+  border: 1px solid var(--desk-rule);
+  background: color-mix(in srgb, var(--terminal-bg-soft) 70%, transparent);
+  padding: 6px 8px;
+}
+
+.opex-desk__stat-label {
+  font: 600 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--desk-label);
+}
+
+.opex-desk__stat-value {
+  margin-top: 4px;
+  font: 600 11px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--desk-value);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opex-desk__stat-value--warn {
+  color: var(--desk-warn-text);
+}
+
+.opex-desk__stat-value--accent {
+  color: var(--desk-move-text);
+}
+
+.opex-desk__stat-value--high {
+  color: var(--desk-short-text);
+}
+
+.opex-desk__stat-value--med {
+  color: var(--desk-warn-text);
+}
+
+.opex-desk__stat-value--low {
+  color: var(--desk-label);
+}
+
+.opex-desk__stat-hint {
+  margin-top: 4px;
+  font: 500 8px / 1 var(--font-mono), ui-monospace, monospace;
+  color: var(--terminal-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opex-desk__magnet {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 48px 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--terminal-radius-sm);
+  background: color-mix(in srgb, var(--terminal-bg-soft) 65%, transparent);
+  border: 1px solid transparent;
+}
+
+.opex-desk__magnet-strike {
+  font: 600 11px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--desk-value);
+}
+
+.opex-desk__magnet-gex--pos {
+  color: var(--desk-long-text);
+}
+
+.opex-desk__magnet-gex--neg {
+  color: var(--desk-short-text);
+}
+
+.opex-desk__colhead {
+  font: 600 7.5px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--terminal-subtle);
+}
+
+.opex-desk__body {
+  font: 500 10px / 1.4 var(--font-mono), ui-monospace, monospace;
+  color: var(--desk-value-soft);
+}
+
+.opex-desk__badge {
+  flex-shrink: 0;
+  border: 1px solid var(--desk-rule);
+  padding: 2px 6px;
+  font: 600 7.5px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--desk-label);
+  background: color-mix(in srgb, var(--terminal-bg-soft) 60%, transparent);
+}
+
+.opex-desk__badge--quarterly {
+  border-color: color-mix(in srgb, var(--terminal-yellow) 35%, transparent);
+  color: var(--desk-warn-text);
+  background: color-mix(in srgb, var(--terminal-yellow) 8%, transparent);
+}
+
+.opex-desk__badge--monthly {
+  border-color: color-mix(in srgb, var(--terminal-blue) 32%, transparent);
+  color: var(--desk-move-text);
+  background: color-mix(in srgb, var(--terminal-blue) 8%, transparent);
+}
+
+.opex-desk__badge--weekly {
+  border-color: color-mix(in srgb, var(--terminal-green) 32%, transparent);
+  color: var(--desk-long-text);
+  background: color-mix(in srgb, var(--terminal-green) 8%, transparent);
+}
+
+/*
+ * Net-GEX curve pane — quiet-desk chrome.
+ * Signed profile line + soft area fill; Flip / Spot / domain labels in SVG.
+ * Background matches the panel (no contrasting well) so the line is the focus.
+ */
+.regime-profile,
+.regime-profile__well {
+  /* Keep in sync with PROFILE.height in RegimePanel.tsx */
+  height: 68px;
+  margin-top: 0;
+  margin-bottom: 0;
+  /*
+   * Bleed into .terminal-rail-section horizontal padding (12px) so the ridge
+   * runs closer to the rail border. Leaves ~4px outer buffer (12 − 8).
+   * Pair with PROFILE.padX gutters for domain $ labels.
+   */
+  margin-inline: -8px;
+  flex: 0 0 auto;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  /* Edge $ labels live inside padX gutters — keep well clipped */
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.regime-profile__curve {
+  pointer-events: none;
+}
+
+.regime-profile__svg {
+  overflow: hidden;
+  display: block;
+  pointer-events: none; /* pointer handled on well for hover sampling */
+  shape-rendering: geometricPrecision;
+  text-rendering: geometricPrecision;
+}
+
+.regime-profile__marker line,
+.regime-profile__marker polygon,
+.regime-profile__marker text {
+  transition: opacity 120ms ease;
+}
+
+/* Hover readout owns attention — quiet Flip/Spot while sampling */
+.regime-profile__marker--dim {
+  opacity: 0.38;
+}
+
+.regime-profile__edge--dim {
+  opacity: 0.35 !important;
+}
+
+.regime-profile__hover text {
+  /* Soft halo for readout legibility over heat */
+  paint-order: stroke fill;
+  stroke: color-mix(in srgb, var(--terminal-bg) 88%, transparent);
+  stroke-width: 2.5px;
+  stroke-linejoin: round;
+}
+
+.regime-metrics {
+  /* Metrics strip — three equal columns; no mid-desk dead air */
+  min-height: 0;
+  flex-shrink: 0;
+  padding-top: 7px;
+  padding-bottom: 1px;
+}
+
+/* Prevent Net GEX / RV / Context values from truncating awkwardly */
+.regime-metric {
+  overflow: visible;
+  min-width: 0;
+  transition: color 160ms ease;
+}
+
+.regime-metric:first-child {
+  padding-left: 0;
+}
+
+.regime-metric:last-child {
+  padding-right: 0;
+  text-align: right;
+}
+
+.regime-metric:last-child .regime-metric__label,
+.regime-metric:last-child .regime-metric__value,
+.regime-metric:last-child .regime-metric__detail {
+  text-align: right;
+}
+
+.regime-metric:nth-child(2) .regime-metric__label,
+.regime-metric:nth-child(2) .regime-metric__value,
+.regime-metric:nth-child(2) .regime-metric__detail {
+  text-align: center;
+}
+
+/*
+ * Display-only vol chips under Net GEX / RV / Context.
+ * One compact stack (Tail / Term / IV−RV) — not part of regime score.
+ * Right-status flags (Contango, IV RICH…) stay in a clean column.
+ * Term stacks secondary vol-regime (Calm…) under the flag in that column.
+ *
+ * Stretch into leftover upper-stack air with more internal pad/scale height
+ * (not new metrics). Subtle hairline dividers; Tail prose left under scale.
+ * Marker % is mapped in JS on fixed domain [−0.20, +0.20].
+ */
+.regime-vol-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  overflow: visible;
+  margin: 0;
+  /* Absorb leftover air above IV/RV via chip padding, not a void gap */
+  flex: 1 1 auto;
+  padding-top: 8px;
+  padding-bottom: 2px;
+}
+
+.regime-vol-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  min-width: 0;
+  /* Slightly taller chip rhythm: label → body → prose */
+  flex: 1 1 0;
+  align-content: center;
+  padding: 8px 0 7px;
+  overflow: visible;
+}
+
+/* Quiet hairline between Tail / Term / IV−RV — not card chrome */
+.regime-vol-chip + .regime-vol-chip {
+  border-top: 1px solid color-mix(in srgb, var(--desk-rule, var(--terminal-subtle)) 55%, transparent);
+  margin-top: 0;
+  padding-top: 8px;
+}
+
+/* Tail risk: scale + left secondary note */
+.regime-vol-chip--tail {
+  gap: 3px;
+}
+
+.regime-vol-chip__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.regime-vol-chip__label {
+  flex-shrink: 0;
+  font: 600 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--desk-label, var(--terminal-subtle));
+}
+
+.regime-vol-chip__flag {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  font: 600 9.5px / 1.2 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: right;
+  /* Right-status column (Contango / IV RICH …) — don’t ellipsis short flags */
+  flex-shrink: 0;
+  max-width: none;
+}
+
+/*
+ * Term structure two-column desk:
+ *   Term structure          CONTANGO
+ *   DVOL … / Front …        Calm
+ * Right column is one status stack (flag over vol-regime) — not a free prose row.
+ */
+.regime-vol-chip__term {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 4px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.regime-vol-chip__term .regime-vol-chip__label {
+  grid-column: 1;
+  grid-row: 1;
+  padding-top: 0;
+}
+
+.regime-vol-chip__term .regime-vol-chip__flag {
+  grid-column: 2;
+  grid-row: 1;
+  max-width: none;
+  justify-self: end;
+}
+
+.regime-vol-chip__term .regime-vol-chip__value {
+  grid-column: 1;
+  grid-row: 2;
+  /* Allow long DVOL/Front line to show; ellipsis only as last resort */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.regime-vol-chip__term .regime-vol-chip__status-secondary {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+}
+
+.regime-vol-chip__status-secondary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 8px / 1.2 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.01em;
+  text-align: right;
+  color: var(--desk-value-soft, var(--terminal-muted));
+  opacity: 0.92;
+}
+
+/* IV−RV flag colors = IV vs RV chart baseline (spreadPos / spreadNeg) */
+.regime-vol-chip__flag--iv-rich {
+  color: #6b8cae;
+}
+
+.regime-vol-chip__flag--iv-cheap {
+  color: #a67c52;
+}
+
+.regime-vol-chip__body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.regime-vol-chip__body--scale {
+  width: 100%;
+  /* Taller scale band so Tail fills more vertical air */
+  padding-block: 7px;
+  overflow: visible;
+  box-sizing: border-box;
+}
+
+.regime-vol-chip__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 9px / 1.2 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--desk-value-soft, var(--terminal-muted));
+}
+
+.regime-vol-chip__value--compact {
+  flex-shrink: 0;
+  text-align: right;
+  font: 600 9.5px / 1.2 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.03em;
+  /* Keep +8.4% fully visible on the right rail */
+  overflow: visible;
+  max-width: none;
+}
+
+.regime-vol-chip__prose {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 8px / 1.25 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.01em;
+  color: var(--desk-value-soft, var(--terminal-muted));
+  opacity: 0.92;
+  padding: 0;
+}
+
+/* Tail secondary note — left under Low–High scale (not trailing right) */
+.regime-vol-chip__prose--under-scale {
+  text-align: left;
+  margin-top: 0;
+  padding-left: 0;
+  /* Align under Low end of scale */
+  padding-inline: 0;
+}
+
+.regime-vol-chip__prose--muted {
+  color: var(--terminal-subtle);
+  opacity: 0.85;
+}
+
+/* Low | track | High — one clear horizontal scale row */
+.regime-vol-chip__scale {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  min-height: 14px;
+  overflow: visible;
+}
+
+.regime-vol-chip__scale-end {
+  flex: 0 0 auto;
+  font: 600 7px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--terminal-subtle);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: visible;
+  user-select: none;
+}
+
+.regime-vol-chip__track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 4px;
+  min-width: 64px;
+  border-radius: 999px;
+  /* Slightly stronger rail so the scale reads as a continuous bar */
+  background: color-mix(in srgb, var(--terminal-muted) 30%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--terminal-subtle) 22%, transparent);
+  /* Marker + mid-tick paint outside the rail bounds */
+  overflow: visible;
+}
+
+/* Zero mark at domain mid (skew 0) */
+.regime-vol-chip__track-mid {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--terminal-subtle) 70%, transparent);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* Position via left % from same skew value as the numeric readout */
+.regime-vol-chip__marker {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: currentColor;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--terminal-bg) 75%, transparent),
+    0 0 5px color-mix(in srgb, currentColor 30%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Micro-headers aligned with quiet-desk labels */
+.regime-metric__label {
+  font: 600 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--desk-label, var(--terminal-subtle));
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.regime-metric__value {
+  font: 600 11px / 1.2 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  overflow: visible;
+  white-space: nowrap;
+  /* Color comes from tone class on the element — do not force desk-value here. */
+}
+
+.regime-metric__detail {
+  font: 500 8.5px / 1 var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+  overflow: visible;
+  white-space: nowrap;
+  /* Inherits tone class from JSX; slightly softer via opacity only. */
+}
+
+/*
+ * ARCHIVED — Structure vs NY Session polarity (not mounted).
+ * Re-enable: project/docs/archived_regime_polarity.md
+ * FE: frontend/src/components/terminal/archived/RegimePolarityBlock.tsx
+ */
+.regime-polarity {
+  padding: 6px 2px 5px;
+  min-height: 0;
+}
+
+.regime-polarity__caption {
+  margin: 0 0 5px;
+  font: 500 7.5px / 1.25 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  color: var(--desk-value-soft, var(--terminal-subtle));
+}
+
+.regime-polarity__scores {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.regime-polarity__label {
+  font: 600 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--regime-polarity-label, var(--desk-label));
+}
+
+.regime-polarity__meter {
+  min-width: 0;
+  height: 11px;
+}
+
+.regime-polarity__score {
+  font-size: 10.5px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+/*
+ * Flow secondary under Regime — IV vs RV dual-pane.
+ * Height pinned to ~default workspace bottom row (38% of desk body via cqh)
+ * so the chart lines up with Top 10 + Net GEX profile bottom panes.
+ * Upper stack (.regime-panel__upper) takes the rest.
+ *
+ * max-height: 46% of Regime keeps chips/headline readable if Price is tall
+ * or the container query is unavailable.
+ */
+.regime-flow {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  /* Fallback ≈ bottom-row share of the Regime column */
+  height: 38%;
+  max-height: 46%;
+  min-height: 128px;
+  padding-top: 6px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Prefer desk-body container units (matches createDefaultWorkspace [62, 38]) */
+@container desk-body (min-height: 240px) {
+  .regime-flow {
+    height: 38cqh;
+    max-height: min(38cqh, 46%);
+  }
+}
+
+.regime-flow-zone {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+
+.regime-flow-zone--vol {
+  flex: 1 1 0;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.regime-flow-zone__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 14px;
+  margin-bottom: 4px;
+}
+
+/* Zone titles — quiet-desk micro-labels */
+.regime-flow-zone__title {
+  flex-shrink: 0;
+  font: 600 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--terminal-muted);
+  white-space: nowrap;
+}
+
+/* Match Regime / rail micro-headers — muted, not series cyan */
+.regime-flow-zone__title--vol {
+  color: var(--terminal-muted);
+}
+
+.regime-flow-zone__meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: 500 7.5px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--terminal-subtle);
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* IV vs RV — minimal text toggles (no chip chrome) */
+.regime-vol__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Window tag (e.g. 7D) sits left of RV / Δ toggles */
+.regime-vol__window {
+  flex-shrink: 0;
+  font: 600 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--terminal-subtle);
+}
+
+.regime-vol__toggle {
+  flex-shrink: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--terminal-subtle);
+  font: 600 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0.55;
+  box-shadow: none;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+.regime-vol__toggle:hover {
+  color: var(--terminal-muted);
+  opacity: 0.85;
+}
+
+.regime-vol__toggle--on {
+  opacity: 1;
+}
+
+.regime-vol__toggle--rv.regime-vol__toggle--on {
+  color: var(--regime-vol-rv);
+}
+
+.regime-vol__toggle--spread.regime-vol__toggle--on {
+  color: var(--regime-vol-spread-pos);
+}
+
+/*
+ * Dual-pane LWC host — fills the pinned .regime-flow height.
+ * Pane stretch (vol vs spread) is set in JS via pane APIs — do not crush spread.
+ * Min-heights are floors only; actual size comes from 38cqh desk-body pin.
+ *
+ * Critical: chart host is position:absolute; inset:0 so LWC gets a real
+ * pixel box. Flex % height alone frequently yields a blank canvas.
+ */
+.regime-vol__chart {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--terminal-bg-soft) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-rule) 70%, transparent);
+  overflow: hidden;
+}
+
+.regime-vol__chart--dual {
+  min-height: 0;
+}
+
+/* Wrapper fills the chart well; canvas + overlays sit absolute inside */
+.regime-vol__lwc,
+.regime-vol__lwc-wrap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+}
+
+.regime-vol__lwc-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  /* Do not set display:flex — LWC injects its own table/canvas structure */
+  background: transparent;
+}
+
+/* Isolate LWC internal table layout from global / Tailwind table resets */
+.regime-vol__lwc-canvas,
+.regime-vol__lwc-canvas table,
+.regime-vol__lwc-canvas tr,
+.regime-vol__lwc-canvas td,
+.regime-vol__lwc,
+.regime-vol__lwc table,
+.regime-vol__lwc tr,
+.regime-vol__lwc td {
+  border: 0 !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.regime-vol__lwc-canvas table,
+.regime-vol__lwc table {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.regime-vol__lwc-canvas canvas,
+.regime-vol__lwc canvas {
+  display: block;
+}
+
+/* GEX heatmap — LWC v5 host (same isolation contract as regime-vol) */
+.heatmap-lwc-wrap {
+  /* Relative so it can flex under the Price/Gamma header; canvas still fills it. */
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+}
+
+.heatmap-lwc-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+}
+
+.heatmap-lwc-canvas,
+.heatmap-lwc-canvas table,
+.heatmap-lwc-canvas tr,
+.heatmap-lwc-canvas td,
+.heatmap-lwc-wrap,
+.heatmap-lwc-wrap table,
+.heatmap-lwc-wrap tr,
+.heatmap-lwc-wrap td {
+  border: 0 !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.heatmap-lwc-canvas table,
+.heatmap-lwc-wrap table {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.heatmap-lwc-canvas canvas,
+.heatmap-lwc-wrap canvas {
+  display: block;
+}
+
+/* Net GEX / Profile — LWC options chart host (vertical histogram: strike X, GEX Y) */
+/*
+ * Plot host sits below ChartPaneHeader in a flex column.
+ * Must NOT use inset:0 absolute on the wrap — that covered the header and
+ * ate all pointer events on mode/expiry toggles.
+ */
+.gex-lwc-wrap {
+  position: relative;
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+  box-sizing: border-box;
+  /* Clip series; time-scale lives inside the canvas host. */
+  overflow: hidden;
+}
+
+/* Legacy overlay layout (no shared header) — pin under floating title strip. */
+.gex-lwc-wrap--overlay {
+  position: absolute;
+  inset: 0;
+  top: 2.25rem;
+  flex: none;
+  height: auto;
+}
+
+.gex-lwc-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+  /* Clip series canvas, but leave room for the reserved time-scale row. */
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/*
+ * Soft reset only — never force height:100% on the LWC table or its rows.
+ * Forcing 100% collapses the bottom time-scale (strike X-axis) and clips
+ * lower strike labels.
+ */
+.gex-lwc-canvas table,
+.gex-lwc-wrap table {
+  width: 100% !important;
+  border: 0 !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+}
+
+.gex-lwc-canvas tr,
+.gex-lwc-canvas td,
+.gex-lwc-wrap tr,
+.gex-lwc-wrap td {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.gex-lwc-canvas canvas,
+.gex-lwc-wrap canvas {
+  display: block;
+}
+
+/* Spot level marker — live Deribit index (vertical line, strike on X) */
+.gex-lwc-spot {
+  pointer-events: none;
+}
+
+.gex-lwc-spot--vertical {
+  width: 0;
+  transform: translateX(-0.5px);
+}
+
+.gex-lwc-spot__glow {
+  position: absolute;
+  top: 0;
+  /* Stop above the axis gutter so the label sits cleanly on the scale */
+  bottom: 26px;
+  left: -1.5px;
+  width: 3px;
+  background: var(--chart-spot-glow, rgba(201, 168, 76, 0.08));
+  opacity: 1;
+  pointer-events: none;
+}
+
+.gex-lwc-spot__line {
+  position: absolute;
+  top: 0;
+  bottom: 26px;
+  left: 0;
+  width: 0;
+  border-left: 1px dashed var(--chart-spot-line, rgba(201, 168, 76, 0.52));
+  background: transparent;
+  opacity: 1;
+  pointer-events: none;
+}
+
+.gex-lwc-spot__label {
+  position: absolute;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/*
+ * Axis-gutter badge — sits on the strike scale, not mid-plot.
+ * Thin tick up into the plot + compact price chip.
+ */
+.gex-lwc-spot__label--axis {
+  bottom: 2px;
+  left: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.gex-lwc-spot__label-tick {
+  display: block;
+  width: 0;
+  height: 5px;
+  border-left: 1px solid var(--chart-spot-solid, #c9a84c);
+  opacity: 0.7;
+  margin-bottom: 1px;
+}
+
+.gex-lwc-spot__label-text {
+  display: block;
+  padding: 1px 5px 2px;
+  border-radius: 2px;
+  border: 1px solid var(--chart-spot-label-border, rgba(201, 168, 76, 0.28));
+  background: var(--chart-spot-label-bg, rgba(12, 14, 16, 0.88));
+  color: var(--chart-spot-solid, #c9a84c);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.95;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+/* Legacy placements (kept if anything still mounts them) */
+.gex-lwc-spot__label--v-top {
+  top: 2px;
+  left: 0;
+  transform: translateX(-50%);
+  padding: 1px 6px 2px;
+  border-radius: 2px;
+  border: 1px solid var(--chart-spot-label-border);
+  background: var(--chart-spot-label-bg);
+  color: var(--chart-spot-solid);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 8.5px;
+  font-weight: 600;
+}
+
+.gex-lwc-spot__label--v-left-mid {
+  top: 50%;
+  left: 0;
+  transform: translate(calc(-100% + 4px), -50%);
+  padding: 1px 6px 2px;
+  border-radius: 2px;
+  border: 1px solid var(--chart-spot-label-border);
+  background: var(--chart-spot-label-bg);
+  color: var(--chart-spot-solid);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 8.5px;
+  font-weight: 600;
+}
+
+/* Thin hairline between IV/RV pane and spread pane */
+.regime-vol__pane-sep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 1px;
+  pointer-events: none;
+  background: rgba(160, 168, 180, 0.28);
+  transform: translateY(-0.5px);
+}
+
+/* Per-series hover value labels — shared X, own Y */
+.regime-vol__hover-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.regime-vol__hover-label {
+  position: absolute;
+  transform: translateY(-50%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: 600 9px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-shadow:
+    0 0 4px color-mix(in srgb, var(--terminal-bg) 92%, transparent),
+    0 0 8px color-mix(in srgb, var(--terminal-bg) 75%, transparent);
+}
+
+.regime-vol__hover-label--iv {
+  color: var(--regime-vol-dvol);
+}
+
+.regime-vol__hover-label--rv {
+  color: var(--regime-vol-rv);
+}
+
+.regime-vol__hover-label--spread {
+  color: var(--regime-vol-spread-pos);
+}
+
+.regime-vol__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 500 8px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--terminal-subtle);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .regime-profile__marker line,
+  .regime-profile__marker polygon,
+  .regime-profile__marker text,
+  .regime-metric {
+    transition: none;
+  }
+}
+
+/* Empty profile well — no crosshair cursor when no samples */
+.regime-profile[aria-hidden='true'] {
+  cursor: default;
+}
+
 * {
   scrollbar-color: var(--terminal-scrollbar-thumb) var(--terminal-scrollbar-track);
   scrollbar-width: thin;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Empty pane hover labels + context menu                                      */
+/* Browsers enforce ~10–12px min font-size; scale from a safe 11px base.       */
+/* -------------------------------------------------------------------------- */
+.empty-pane__label {
+  display: block;
+  color: var(--terminal-muted);
+  font: 600 11px / 1.1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  transform: scale(0.72);
+  transform-origin: center top;
+}
+
+.empty-pane__hint {
+  display: block;
+  margin-top: 1px;
+  color: var(--terminal-subtle);
+  font: 500 11px / 1.1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  transform: scale(0.64);
+  transform-origin: center top;
+}
+
+.empty-pane-menu {
+  position: fixed;
+  z-index: 90;
+  width: 104px;
+  overflow: hidden;
+  border: 1px solid var(--terminal-border-strong);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--terminal-surface) 96%, var(--terminal-bg));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 3px 0 2px;
+}
+
+.empty-pane-menu__heading {
+  padding: 2px 8px 1px;
+  color: var(--terminal-subtle);
+  font: 600 11px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transform: scale(0.62);
+  transform-origin: left center;
+}
+
+.empty-pane-menu__rule {
+  height: 1px;
+  margin: 2px 6px;
+  background: var(--terminal-rule);
+}
+
+.empty-pane-menu__rule--soft {
+  background: color-mix(in srgb, var(--terminal-rule) 70%, transparent);
+}
+
+.empty-pane-menu__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 16px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--terminal-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.empty-pane-menu__item:hover,
+.empty-pane-menu__item:focus-visible {
+  background: var(--terminal-surface-2);
+  color: var(--terminal-heading);
+  outline: none;
+}
+
+.empty-pane-menu__item-label {
+  display: inline-block;
+  font: 500 11px / 1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  transform: scale(0.7);
+  transform-origin: left center;
+}
+
+.empty-pane-menu__item--danger {
+  color: color-mix(in srgb, var(--terminal-red) 72%, var(--terminal-muted) 28%);
+}
+
+.empty-pane-menu__item--danger:hover,
+.empty-pane-menu__item--danger:focus-visible {
+  background: var(--terminal-red-soft);
+  color: var(--terminal-red-strong);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Multi-panel workspace: drag handle, drop target, add-panel control          */
+/* -------------------------------------------------------------------------- */
+
+/* Add-panel control — fixed mono metrics (no Button CVA uppercase scale bugs). */
+.terminal-add-panel {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 22px;
+  min-height: 22px;
+  max-height: 22px;
+  padding: 0 8px 0 6px;
+  border: 1px solid var(--terminal-control-border);
+  border-radius: var(--terminal-control-radius);
+  background: var(--terminal-bg-soft);
+  box-shadow: var(--terminal-control-inset);
+  color: var(--desk-value, var(--terminal-text));
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color 0.14s ease,
+    background 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.terminal-add-panel:hover:not(:disabled) {
+  border-color: var(--terminal-border-strong);
+  background: var(--terminal-surface-2);
+  color: var(--terminal-heading);
+}
+
+.terminal-add-panel:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.terminal-add-panel:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--terminal-border-strong) 80%, transparent);
+  outline-offset: 1px;
+}
+
+.terminal-add-panel__icon {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.terminal-add-panel__label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pane-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  min-width: 16px;
+  max-width: 16px;
+  height: 20px;
+  min-height: 20px;
+  max-height: 20px;
+  padding: 0;
+  border-radius: var(--terminal-control-radius);
+  color: var(--desk-label);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  flex-shrink: 0;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.pane-drag-handle:hover {
+  color: var(--desk-value);
+  background: color-mix(in srgb, var(--terminal-surface-2) 80%, transparent);
+}
+
+.pane-drag-handle:active,
+.pane-workspace--dragging .pane-drag-handle {
+  cursor: grabbing;
+}
+
+.empty-pane__drag {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.empty-pane:hover .empty-pane__drag,
+.empty-pane:focus-within .empty-pane__drag {
+  opacity: 1;
+}
+
+.pane-workspace--dragging {
+  cursor: grabbing;
+}
+
+.pane-workspace__cell--dragging {
+  opacity: 0.42;
+  filter: saturate(0.7);
+}
+
+.pane-workspace__cell--drop-target {
+  box-shadow: inset 0 0 0 1px var(--terminal-active-border),
+    inset 0 0 24px color-mix(in srgb, var(--terminal-green) 8%, transparent);
+}
+
+.pane-workspace__drag-ghost {
+  padding: 3px 8px;
+  border: 1px solid var(--terminal-border-strong);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--terminal-surface) 92%, var(--terminal-bg));
+  color: var(--desk-value);
+  font: 600 10px / 1.2 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  opacity: 0.92;
+  white-space: nowrap;
 }

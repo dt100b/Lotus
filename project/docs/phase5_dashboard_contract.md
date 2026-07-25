@@ -1,8 +1,14 @@
 # Phase 5 Dashboard Contract
 
+Current contract version: `phase5.dashboard.v2`.
+
 Phase 5 is a presentation-only layer for validated BTC gamma exposure outputs.
 It does not reconstruct trades, replay inventory, or recompute dealer methodology.
 Those responsibilities remain upstream in `collector/`, `normalizer/`, `ledger/`, and `greeks/`.
+
+Continuous snapshot refresh and the production live terminal path are **Phase 6**
+(`project/docs/phase6_live_ops.md`). Phase 6 reuses this contract without
+changing field semantics.
 
 ## Boundary
 
@@ -28,9 +34,14 @@ The dashboard reads one JSON document with this exact shape:
       "call_gex": 18.7,
       "put_gex": -6.3
     }
-  ]
+  ],
 }
 ```
+
+`rows` is required and is always the production (blocks/combos excluded) profile.
+Optional archived fields `rows_include_otc` / `include_otc_prints_available` may
+appear if dual materialize was re-enabled; they are not used by the live desk
+(see `project/docs/archived_include_otc_prints.md`).
 
 ## Field Semantics
 
@@ -96,6 +107,8 @@ Query parameters:
 
 - `expiry`: `"ALL"` or one expiry present in the snapshot
 - `view`: `net`, `call`, or `put`
+- `include_otc_prints`: `false` (default) or `true` — **archived secondary path**;
+  see `project/docs/archived_include_otc_prints.md`. Live desk does not use this.
 
 Response fields:
 
@@ -106,6 +119,8 @@ Response fields:
 - `view`
 - `expiries`
 - `points`
+- `ledger_policy`: always `"exclude_otc_prints"` for the live default
+- `include_otc_prints_available`: whether an archived secondary profile is present
 
 Each item in `points` contains:
 
@@ -117,6 +132,56 @@ Each item in `points` contains:
 
 `value` is the selected display series for the requested `view`.
 For `expiry=ALL`, Phase 5 aggregates snapshot rows by strike across expiries.
+
+### `GET /api/v1/terminal-snapshot`
+
+Returns the enriched terminal-ready snapshot used by the Vite frontend. This is
+an additive v2 API over the v1 profile endpoints.
+
+Top-level fields include:
+
+- `as_of_utc`, `symbol`, `expiry`, `expiries`, and `spot` (materialize GEX spot)
+- `live_index`: live Deribit `btc_usd` when reachable (null otherwise). Shared
+  by Price panel Index, chart spot lines, and trading DIST %; charts fall back
+  to `spot` when null. GEX bar heights / Flip level still use materialize data.
+- `gamma_bars` with signed net/call/put GEX by strike (production, blocks/combos excluded)
+- `market_sources` with live Deribit `btc_usd` settlement index (serve-time,
+  short cache) and, when reachable, the cached Hyperliquid BTC perp mid plus
+  live basis (`HL_mid − Deribit_btc_usd_index`). Snapshot `spot` / GEX
+  `spot_price` is not used for Index or basis.
+- `levels` with backend-derived all-expiry, 0DTE, and reference level metadata
+- `rankings` for all-expiry, selected-expiry, and 0DTE top strikes
+- `expiry_events` for the compact `OPEX` panel
+
+Archived optional fields (`gamma_bars_include_otc`, `include_otc_prints_available`)
+are documented in `project/docs/archived_include_otc_prints.md` and are not used
+by the live terminal UI.
+
+Level semantics (taker-flow net GEX peaks + independent reference metrics):
+
+- `Positive Gamma`: strike with most positive `net_gex` (`argmax`).
+- `Negative Gamma`: strike with most negative `net_gex` (`argmin`).
+- Same two fields under `zero_dte`, computed only on the front/0DTE surface.
+- `Gamma Flip` (under `reference`): mass-valid cumulative net-GEX zero-cross (low→high),
+  linear interpolation between strikes, nearest to spot among valid crosses (tie → larger
+  mass). Mass filter: |prev_cum| + |next_cum| ≥ 1.5% of Σ|net_gex|. Eligibility window:
+  |level − spot| / spot ≤ 0.15 (±15%); far mass-valid crosses are discarded. When no
+  mass-valid in-window cross: value is `—`, `status` is `no_cross`, and top-level
+  `gamma_flip` / `zero_gamma` are null (`gamma_flip_status: "no_cross"`). Never invent
+  Flip from flattest |net_gex| or an out-of-window cross. Empty-state copy is carried on
+  `gamma_flip_note` (and reference `note`) with locked strings:
+  `No local flip · GEX one-sided`, optionally suffixed `(short)` / `(long)` from clean
+  local-book net GEX sign inside the ±15% window (else neutral). (Regime profile corridor
+  is a separate display-only band at spot ± 8%.)
+- `Max Pain` (under `reference`): OI-weighted payoff-minimization strike (OI-derived).
+- `Expected Move` (under `reference`): one-standard-deviation range from spot, IV, and
+  time to front expiry — independent of the GEX model.
+
+Signed call/put GEX are **not** flipped in the presentation layer. Each leg follows
+dealer inventory sign from cumulative taker flow.
+
+The frontend treats this endpoint as authoritative and does not recompute
+methodology from raw trades.
 
 ## Validation Rules
 

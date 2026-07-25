@@ -43,6 +43,30 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow the pipeline to complete even if the final dashboard snapshot has zero rows.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=("auto", "full", "incremental"),
+        default="auto",
+        help=(
+            "auto uses inventory_checkpoint.json when compatible; "
+            "full always rebuilds from the entire Phase 1 history; "
+            "incremental requires a usable checkpoint."
+        ),
+    )
+    parser.add_argument(
+        "--lightweight",
+        action="store_true",
+        help="Skip multi-GB intermediate JSONL/CSV artifacts (Phase 6 live style).",
+    )
+    parser.add_argument(
+        "--include-otc-secondary",
+        action="store_true",
+        help=(
+            "ARCHIVED feature: also materialize the include-OTC (blocks/combos) "
+            "secondary GEX profile. Off by default; see "
+            "project/docs/archived_include_otc_prints.md."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -55,6 +79,9 @@ def main() -> None:
         greeks_json=args.greeks_json,
         snapshot_id=args.snapshot_id,
         fail_on_empty=not args.allow_empty,
+        mode=args.mode,
+        lightweight=args.lightweight,
+        enable_include_otc_secondary=args.include_otc_secondary,
     )
     print(json.dumps(result.to_dict(), indent=2))
 

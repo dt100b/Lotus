@@ -62,6 +62,108 @@ export function getDeribitExpiryMs(expiry: string) {
   return parseDeribitExpiry(expiry)?.getTime() ?? null
 }
 
+/**
+ * Deribit contract structure (options):
+ *  - Weekly  → every Friday 08:00 UTC
+ *  - Monthly → last Friday of each calendar month 08:00 UTC
+ *  - Quarterly → last Friday of Mar / Jun / Sep / Dec 08:00 UTC
+ *  - Daily   → any other listed day
+ *
+ * @see https://support.deribit.com (Contract Introduction Policy)
+ */
+export type DeribitExpiryStructure = 'daily' | 'weekly' | 'monthly' | 'quarterly'
+
+/** Desk UI tenor tag — structural + 0DTE (front) + ALL. */
+export type ExpiryTenor = 'all' | '0dte' | DeribitExpiryStructure
+
+/** Pure Deribit structural class from the expiry date code. */
+export function getDeribitExpiryStructure(expiry: string): DeribitExpiryStructure {
+  const date = parseDeribitExpiry(expiry)
+  if (!date) return 'daily'
+
+  // Last Friday of month wins over plain weekly.
+  if (isLastFridayOfMonth(date)) {
+    // Quarter months: Mar=2, Jun=5, Sep=8, Dec=11
+    return [2, 5, 8, 11].includes(date.getUTCMonth()) ? 'quarterly' : 'monthly'
+  }
+
+  return date.getUTCDay() === 5 ? 'weekly' : 'daily'
+}
+
+/**
+ * Classify for labels. Front book date is always 0DTE (even if it is also
+ * a Friday weekly / monthly / quarterly structurally).
+ */
+export function getExpiryTenor(
+  expiry: string,
+  frontExpiry?: string | null,
+): ExpiryTenor {
+  if (expiry === 'ALL') return 'all'
+  if (frontExpiry && expiry === frontExpiry) return '0dte'
+  return getDeribitExpiryStructure(expiry)
+}
+
+/**
+ * Build select options with Deribit structural tags on every matching date:
+ *  ALL · 0DTE (front) · Weekly / Monthly / Quarterly for all Fridays of that class
+ *  · bare codes for plain dailies (e.g. 27JUL26)
+ */
+export function buildExpirySelectOptions(
+  listedExpiries: string[],
+): Array<{ value: string; label: string; shortLabel: string }> {
+  const front = listedExpiries[0] ?? null
+
+  return [
+    { value: 'ALL', label: 'ALL', shortLabel: 'ALL' },
+    ...listedExpiries.map((value) => {
+      const tenor = getExpiryTenor(value, front)
+      return {
+        value,
+        label: formatTenorExpiryLabel(value, tenor, 'full'),
+        shortLabel: formatTenorExpiryLabel(value, tenor, 'short'),
+      }
+    }),
+  ]
+}
+
+export function formatExpiryOptionLabel(
+  expiry: string,
+  frontExpiry?: string | null,
+): string {
+  return formatTenorExpiryLabel(expiry, getExpiryTenor(expiry, frontExpiry), 'full')
+}
+
+export function formatExpiryOptionShortLabel(
+  expiry: string,
+  frontExpiry?: string | null,
+): string {
+  return formatTenorExpiryLabel(expiry, getExpiryTenor(expiry, frontExpiry), 'short')
+}
+
+function formatTenorExpiryLabel(
+  expiry: string,
+  tenor: ExpiryTenor,
+  style: 'full' | 'short',
+): string {
+  if (tenor === 'all') return 'ALL'
+  if (tenor === '0dte') return '0DTE'
+  if (tenor === 'daily') return expiry
+  if (style === 'short') {
+    if (tenor === 'weekly') return `W ${expiry}`
+    if (tenor === 'monthly') return `M ${expiry}`
+    return `Q ${expiry}`
+  }
+  if (tenor === 'weekly') return `Weekly ${expiry}`
+  if (tenor === 'monthly') return `Monthly ${expiry}`
+  return `Quarterly ${expiry}`
+}
+
+function isLastFridayOfMonth(date: Date) {
+  if (date.getUTCDay() !== 5) return false
+  const nextFriday = new Date(date.getTime() + 7 * dayMs)
+  return nextFriday.getUTCMonth() !== date.getUTCMonth()
+}
+
 function addExpiryDates(expiries: Map<number, DeribitExpiry>, dates: Date[]) {
   for (const date of dates) {
     expiries.set(date.getTime(), formatDeribitExpiry(date))

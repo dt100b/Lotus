@@ -136,16 +136,22 @@ class SchemaContractTests(unittest.TestCase):
             "input_event_count",
             "applied_event_count",
             "excluded_event_count",
+            "batch_input_event_count",
+            "batch_applied_event_count",
+            "batch_excluded_event_count",
             "position_delta_count",
             "snapshot_count",
             "final_trade_seq",
             "final_nonzero_position_count",
             "position_deltas_sha256",
             "snapshots_sha256",
+            "incremental",
         }
         self.assertEqual(set(manifest.keys()), required)
         self.assertEqual(manifest["input_event_count"], 2)
         self.assertEqual(manifest["applied_event_count"], 2)
+        self.assertEqual(manifest["batch_input_event_count"], 2)
+        self.assertFalse(manifest["incremental"])
         self.assertIsInstance(manifest["position_deltas_sha256"], str)
         self.assertEqual(len(manifest["position_deltas_sha256"]), 64)
 

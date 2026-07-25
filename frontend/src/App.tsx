@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { TerminalDashboard } from '@/components/terminal/TerminalDashboard'
 import { useTerminalStore } from '@/store/terminalStore'
 
@@ -10,9 +11,11 @@ function App() {
   }, [theme])
 
   return (
-    <main className="min-h-screen bg-[var(--terminal-bg)] text-[var(--terminal-text)]">
-      <TerminalDashboard />
-    </main>
+    <ErrorBoundary>
+      <main className="terminal-desk min-h-screen bg-[var(--terminal-bg)] text-[var(--desk-value,var(--terminal-text))]">
+        <TerminalDashboard />
+      </main>
+    </ErrorBoundary>
   )
 }
 

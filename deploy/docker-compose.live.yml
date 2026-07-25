@@ -1,0 +1,30 @@
+# Minimal compose fragment for the Phase 6 live refresher with restart policy.
+# Usage (from repo root, after history DB exists):
+#   docker compose -f deploy/docker-compose.live.yml up -d live-refresh
+#
+# Mount the same volume for the API container if you run it separately so both
+# see project/greeks/data/latest_gex_snapshot.json and phase1_history.sqlite3.
+
+services:
+  live-refresh:
+    image: python:3.13-slim
+    working_dir: /app
+    volumes:
+      - ../:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    command:
+      - bash
+      - -lc
+      - |
+        pip install -q -e . &&
+        python project/scripts/refresh_dashboard_live.py \
+          --db-path project/data/phase1_history.sqlite3 \
+          --artifacts-dir project/runtime/dashboard_build \
+          --snapshot-path project/greeks/data/latest_gex_snapshot.json \
+          --job-name btc_options_live_phase6 \
+          --lookback-minutes 180 \
+          --interval-seconds 120 \
+          --materialize-mode auto
+    restart: unless-stopped
+    stop_grace_period: 60s

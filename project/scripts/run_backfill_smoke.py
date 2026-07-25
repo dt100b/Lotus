@@ -19,14 +19,35 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Deribit BTC option Phase 1 smoke backfill.")
     parser.add_argument("--minutes", type=int, default=30, help="Recent lookback window in minutes")
-    parser.add_argument("--page-size", type=int, default=200, help="Deribit page size (max 1000)")
+    parser.add_argument("--page-size", type=int, default=200, help="Deribit page size (max 1000 on main host)")
     parser.add_argument("--max-pages", type=int, default=5, help="Maximum pages to fetch")
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Hit history.deribit.com instead of the main host (for deep-window diagnostics).",
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="If set, lookback window in days (overrides --minutes). Useful with --history.",
+    )
     args = parser.parse_args()
 
     now_ms = int(time.time() * 1000)
-    start_ms = now_ms - (args.minutes * 60 * 1000)
+    if args.days is not None:
+        start_ms = now_ms - (args.days * 24 * 60 * 60 * 1000)
+    else:
+        start_ms = now_ms - (args.minutes * 60 * 1000)
 
-    with DeribitClient() as client:
+    base_url = (
+        "https://history.deribit.com/api/v2"
+        if args.history
+        else "https://www.deribit.com/api/v2"
+    )
+    print(f"Smoke host: {base_url}")
+
+    with DeribitClient(base_url=base_url) as client:
         instruments = client.get_instruments(currency="BTC", kind="option", expired=False)
         baseline = client.get_last_trades_by_currency(
             currency="BTC",

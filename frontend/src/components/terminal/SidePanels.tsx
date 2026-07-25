@@ -1,62 +1,51 @@
-import { useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { WallSignificanceChart } from '@/components/terminal/WallSignificanceChart'
-import type { ExpiryKind, ExpiryPositioningEvent, TerminalSnapshot } from '@/data/mockTerminal'
+import { RegimePanel } from '@/components/terminal/RegimePanel'
+import {
+  getDisplaySpot,
+  type AdvancedMetric,
+  type ExpiryKind,
+  type ExpiryPositioningEvent,
+  type LevelItem,
+  type TerminalSnapshot,
+} from '@/data/mockTerminal'
 import { formatMillions, formatSignedPercent, formatStrike, formatUsd } from '@/lib/formatters'
-import { useTerminalStore, type LevelVisibilityKey } from '@/store/terminalStore'
-import { getSpotDistanceColor, levelColors } from '@/data/levelColors'
+import { useTerminalStore } from '@/store/terminalStore'
+import { getSpotDistanceColor, levelRoleCssVars } from '@/data/levelColors'
+import { cn } from '@/lib/utils'
 
 type SidePanelsProps = {
   snapshot: TerminalSnapshot
   allExpirySnapshot?: TerminalSnapshot
 }
 
-type LevelPanelTab = 'levels' | 'walls' | 'expiry'
+/** Side-rail desk tabs: REGIME · LEVELS · WALLS · OPEX */
+type LevelPanelTab = 'regime' | 'levels' | 'walls' | 'expiry'
 
-const allLevelVisibilityKeys: LevelVisibilityKey[] = [
-  'allExpiryHvl',
-  'allExpiryCallResistance',
-  'allExpiryPutSupport',
-  'zeroDteHvl',
-  'zeroDteCall',
-  'zeroDtePut',
-  'advancedZeroGamma',
-  'advancedMaxPain',
-  'advancedExpectedMove',
-  'advancedGammaFlipZones',
-]
-
-export function SidePanels({
+export const SidePanels = memo(function SidePanels({
   snapshot,
   allExpirySnapshot,
 }: SidePanelsProps) {
-  const [levelPanelTab, setLevelPanelTab] = useState<LevelPanelTab>('levels')
+  const [levelPanelTab, setLevelPanelTab] = useState<LevelPanelTab>('regime')
   const theme = useTerminalStore((state) => state.theme)
-  const levelVisibility = useTerminalStore((state) => state.levelVisibility)
-  const setLevelVisibility = useTerminalStore((state) => state.setLevelVisibility)
-  const allLevelsVisible = allLevelVisibilityKeys.every((level) => levelVisibility[level])
-  const toggleAllLevels = () => {
-    const nextVisible = !allLevelsVisible
 
-    allLevelVisibilityKeys.forEach((level) => setLevelVisibility(level, nextVisible))
-  }
+  // Book structure + regime always use the full surface so chart expiry filters do not mutate the desk.
+  const bookSnapshot = allExpirySnapshot ?? snapshot
 
   return (
     <aside className="terminal-panel terminal-rail grid h-full grid-rows-[auto_minmax(0,1fr)] content-stretch items-stretch">
       <RailSection
-        title="Price Sources"
+        title="Price"
       >
-        <div className="grid gap-0">
+        <div className="rail-price">
           {snapshot.marketSources.map((source) => (
-            <div
-              key={source.name}
-              className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-[var(--terminal-rule)] px-1 py-1.5 text-[10.5px] last:border-b-0"
-            >
-              <div className="flex min-w-0 items-center gap-2.5 text-[var(--terminal-muted)]">
+            <div key={source.name} className="rail-price__row">
+              <div className="rail-price__name">
                 <SourceLogo sourceName={source.name} />
                 <span className="truncate">{source.name}</span>
               </div>
-              <div className="text-right">
-                <div className="terminal-value text-[11px] font-semibold leading-none text-[var(--terminal-heading)]">{formatUsd(source.value)}</div>
+              <div>
+                <div className="rail-price__value">{formatUsd(source.value)}</div>
                 <div className={getPriceSourceNoteClassName(source.note)}>{source.note}</div>
               </div>
             </div>
@@ -72,60 +61,27 @@ export function SidePanels({
             onTabChange={setLevelPanelTab}
           />
         )}
-        action={levelPanelTab === 'levels' ? (
-          <div className="flex items-center gap-1.5">
-            <ToggleAllLevelsButton allVisible={allLevelsVisible} onToggle={toggleAllLevels} />
-            <CopyLevelsButton />
-          </div>
-        ) : null}
+        action={levelPanelTab === 'levels' ? <CopyLevelsButton /> : null}
         className="flex min-h-0 flex-col"
       >
-        {levelPanelTab === 'levels' ? (
-          <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
-            <PanelGroupTitle title="All-Expiry Levels" />
-            <LevelRows
-              title="All-Expiry Levels"
-              items={snapshot.levels.allExpiry}
-              levelVisibility={levelVisibility}
-              setLevelVisibility={setLevelVisibility}
-              spot={snapshot.spot}
-            />
-
-            <PanelGroupTitle title="0DTE Levels" />
-            <LevelRows
-              title="0DTE Levels"
-              items={snapshot.levels.zeroDte}
-              levelVisibility={levelVisibility}
-              setLevelVisibility={setLevelVisibility}
-              spot={snapshot.spot}
-            />
-
-            <PanelGroupTitle title="Advanced" />
-            <AdvancedRows
-              items={snapshot.levels.advanced}
-              levelVisibility={levelVisibility}
-              setLevelVisibility={setLevelVisibility}
-              spot={snapshot.spot}
-            />
-            <GammaRegimeExtension snapshot={snapshot} />
-          </div>
+        {levelPanelTab === 'regime' ? (
+          <RegimePanel bookSnapshot={bookSnapshot} />
+        ) : levelPanelTab === 'levels' ? (
+          <LevelsDesk
+            bookSnapshot={bookSnapshot}
+            sessionLevels={snapshot.levels.zeroDte}
+            // Reference Flip is always ALL-book cumulative (Levels tab only).
+            reference={bookSnapshot.levels.reference}
+          />
         ) : levelPanelTab === 'walls' ? (
-          <WallSignificanceChart snapshot={allExpirySnapshot ?? snapshot} />
+          <WallSignificanceChart snapshot={bookSnapshot} />
         ) : (
           <ExpiryImpactPanel snapshot={snapshot} />
         )}
       </RailSection>
     </aside>
   )
-}
-
-type LevelPanelProps = {
-  title: string
-  items: TerminalSnapshot['levels']['allExpiry']
-  levelVisibility: Record<LevelVisibilityKey, boolean>
-  setLevelVisibility: (level: LevelVisibilityKey, visible: boolean) => void
-  spot: number
-}
+})
 
 type RailSectionProps = {
   title: ReactNode
@@ -141,7 +97,7 @@ function RailSection({ title, action, className, children }: RailSectionProps) {
         {typeof title === 'string' ? <h2 className="terminal-title whitespace-nowrap">{title}</h2> : title}
         {action ? <div className="terminal-section-action">{action}</div> : null}
       </div>
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
     </section>
   )
 }
@@ -166,10 +122,16 @@ function LevelPanelTabs({
 
   return (
     <div
-      aria-label="Levels rail view"
+      aria-label="Side rail desk view"
       className={rootClassName}
       role="tablist"
     >
+      <LevelPanelTabButton
+        active={activeTab === 'regime'}
+        className={getTabClassName(activeTab === 'regime')}
+        label="Regime"
+        onClick={() => onTabChange('regime')}
+      />
       <LevelPanelTabButton
         active={activeTab === 'levels'}
         className={getTabClassName(activeTab === 'levels')}
@@ -185,7 +147,7 @@ function LevelPanelTabs({
       <LevelPanelTabButton
         active={activeTab === 'expiry'}
         className={getTabClassName(activeTab === 'expiry')}
-        label="Expiry"
+        label="OPEX"
         onClick={() => onTabChange('expiry')}
       />
     </div>
@@ -216,92 +178,187 @@ function LevelPanelTabButton({
   )
 }
 
-function ToggleAllLevelsButton({
-  allVisible,
-  onToggle,
-}: {
-  allVisible: boolean
-  onToggle: () => void
-}) {
-  return (
-    <button
-      aria-label={allVisible ? 'Hide all GEX levels' : 'Show all GEX levels'}
-      aria-pressed={allVisible}
-      className="group flex h-4 w-6 cursor-pointer items-center justify-center focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--terminal-green)]"
-      title={allVisible ? 'Hide all levels' : 'Show all levels'}
-      type="button"
-      onClick={onToggle}
-    >
-      <span
-        aria-hidden="true"
-        className={allVisible
-          ? 'relative h-3.5 w-6 rounded-full border border-[var(--terminal-active-border)] bg-[var(--terminal-active-toggle-bg)] shadow-[var(--terminal-active-shadow)] transition-[background-color,border-color,box-shadow] duration-200'
-          : 'relative h-3.5 w-6 rounded-full border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] shadow-[var(--terminal-control-inset)] transition-[background-color,border-color,box-shadow] duration-200 group-hover:border-[var(--terminal-border-strong)]'}
-      >
-        <span
-          className={allVisible
-            ? 'absolute left-[11px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[var(--terminal-green-strong)] shadow-[0_0_7px_color-mix(in_srgb,var(--terminal-green-strong)_42%,transparent)] transition-[left,background-color,box-shadow] duration-200'
-            : 'absolute left-[2px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[var(--terminal-subtle)] transition-[left,background-color,box-shadow] duration-200'}
-        />
-      </span>
-    </button>
-  )
-}
-
 function CopyLevelsButton() {
+  // Browser min-font floors block true 9px; scale from a safe 11px base (same pattern as heatmap chips).
   return (
     <button
       aria-label="Copy GEX levels"
-      className="flex h-4 min-w-10 cursor-pointer items-center justify-center rounded-[var(--terminal-control-radius)] border border-[var(--terminal-control-border)] bg-[var(--terminal-bg-soft)] px-1.5 text-[10px] font-semibold uppercase leading-none text-[var(--terminal-blue)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)] transition-[border-color,background-color,box-shadow,color,transform] duration-150 hover:border-[var(--terminal-blue)] hover:bg-[rgba(134,169,199,0.12)] hover:text-[var(--terminal-heading)] hover:ring-1 hover:ring-[rgba(134,169,199,0.34)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--terminal-blue)] active:translate-y-px"
+      className="levels-copy-btn cursor-pointer border-0 bg-transparent p-0 text-[var(--terminal-subtle)] transition-colors duration-150 hover:text-[var(--terminal-heading)] focus-visible:outline-none focus-visible:text-[var(--terminal-heading)]"
       type="button"
     >
-      <span className="inline-block origin-center scale-[0.72] tracking-[0.08em]">
-        Copy
-      </span>
+      <span className="levels-copy-btn__label">Copy</span>
     </button>
   )
 }
 
-function PanelGroupTitle({ title }: { title: string }) {
+/**
+ * Levels instrument board for an intraday directional trader.
+ *
+ * Read-only structural desk — no chart overlay toggles.
+ * Order: Key Levels → All → 0DTE → Weekly → Monthly → Quarterly.
+ * All / 0DTE / tenors = Positive Gamma + Negative Gamma (flow net_gex extrema).
+ * Key Levels = Gamma Flip (flow), Max Pain (OI), Expected Move (vol).
+ * Regime lives on its own tab (Dealer Γ / Net GEX / Context / vol chips / IV−RV).
+ * Structure/NY Session polarity is archived (see archived/RegimePolarityBlock.tsx).
+ */
+function LevelsDesk({
+  bookSnapshot,
+  sessionLevels,
+  reference,
+}: {
+  bookSnapshot: TerminalSnapshot
+  sessionLevels: LevelItem[]
+  reference: AdvancedMetric[]
+}) {
+  // Key Levels: Gamma Flip (not "Zero Gamma"), Max Pain, Expected Move.
+  const contextMetrics = useMemo(
+    () => reference.filter((metric) => (
+      !metric.label.includes('Zero Gamma')
+    )),
+    [reference],
+  )
+
+  // DIST % / nearest-to-spot: live Deribit index when present.
+  const displaySpot = getDisplaySpot(bookSnapshot)
+  const weekly = bookSnapshot.levels.weekly ?? []
+  const monthly = bookSnapshot.levels.monthly ?? []
+  const quarterly = bookSnapshot.levels.quarterly ?? []
+
   return (
-    <div className="mt-1 flex items-center gap-2 first:mt-0">
-      <span className="text-[9.5px] font-semibold uppercase leading-none tracking-[0.14em] text-[var(--terminal-muted)]">{title}</span>
-      <span className="h-px flex-1 bg-[var(--terminal-rule)]" />
+    <div
+      className="levels-desk flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-y-auto overflow-x-hidden"
+      aria-label="Levels desk"
+    >
+      <section className="shrink-0">
+        <PanelGroupTitle title="Key Levels" />
+        <ReferenceRows
+          items={contextMetrics}
+          spot={displaySpot}
+        />
+      </section>
+
+      <section className="shrink-0">
+        <PanelGroupTitle title="All" />
+        <LevelRows
+          group="all-expiry"
+          items={bookSnapshot.levels.allExpiry}
+          spot={displaySpot}
+        />
+      </section>
+
+      <section className="shrink-0">
+        <PanelGroupTitle title="0DTE" />
+        <LevelRows
+          group="0dte"
+          items={sessionLevels}
+          spot={displaySpot}
+        />
+      </section>
+
+      {weekly.length > 0 ? (
+        <section className="shrink-0">
+          <PanelGroupTitle
+            title="Weekly"
+            scope={getLevelGroupScope(weekly)}
+          />
+          <LevelRows
+            group="weekly"
+            items={weekly}
+            spot={displaySpot}
+          />
+        </section>
+      ) : null}
+
+      {monthly.length > 0 ? (
+        <section className="shrink-0">
+          <PanelGroupTitle
+            title="Monthly"
+            scope={getLevelGroupScope(monthly)}
+          />
+          <LevelRows
+            group="monthly"
+            items={monthly}
+            spot={displaySpot}
+          />
+        </section>
+      ) : null}
+
+      {quarterly.length > 0 ? (
+        <section className="shrink-0">
+          <PanelGroupTitle
+            title="Quarterly"
+            scope={getLevelGroupScope(quarterly)}
+          />
+          <LevelRows
+            group="quarterly"
+            items={quarterly}
+            spot={displaySpot}
+          />
+        </section>
+      ) : null}
     </div>
   )
 }
 
-function LevelRows({ title, items, levelVisibility, setLevelVisibility, spot }: LevelPanelProps) {
+function PanelGroupTitle({ title, scope }: { title: string; scope?: string | null }) {
   return (
-    <div className="grid gap-0">
+    <div className="levels-desk__group-title">
+      <span className="levels-desk__group-title-text">{title}</span>
+      {scope ? (
+        <span className="levels-desk__group-title-scope">{scope}</span>
+      ) : null}
+      <span className="levels-desk__group-title-rule" aria-hidden />
+    </div>
+  )
+}
+
+function getLevelGroupScope(items: LevelItem[]) {
+  const raw = items.find((item) => item.scopeLabel)?.scopeLabel
+  if (!raw) return null
+  return formatExpiryDisplay(raw)
+}
+
+function LevelRows({
+  group,
+  items,
+  spot,
+}: {
+  group: LevelGammaGroup
+  items: LevelItem[]
+  spot: number
+}) {
+  const nearestLabel = useMemo(() => getNearestLevelLabel(items, spot), [items, spot])
+
+  return (
+    <div className="levels-board">
       {items.map((item) => {
-        const visibilityKey = getLevelVisibilityKey(title, item.label)
-        const visible = levelVisibility[visibilityKey]
         const distanceFromSpotPercent = item.distanceFromSpotPercent ?? getDistanceFromSpotPercent(item.strike, spot)
-        const markerColor = getLevelMarkerColor(title, item.label)
+        const displayLabel = item.label.replace(/^0DTE\s+/i, '')
+        const accent = getLevelRoleAccent(group, item.label)
+        const roleMod = getLevelRoleModifier(item.label)
+        const nearest = item.label === nearestLabel
 
         return (
           <div
-            key={item.label}
-            className={getLevelRowClassName()}
+            key={`${group}-${item.label}`}
+            className={cn(
+              'levels-board__row',
+              roleMod,
+              nearest && 'levels-board__row--nearest',
+            )}
+            style={{ '--level-role-accent': accent } as CSSProperties}
           >
-            <div className="relative z-10 flex items-center gap-3 px-1 py-1.5 text-[var(--terminal-text)]">
-              <MetricMarkerButton
-                color={markerColor}
-                label={item.label}
-                variant={getLevelMarkerVariant(item.label)}
-                visible={visible}
-                onToggle={() => setLevelVisibility(visibilityKey, !visible)}
-              />
-              {item.label}
+            <div className="levels-board__label">
+              <span className="truncate">{displayLabel}</span>
             </div>
-            <div className="terminal-value relative z-10 px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">${formatStrike(item.strike)}</div>
+            <div className="levels-board__value text-right">
+              ${formatStrike(item.strike)}
+            </div>
             <div
-              className="terminal-value relative z-10 px-1 py-1.5 text-right"
-              style={{ color: getSpotDistanceColor(distanceFromSpotPercent) }}
-              title="Percent from spot"
+              className="levels-board__dist text-right"
+              style={{ color: getSpotDistanceColor(distanceFromSpotPercent, { quiet: true }) }}
             >
-              {distanceFromSpotPercent === undefined ? '-' : formatSignedPercent(distanceFromSpotPercent)}
+              {distanceFromSpotPercent === undefined ? '—' : formatSignedPercent(distanceFromSpotPercent)}
             </div>
           </div>
         )
@@ -310,48 +367,77 @@ function LevelRows({ title, items, levelVisibility, setLevelVisibility, spot }: 
   )
 }
 
-function AdvancedRows({
+type LevelGammaGroup = 'all-expiry' | '0dte' | 'weekly' | 'monthly' | 'quarterly'
+
+function ReferenceRows({
   items,
-  levelVisibility,
   spot,
-  setLevelVisibility,
 }: {
-  items: TerminalSnapshot['levels']['advanced']
-  levelVisibility: Record<LevelVisibilityKey, boolean>
-  setLevelVisibility: (level: LevelVisibilityKey, visible: boolean) => void
+  items: AdvancedMetric[]
   spot: number
 }) {
+  const nearestLabel = useMemo(() => {
+    let bestLabel: string | null = null
+    let bestDistance = Number.POSITIVE_INFINITY
+
+    for (const metric of items) {
+      if (metric.label === 'Expected Move') continue
+      const strike = parseLevelValue(metric.value)
+      if (!Number.isFinite(strike)) continue
+      const distance = Math.abs(strike - spot)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        bestLabel = metric.label
+      }
+    }
+
+    return bestLabel
+  }, [items, spot])
+
   return (
-    <div className="grid gap-0">
+    <div className="levels-board">
       {items.map((metric) => {
         const expectedMoveRange = metric.label === 'Expected Move' ? splitExpectedMoveRange(metric.value) : null
-        const visibilityKey = getAdvancedVisibilityKey(metric.label)
-        const visible = levelVisibility[visibilityKey]
-        const markerColor = getAdvancedMarkerColor(metric)
-        const distanceFromSpotPercent = getAdvancedDistanceFromSpotPercent(metric, spot, expectedMoveRange)
-        const distanceDisplay = distanceFromSpotPercent === undefined ? '-' : formatSignedPercent(distanceFromSpotPercent)
+        const accent = getReferenceRoleAccent(metric)
+        const roleMod = getReferenceRoleModifier(metric)
+        const distanceFromSpotPercent = getReferenceDistanceFromSpotPercent(metric, spot, expectedMoveRange)
+        const distanceDisplay = distanceFromSpotPercent === undefined ? '—' : formatSignedPercent(distanceFromSpotPercent)
+        const scopeTag = formatReferenceScopeTag(metric)
+        const nearest = metric.label === nearestLabel
 
         return (
           <div
             key={metric.label}
-            className={getLevelRowClassName()}
+            className={cn(
+              'levels-board__row',
+              roleMod,
+              nearest && 'levels-board__row--nearest',
+            )}
+            style={{ '--level-role-accent': accent } as CSSProperties}
           >
-            <div className="relative z-10 flex items-center gap-3 px-1 py-1.5 text-[var(--terminal-text)]">
-              <MetricMarkerButton
-                color={markerColor}
-                label={metric.label}
-                variant={getAdvancedMarkerVariant(metric.label)}
-                visible={visible}
-                onToggle={() => setLevelVisibility(visibilityKey, !visible)}
-              />
-              {metric.label}
+            <div className="levels-board__label">
+              <div className="flex min-w-0 items-baseline gap-1.5">
+                <span className="truncate leading-none">{formatReferenceLabel(metric.label)}</span>
+                {scopeTag ? (
+                  <span className="levels-board__label-scope shrink-0">
+                    {scopeTag}
+                  </span>
+                ) : null}
+              </div>
             </div>
-            <div className="terminal-value relative z-10 px-3 py-1.5 text-right font-semibold text-[var(--terminal-heading)]">
+            <div className="levels-board__value text-right">
               {expectedMoveRange?.lower ?? metric.value}
             </div>
             <div
-              className={expectedMoveRange ? 'terminal-value relative z-10 -ml-3 px-0 py-1.5 text-left font-semibold text-[var(--terminal-heading)]' : 'terminal-value relative z-10 px-1 py-1.5 text-right'}
-              style={expectedMoveRange ? undefined : { color: getSpotDistanceColor(distanceFromSpotPercent) }}
+              className={cn(
+                'levels-board__dist',
+                expectedMoveRange ? 'text-left' : 'text-right',
+              )}
+              style={
+                expectedMoveRange
+                  ? undefined
+                  : { color: getSpotDistanceColor(distanceFromSpotPercent, { quiet: true }) }
+              }
             >
               {expectedMoveRange?.upper ?? distanceDisplay}
             </div>
@@ -362,12 +448,92 @@ function AdvancedRows({
   )
 }
 
-function getLevelRowClassName() {
-  return 'relative grid grid-cols-[170px_120px_minmax(54px,1fr)] items-center overflow-hidden border-b border-[var(--terminal-rule)] text-[11px] transition-[background-color] last:border-b-0 hover:bg-[var(--terminal-surface-2)]'
+function getNearestLevelLabel(items: LevelItem[], spot: number) {
+  let bestLabel: string | null = null
+  let bestDistance = Number.POSITIVE_INFINITY
+
+  for (const item of items) {
+    if (!Number.isFinite(item.strike)) continue
+    const distance = Math.abs(item.strike - spot)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestLabel = item.label
+    }
+  }
+
+  return bestLabel
 }
 
-function getAdvancedDistanceFromSpotPercent(
-  metric: TerminalSnapshot['levels']['advanced'][number],
+/** Role accent shared by Levels list markers (All / 0DTE / tenors use the same family). */
+function getLevelRoleAccent(_group: LevelGammaGroup, label: string) {
+  if (label.includes('Positive Gamma')) return levelRoleCssVars.positiveGamma
+  if (label.includes('Negative Gamma')) return levelRoleCssVars.negativeGamma
+  return 'var(--terminal-subtle)'
+}
+
+/** Row modifier for quiet role-tinted strike values (Polarity score language). */
+function getLevelRoleModifier(label: string) {
+  if (label.includes('Positive Gamma')) return 'levels-board__row--pos'
+  if (label.includes('Negative Gamma')) return 'levels-board__row--neg'
+  return undefined
+}
+
+function getReferenceRoleAccent(metric: AdvancedMetric) {
+  if (metric.label.includes('Expected')) return levelRoleCssVars.expectedMove
+  if (metric.label.includes('Flip')) return levelRoleCssVars.gammaFlip
+  if (metric.label.includes('Max Pain')) return levelRoleCssVars.maxPain
+  return 'var(--terminal-muted)'
+}
+
+function getReferenceRoleModifier(metric: AdvancedMetric) {
+  if (metric.label.includes('Expected')) return 'levels-board__row--move'
+  if (metric.label.includes('Flip')) return 'levels-board__row--flip'
+  return undefined
+}
+
+function formatReferenceLabel(label: string) {
+  if (label.includes('Expected')) return 'Expected Move'
+  return label
+}
+
+/** Compact scope tag beside the label — e.g. ALL or 16JUL26. No weight suffixes. */
+function formatReferenceScopeTag(metric: AdvancedMetric) {
+  // Expected Move is always the session 1σ band; the date tag collides with the long label.
+  if (metric.label.includes('Expected')) {
+    return null
+  }
+
+  if (metric.scope === 'book' || metric.label.includes('Flip')) {
+    return 'ALL'
+  }
+
+  const raw = metric.scopeLabel
+  if (!raw || raw === 'ALL') return null
+
+  return formatExpiryDisplay(raw)
+}
+
+function formatExpiryDisplay(expiry: string) {
+  // Already Deribit-style (16JUL26)
+  if (/^\d{1,2}[A-Z]{3}\d{2}$/.test(expiry)) {
+    return expiry
+  }
+
+  // ISO date from backend (2026-07-16) → 16JUL26
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(expiry)
+  if (iso) {
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+    const day = String(Number(iso[3]))
+    const month = months[Number(iso[2]) - 1] ?? iso[2]
+    const year = iso[1].slice(-2)
+    return `${day}${month}${year}`
+  }
+
+  return expiry
+}
+
+function getReferenceDistanceFromSpotPercent(
+  metric: TerminalSnapshot['levels']['reference'][number],
   spot: number,
   expectedMoveRange: ReturnType<typeof splitExpectedMoveRange>,
 ) {
@@ -403,20 +569,20 @@ function getDistanceFromSpotPercent(strike: number, spot: number) {
 
 function getPriceSourceNoteClassName(note: string) {
   const signedValue = note.match(/[+-]\s*\d+(?:\.\d+)?/)
-  const baseClassName = 'mt-0.5 text-[9px] leading-none'
+  const baseClassName = 'rail-price__note'
 
   if (!signedValue) {
-    return `${baseClassName} text-[var(--terminal-muted)]`
+    return baseClassName
   }
 
   const value = Number(signedValue[0].replace(/\s/g, ''))
   if (!Number.isFinite(value) || value === 0) {
-    return `${baseClassName} text-[var(--terminal-muted)]`
+    return baseClassName
   }
 
   return value > 0
-    ? `${baseClassName} text-[var(--terminal-green-strong)]`
-    : `${baseClassName} text-[var(--terminal-red-strong)]`
+    ? `${baseClassName} rail-price__note--pos`
+    : `${baseClassName} rail-price__note--neg`
 }
 
 function SourceLogo({ sourceName }: { sourceName: string }) {
@@ -456,7 +622,7 @@ function HyperliquidLogo() {
       className="h-3.5 w-3.5"
       role="img"
       aria-label="Hyperliquid"
-      style={{ filter: 'drop-shadow(0 0 4px rgba(151, 252, 228, 0.5)) drop-shadow(0 0 9px rgba(151, 252, 228, 0.22))' }}
+      style={{ filter: 'drop-shadow(0 0 3px rgba(151, 252, 228, 0.28)) drop-shadow(0 0 6px rgba(151, 252, 228, 0.12))' }}
     >
       <path
         d="M144 71.6991C144 119.306 114.866 134.582 99.5156 120.98C86.8804 109.889 83.1211 86.4521 64.116 84.0456C39.9942 81.0113 37.9057 113.133 22.0334 113.133C3.5504 113.133 0 86.2428 0 72.4315C0 58.3063 3.96809 39.0542 19.736 39.0542C38.1146 39.0542 39.1588 66.5722 62.132 65.1073C85.0007 63.5379 85.4184 34.8689 100.247 22.6271C113.195 12.0593 144 23.4641 144 71.6991Z"
@@ -464,185 +630,6 @@ function HyperliquidLogo() {
       />
     </svg>
   )
-}
-
-type MarkerVariant = 'diamond' | 'chevronUp' | 'chevronDown' | 'crosshair' | 'slash' | 'bracket' | 'flipZone'
-
-function MetricMarkerButton({
-  color,
-  label,
-  onToggle,
-  variant,
-  visible,
-}: {
-  color: string
-  label: string
-  onToggle: () => void
-  variant: MarkerVariant
-  visible: boolean
-}) {
-  return (
-    <button
-      aria-label={`${visible ? 'Hide' : 'Show'} ${label} level`}
-      aria-pressed={visible}
-      className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-[2px] transition-colors hover:bg-[var(--terminal-surface-3)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--terminal-border-strong)]"
-      type="button"
-      onClick={onToggle}
-    >
-      <MetricMarker color={color} variant={variant} visible={visible} />
-    </button>
-  )
-}
-
-function MetricMarker({ color, variant, visible = true }: { color: string; variant: MarkerVariant; visible?: boolean }) {
-  const activeMarkerColor = normalizeMarkerColor(color)
-  const markerColor = visible ? activeMarkerColor : 'var(--terminal-subtle)'
-  const commonStyle = {
-    color: markerColor,
-    '--marker-color': markerColor,
-    '--marker-glow-color': activeMarkerColor,
-    opacity: visible ? 1 : 0.34,
-    filter: visible
-      ? 'drop-shadow(0 0 4px color-mix(in srgb, var(--marker-glow-color) 52%, transparent)) drop-shadow(0 0 9px color-mix(in srgb, var(--marker-glow-color) 22%, transparent))'
-      : 'drop-shadow(0 0 0 color-mix(in srgb, var(--marker-glow-color) 0%, transparent)) drop-shadow(0 0 0 color-mix(in srgb, var(--marker-glow-color) 0%, transparent))',
-    transform: visible ? 'scale(1)' : 'scale(0.82)',
-    transition: 'color 160ms ease, opacity 170ms ease, filter 320ms ease-out, transform 190ms ease-out',
-  } as CSSProperties
-
-  if (variant === 'diamond') {
-    return (
-      <span
-        aria-hidden="true"
-        className="flex h-4 w-4 shrink-0 items-center justify-center"
-        style={commonStyle}
-      >
-        <span className="h-2.5 w-2.5 rotate-45 border border-[var(--marker-color)] bg-[color-mix(in_srgb,var(--marker-color)_18%,transparent)]" />
-      </span>
-    )
-  }
-
-  if (variant === 'chevronUp' || variant === 'chevronDown') {
-    return (
-      <span
-        aria-hidden="true"
-        className="relative h-4 w-4 shrink-0 text-[var(--marker-color)]"
-        style={commonStyle}
-      >
-        <span
-          className={
-            variant === 'chevronUp'
-              ? 'absolute left-1/2 top-[4px] h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-l-2 border-t-2 border-current'
-              : 'absolute left-1/2 top-[1px] h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-b-2 border-r-2 border-current'
-          }
-        />
-      </span>
-    )
-  }
-
-  if (variant === 'crosshair') {
-    return (
-      <span aria-hidden="true" className="relative h-4 w-4 shrink-0" style={commonStyle}>
-        <span className="absolute left-1/2 top-[2px] h-3 w-px -translate-x-1/2 bg-[var(--marker-color)] opacity-80" />
-        <span className="absolute left-[2px] top-1/2 h-px w-3 -translate-y-1/2 bg-[var(--marker-color)] opacity-80" />
-        <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border border-[var(--marker-color)] bg-[var(--terminal-surface)]" />
-      </span>
-    )
-  }
-
-  if (variant === 'slash') {
-    return (
-      <span aria-hidden="true" className="relative h-4 w-4 shrink-0" style={commonStyle}>
-        <span className="absolute left-1/2 top-1/2 h-[2px] w-4 -translate-x-1/2 -translate-y-1/2 -rotate-45 rounded-full bg-[var(--marker-color)]" />
-      </span>
-    )
-  }
-
-  if (variant === 'flipZone') {
-    return (
-      <span aria-hidden="true" className="relative h-4 w-4 shrink-0" style={commonStyle}>
-        <span className="absolute left-[2px] top-[4px] h-2 w-2 rotate-45 border-l-2 border-b-2 border-[var(--marker-color)]" />
-        <span className="absolute right-[2px] top-[4px] h-2 w-2 rotate-45 border-r-2 border-t-2 border-[var(--marker-color)] opacity-75" />
-      </span>
-    )
-  }
-
-  return (
-    <span aria-hidden="true" className="relative h-4 w-4 shrink-0" style={commonStyle}>
-      <span className="absolute left-[3px] top-[4px] h-2.5 w-[3px] rounded-px bg-[var(--marker-color)]" />
-      <span className="absolute right-[3px] top-[4px] h-2.5 w-[3px] rounded-px bg-[var(--marker-color)] opacity-60" />
-      <span className="absolute left-[5px] top-[4px] h-[3px] w-1.5 bg-[var(--marker-color)] opacity-70" />
-    </span>
-  )
-}
-
-function getLevelMarkerColor(title: string, label: string) {
-  const isZeroDte = title.includes('0DTE')
-  if (isZeroDte && label.includes('Call')) return levelColors.zeroDteCall
-  if (isZeroDte && label.includes('Put')) return levelColors.zeroDtePut
-  if (label.includes('Call')) return 'var(--terminal-green-strong)'
-  if (label.includes('Put')) return 'var(--terminal-red-strong)'
-  if (isZeroDte) return 'var(--terminal-blue)'
-
-  return 'var(--terminal-yellow)'
-}
-
-function getLevelVisibilityKey(title: string, label: string): LevelVisibilityKey {
-  const isZeroDte = title.includes('0DTE')
-
-  if (isZeroDte) {
-    if (label.includes('HVL')) return 'zeroDteHvl'
-    if (label.includes('Call')) return 'zeroDteCall'
-    if (label.includes('Put')) return 'zeroDtePut'
-
-    return 'zeroDteHvl'
-  }
-
-  if (label.includes('HVL')) return 'allExpiryHvl'
-  if (label.includes('Call')) return 'allExpiryCallResistance'
-  if (label.includes('Put')) return 'allExpiryPutSupport'
-
-  return 'allExpiryHvl'
-}
-
-function getAdvancedVisibilityKey(label: string): LevelVisibilityKey {
-  if (label.includes('Zero')) return 'advancedZeroGamma'
-  if (label.includes('Pain')) return 'advancedMaxPain'
-  if (label.includes('Expected')) return 'advancedExpectedMove'
-
-  return 'advancedGammaFlipZones'
-}
-
-function normalizeMarkerColor(color: string) {
-  if (color === '#42e66f' || color === '#39d85f') return 'var(--terminal-green-strong)'
-  if (color === '#ff4b43' || color === '#ff3f37') return 'var(--terminal-red-strong)'
-  if (color === '#62b8ff') return 'var(--terminal-blue)'
-  if (color === '#f5b946') return 'var(--terminal-yellow)'
-
-  return color
-}
-
-function getLevelMarkerVariant(label: string): MarkerVariant {
-  if (label.includes('HVL')) return 'diamond'
-  if (label.includes('Call')) return 'chevronUp'
-  if (label.includes('Put')) return 'chevronDown'
-
-  return 'diamond'
-}
-
-function getAdvancedMarkerVariant(label: string): MarkerVariant {
-  if (label.includes('Zero')) return 'crosshair'
-  if (label.includes('Pain')) return 'slash'
-  if (label.includes('Expected')) return 'bracket'
-
-  return 'flipZone'
-}
-
-function getAdvancedMarkerColor(metric: TerminalSnapshot['levels']['advanced'][number]) {
-  if (metric.label.includes('Zero')) return levelColors.zeroGamma
-  if (metric.label.includes('Expected')) return levelColors.expectedMove
-  if (metric.label.includes('Gamma Flip')) return levelColors.gammaFlip
-
-  return metric.color
 }
 
 function splitExpectedMoveRange(value: string) {
@@ -660,440 +647,528 @@ function formatWholePercent(value: number) {
   return `${Math.round(value)}%`
 }
 
-function GammaRegimeExtension({ snapshot }: { snapshot: TerminalSnapshot }) {
-  const context = getRegimeContext(snapshot)
-  const spotDistanceDirection = context.flipDistance >= 0 ? 'above flip' : 'below flip'
-  const tradeToneClassName = getRegimeToneClassName(context.tradeRegimeTone)
 
-  return (
-    <section className="mt-1.5 border-t border-[var(--terminal-border-strong)] pb-1 pt-2" aria-label="Regime">
-      <div className="grid grid-cols-[1fr_auto] items-start gap-3 border-b border-[var(--terminal-rule)] pb-2">
-        <div className="min-w-0">
-          <PanelGroupTitle title="Regime" />
-          <div className={`mt-1.5 text-[16px] font-semibold uppercase leading-none tracking-normal ${tradeToneClassName}`}>
-            {context.tradeRegimeLabel}
-          </div>
-          <div className="terminal-value mt-1.5 text-[9.5px] text-[var(--terminal-muted)]">
-            {formatSignedUsd(context.flipDistance)} / {formatSignedPercent(context.flipDistancePercent)} {spotDistanceDirection}
-          </div>
-        </div>
-        <div className="text-right">
-          <div className={`terminal-value text-[16px] font-semibold leading-none ${tradeToneClassName}`}>
-            {formatRegimeScore(context.dealerGammaScore)}
-          </div>
-          <div className="mt-1 text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">
-            Gamma
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-2 grid gap-1">
-        <RegimeSignalRow
-          label="Dealer Gamma"
-          value={context.dealerGammaLabel}
-          score={context.dealerGammaScore}
-          scoreDisplay={formatRegimeScore(context.dealerGammaScore)}
-          tone={context.dealerGammaTone}
-        />
-        <RegimeSignalRow
-          label="Pin Pressure"
-          value={context.pinPressureLabel}
-          score={context.pinPressureScore}
-          scoreDisplay={formatWholePercent(context.pinPressureScore)}
-          tone={context.pinPressureTone}
-        />
-        <RegimeSignalRow
-          label="Expansion Risk"
-          value={context.expansionRiskLabel}
-          score={context.expansionRiskScore}
-          scoreDisplay={formatWholePercent(context.expansionRiskScore)}
-          tone={context.expansionRiskTone}
-        />
-      </div>
-
-      <div className="mt-2 border-t border-[var(--terminal-rule)] px-1 pt-2">
-        <div className="mb-1 grid grid-cols-[1fr_auto_1fr] items-end gap-2 text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">
-          <span>Short Γ</span>
-          <span>Flip</span>
-          <span className="text-right">Long Γ</span>
-        </div>
-        <div className="relative h-[62px]">
-          <div className="absolute left-0 right-0 top-4 h-2 overflow-hidden rounded-[2px] border border-[var(--terminal-border-strong)] bg-[var(--terminal-bg-soft)] shadow-[var(--terminal-control-inset)]">
-            <div
-              className="absolute inset-y-0 left-0 bg-gradient-to-r from-[color-mix(in_srgb,var(--terminal-red-strong)_82%,transparent)] to-[color-mix(in_srgb,var(--terminal-yellow)_78%,transparent)]"
-              style={{ width: `${context.flipPosition}%` }}
-            />
-            <div
-              className="absolute inset-y-0 right-0 bg-gradient-to-r from-[color-mix(in_srgb,var(--terminal-yellow)_78%,transparent)] to-[color-mix(in_srgb,var(--terminal-green-strong)_86%,transparent)]"
-              style={{ width: `${100 - context.flipPosition}%` }}
-            />
-          </div>
-
-          <div
-            className="absolute top-0.5 h-10 w-px bg-[var(--terminal-yellow)] opacity-80"
-            style={{ left: `${context.flipPosition}%` }}
-          >
-            <span className="absolute left-1/2 top-[34px] h-1.5 w-1.5 -translate-x-1/2 rotate-45 border border-[var(--terminal-yellow)] bg-[var(--terminal-bg-soft)]" />
-          </div>
-          <div
-            className="absolute top-0 h-12 w-px bg-[var(--terminal-heading)] shadow-[0_0_9px_rgba(228,232,223,0.4)]"
-            style={{ left: `${context.spotPosition}%` }}
-          >
-            <span className="absolute left-1/2 top-[-1px] h-2 w-2 -translate-x-1/2 rotate-45 bg-[var(--terminal-heading)]" />
-            <span className="absolute left-1/2 top-[48px] -translate-x-1/2 whitespace-nowrap text-[8px] font-semibold uppercase leading-none text-[var(--terminal-heading)]">
-              Spot
-            </span>
-          </div>
-          {context.supportStrike !== undefined ? (
-            <span className="terminal-value absolute bottom-0 left-0 whitespace-nowrap text-[8.5px] font-semibold leading-none text-[var(--terminal-red-strong)]">
-              {formatUsd(context.supportStrike)}
-            </span>
-          ) : null}
-          {context.resistanceStrike !== undefined ? (
-            <span className="terminal-value absolute bottom-0 right-0 whitespace-nowrap text-[8.5px] font-semibold leading-none text-[var(--terminal-green-strong)]">
-              {formatUsd(context.resistanceStrike)}
-            </span>
-          ) : null}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-type RegimeTone = 'green' | 'red' | 'amber' | 'muted'
-
-function RegimeSignalRow({
-  label,
-  value,
-  score,
-  scoreDisplay,
-  tone,
-}: {
-  label: string
-  value: string
-  score: number
-  scoreDisplay: string
-  tone: RegimeTone
-}) {
-  const toneClassName = getRegimeToneClassName(tone)
-  const scoreWidth = label === 'Dealer Gamma'
-    ? Math.abs(score) * 100
-    : score
-  const barWidth = scoreWidth === 0 ? 0 : clamp(scoreWidth, 4, 100)
-
-  return (
-    <div className="grid grid-cols-[96px_minmax(0,1fr)_44px] items-center gap-2 border-b border-[var(--terminal-rule)] px-1 py-1 text-[9px] last:border-b-0">
-      <div className="min-w-0">
-        <div className="truncate text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">{label}</div>
-        <div className={`terminal-value mt-0.5 text-[10px] font-semibold uppercase ${toneClassName}`}>{value}</div>
-      </div>
-      <div className="h-1.5 overflow-hidden border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)]">
-        <div
-          className={getRegimeBarClassName(tone)}
-          style={{ width: `${barWidth}%` }}
-        />
-      </div>
-      <div className={`terminal-value text-right text-[9.5px] font-semibold ${toneClassName}`}>
-        {scoreDisplay}
-      </div>
-    </div>
-  )
-}
-
-function getRegimeToneClassName(tone: RegimeTone) {
-  return {
-    green: 'text-[var(--terminal-green-strong)]',
-    red: 'text-[var(--terminal-red-strong)]',
-    amber: 'text-[var(--terminal-yellow)]',
-    muted: 'text-[var(--terminal-muted)]',
-  }[tone]
-}
-
-function getRegimeBarClassName(tone: RegimeTone) {
-  return {
-    green: 'h-full bg-[var(--terminal-green-strong)]',
-    red: 'h-full bg-[var(--terminal-red-strong)]',
-    amber: 'h-full bg-[var(--terminal-yellow)]',
-    muted: 'h-full bg-[var(--terminal-subtle)]',
-  }[tone]
-}
-
+/**
+ * OPEX rail — expiry structure / pin-risk view (not flow Levels/Regime).
+ *
+ * Does NOT crown a single "most important" expiry (that collapses to 0DTE via urgency).
+ * Instead splits the book into:
+ *  - Session front: nearest expiry driving today's tape (time + pin magnets)
+ *  - Range anchor: largest structural book that still frames the range
+ *  - Horizon: next few events by calendar, always keeping the range anchor visible
+ *  - Session read: observational pin / release / bias compressed into words
+ */
 function ExpiryImpactPanel({ snapshot }: { snapshot: TerminalSnapshot }) {
   const events = snapshot.expiryEvents
-  const topEvent = events[0]
-  const nextByKind = getNextExpiryEventsByKind(events)
-  const leaderboard = events.slice(0, 4)
+  const desk = useMemo(() => buildOpexDesk(events), [events])
 
-  if (!topEvent) {
+  if (!desk) {
     return (
-      <div className="flex min-h-[190px] items-center justify-center text-[10px] text-[var(--terminal-muted)]">
-        No expiry data available
+      <div className="flex h-full min-h-[160px] items-center justify-center px-3 text-center text-[10px] leading-5 text-[var(--terminal-muted)]">
+        No expiry positioning in the current snapshot
       </div>
     )
   }
 
+  const { session, anchor, magnets, horizon, read } = desk
+  const sessionCountdown = formatExpiryCountdown(session)
+
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden pr-1" aria-label="Expiry positioning impact">
-      <div className="mb-2.5 grid grid-cols-[1fr_auto] items-start gap-3 border-b border-[var(--terminal-rule)] pb-2.5">
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <ExpiryKindBadge kind={topEvent.kind} />
-            <div className="terminal-value truncate text-[16px] font-semibold leading-none text-[var(--terminal-heading)]">
-              {topEvent.expiry}
-            </div>
+    <div className="opex-desk" aria-label="OPEX session desk">
+      {/* ── Session front: what can pin/print the tape today ── */}
+      <section className="shrink-0">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="opex-desk__section-title">Session</span>
+            <ExpiryKindBadge kind={session.kind} />
           </div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            <ExpiryMetric label="Notional" value={formatCompactUsd(topEvent.expiringNotionalUsd)} />
-            <ExpiryMetric label="Near Spot" value={formatWholePercent(topEvent.nearSpotOpenInterestSharePercent)} />
-            <ExpiryMetric label="Time" value={formatExpiryTime(topEvent)} align="right" />
-          </div>
-        </div>
-        <div className="text-right">
-          <div className={`terminal-value text-[18px] font-semibold leading-none ${getImportanceToneClassName(topEvent.importanceScore)}`}>
-            {formatImportanceScore(topEvent.importanceScore)}
-          </div>
-          <div className="mt-1 text-[8.5px] font-semibold uppercase text-[var(--terminal-muted)]">
-            Impact
+          <div className="opex-desk__countdown">
+            {sessionCountdown.text}
+            {sessionCountdown.showLeft ? (
+              <span className="ml-1 text-[8.5px] font-semibold uppercase tracking-[0.06em] text-[var(--desk-label)]">
+                left
+              </span>
+            ) : null}
           </div>
         </div>
-      </div>
 
-      <div className="mb-2.5 grid grid-cols-3 gap-1.5">
-        <ExpiryDriverBar label="Size" value={topEvent.sizeScore} weight="40%" />
-        <ExpiryDriverBar label="Pin" value={topEvent.concentrationScore} weight="35%" />
-        <ExpiryDriverBar label="Urgency" value={topEvent.urgencyScore} weight="25%" />
-      </div>
+        <div className="mb-2.5 flex items-baseline justify-between gap-2">
+          <div className="opex-desk__expiry">{session.expiry}</div>
+          <div className={getSessionModeClassName(read.sessionMode)}>{read.sessionMode}</div>
+        </div>
 
-      <div className="mb-2.5 grid grid-cols-4 gap-1.5">
-        {nextByKind.map((event) => (
-          <div
-            key={event.kind}
-            className="min-w-0 border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)] px-1.5 py-1"
-          >
-            <div className="mb-1 text-[7.5px] font-semibold uppercase text-[var(--terminal-muted)]">{event.kind}</div>
-            <div className="terminal-value truncate text-[9.5px] text-[var(--terminal-heading)]">{event.expiry}</div>
-            <div className={`terminal-value mt-1 text-[9.5px] ${getImportanceToneClassName(event.importanceScore)}`}>
-              {formatImportanceScore(event.importanceScore)}
+        <div className="grid grid-cols-3 gap-2">
+          <OpexStat
+            label="Near Spot"
+            value={formatWholePercent(session.nearSpotOpenInterestSharePercent)}
+            hint="OI ≤2.5%"
+            tone={session.nearSpotOpenInterestSharePercent >= 30 ? 'warn' : 'neutral'}
+          />
+          <OpexStat
+            label="Book"
+            value={formatCompactUsd(session.expiringNotionalUsd)}
+            hint={`${formatWholePercent(session.openInterestSharePercent)} OI`}
+          />
+          <OpexStat
+            label="|Γ| Near"
+            value={formatMillions(session.nearSpotGammaExposureUsd)}
+            hint="Σ|net GEX|"
+            tone={session.nearSpotGammaExposureUsd > 0 ? 'accent' : 'neutral'}
+          />
+        </div>
+      </section>
+
+      {/* ── Magnets: strikes that can hold an intraday print ── */}
+      <section className="shrink-0 border-t border-[var(--desk-rule)] pt-2.5">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <span className="opex-desk__section-title">Magnets</span>
+          <span className="opex-desk__meta">
+            OI × proximity · {session.expiry}
+          </span>
+        </div>
+        {magnets.length === 0 ? (
+          <div className="opex-desk__body">No near-spot concentration</div>
+        ) : (
+          <div className="grid gap-1">
+            <div className="grid grid-cols-[minmax(0,1fr)_52px_48px_44px] items-center gap-2 px-2">
+              <div className="opex-desk__colhead">Strike</div>
+              <div className="opex-desk__colhead text-right">GEX</div>
+              <div className="opex-desk__colhead text-right">OI%</div>
+              <div className="opex-desk__colhead text-right">Dist</div>
+            </div>
+            {magnets.map((strike) => (
+              <div
+                key={`${session.expiry}-${strike.strike}`}
+                className="opex-desk__magnet"
+              >
+                <div className="opex-desk__magnet-strike min-w-0">
+                  ${formatStrike(strike.strike)}
+                </div>
+                <div
+                  className={cn(
+                    'text-right text-[10px] font-semibold leading-none tabular-nums',
+                    strike.gammaExposureUsd >= 0
+                      ? 'opex-desk__magnet-gex--pos'
+                      : 'opex-desk__magnet-gex--neg',
+                  )}
+                >
+                  {formatMillions(strike.gammaExposureUsd)}
+                </div>
+                <div className="text-right text-[10px] font-semibold leading-none tabular-nums text-[var(--desk-value)]">
+                  {formatWholePercent(strike.openInterestSharePercent)}
+                </div>
+                <div
+                  className="text-right text-[10px] font-semibold leading-none tabular-nums"
+                  style={{ color: getSpotDistanceColor(strike.distanceFromSpotPercent, { quiet: true }) }}
+                >
+                  {formatSignedPercent(strike.distanceFromSpotPercent)}
+                </div>
+              </div>
+            ))}
+            <div className="px-2 text-[8px] leading-none text-[var(--terminal-subtle)]">
+              OI% = strike share of this expiry&apos;s OI
             </div>
           </div>
-        ))}
-      </div>
+        )}
+      </section>
 
-      <div className="mb-1.5 grid gap-1">
-        <div className="grid grid-cols-[52px_1fr_52px_42px] px-1 text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">
-          <span>Expiry</span>
-          <span>Drivers</span>
-          <span className="text-right">Share</span>
-          <span className="text-right">Score</span>
+      {/* ── Range anchor: structural book ≠ always 0DTE ── */}
+      <section className="shrink-0 border-t border-[var(--desk-rule)] pt-2.5">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <span className="opex-desk__section-title">Range Anchor</span>
+          {anchor.sameAsSession ? (
+            <span className="opex-desk__meta uppercase">same as session</span>
+          ) : (
+            <ExpiryKindBadge kind={anchor.event.kind} />
+          )}
         </div>
-        {leaderboard.map((event) => (
-          <div
-            key={event.expiry}
-            className="grid grid-cols-[52px_1fr_52px_42px] items-center gap-2 border-t border-[var(--terminal-rule)] px-1 py-1 text-[9px]"
-          >
-            <div className="min-w-0">
-              <div className="terminal-value truncate text-[var(--terminal-heading)]">{event.expiry}</div>
-              <div className="mt-0.5 text-[7.5px] uppercase text-[var(--terminal-muted)]">{event.kind}</div>
-            </div>
-            <div className="min-w-0">
-              <ExpiryCompositeBar event={event} />
-              <div className="mt-1 truncate text-[8px] text-[var(--terminal-muted)]">
-                {event.topStrikes.slice(0, 2).map((strike) => `$${formatStrike(strike.strike)}`).join(' / ')}
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="opex-desk__expiry opex-desk__expiry--sm">{anchor.event.expiry}</div>
+          <div className="text-[10px] font-semibold tabular-nums text-[var(--desk-value-soft)]">
+            {formatExpiryTime(anchor.event)}
+          </div>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <OpexStat
+            label="OI Share"
+            value={formatWholePercent(anchor.event.openInterestSharePercent)}
+            hint="of listed book"
+          />
+          <OpexStat
+            label="Notional"
+            value={formatCompactUsd(anchor.event.expiringNotionalUsd)}
+            hint="expiring size"
+          />
+        </div>
+        <p className="opex-desk__body mt-2">{anchor.reason}</p>
+      </section>
+
+      {/* ── Horizon: calendar order, not importance score ── */}
+      <section className="min-h-0 flex-1 border-t border-[var(--desk-rule)] pt-2.5">
+        <div className="opex-desk__section-title mb-1.5">Horizon</div>
+        <div className="grid gap-1">
+          {horizon.map((row) => (
+            <div
+              key={row.event.expiry}
+              className="grid grid-cols-[56px_minmax(0,1fr)_40px_36px] items-center gap-2 px-0.5 py-1"
+            >
+              <div className="text-[8.5px] font-semibold uppercase leading-none text-[var(--desk-label)]">
+                {row.role}
+              </div>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-[11px] font-semibold leading-none tabular-nums text-[var(--desk-value)]">
+                  {row.event.expiry}
+                </span>
+                <ExpiryKindBadge kind={row.event.kind} />
+              </div>
+              <div className="text-right text-[10px] font-semibold leading-none tabular-nums text-[var(--desk-value-soft)]">
+                {formatExpiryTime(row.event)}
+              </div>
+              <div className="text-right text-[10px] font-semibold leading-none tabular-nums text-[var(--desk-label)]">
+                {formatWholePercent(row.event.openInterestSharePercent)}
               </div>
             </div>
-            <div className="terminal-value text-right text-[9px] text-[var(--terminal-text)]">
-              {formatWholePercent(event.openInterestSharePercent)}
-            </div>
-            <div className={`terminal-value text-right text-[10px] font-semibold ${getImportanceToneClassName(event.importanceScore)}`}>
-              {formatImportanceScore(event.importanceScore)}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-2 border-t border-[var(--terminal-rule)] pt-1.5">
-        <div className="mb-1.5 grid grid-cols-[1fr_auto_auto] gap-2 px-1 text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">
-          <span>Top Strikes</span>
-          <span>OI</span>
-          <span>Dist</span>
+          ))}
         </div>
-        {topEvent.topStrikes.slice(0, 3).map((strike) => (
-          <div
-            key={`${topEvent.expiry}-${strike.strike}`}
-            className="grid grid-cols-[1fr_44px_44px] items-center gap-2 px-1 py-0.5 text-[9px]"
-          >
-            <div className="min-w-0">
-              <div className="terminal-value text-[var(--terminal-heading)]">${formatStrike(strike.strike)}</div>
-              <div className={strike.gammaExposureUsd >= 0 ? 'terminal-value mt-0.5 text-[8px] text-[var(--terminal-green-strong)]' : 'terminal-value mt-0.5 text-[8px] text-[var(--terminal-red-strong)]'}>
-                {formatMillions(strike.gammaExposureUsd)}
-              </div>
-            </div>
-            <div className="terminal-value text-right text-[9px] text-[var(--terminal-text)]">
-              {formatWholePercent(strike.openInterestSharePercent)}
-            </div>
-            <div className={getSpotDistanceColor(strike.distanceFromSpotPercent)}>
-              <div className="terminal-value text-right text-[9px]">
-                {formatSignedPercent(strike.distanceFromSpotPercent)}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+      </section>
 
-      <ExpiryRegimeChangeStrip event={topEvent} />
+      {/* ── Expiry / pin-risk read (OI-aware; not Levels/Regime language) ── */}
+      <section className="mt-auto shrink-0 border-t border-[var(--desk-rule)] pt-2.5">
+        <div className="opex-desk__section-title mb-1.5">Session Read</div>
+        <div className="grid grid-cols-3 gap-1.5">
+          <OpexReadout label="Pin" value={read.magnet} tone={read.magnet} />
+          <OpexReadout label="Release" value={read.release} tone={read.release} />
+          <OpexReadout label="Bias" value={read.skew} tone={read.skewTone} />
+        </div>
+        <p className="opex-desk__body mt-2">{read.summary}</p>
+      </section>
     </div>
   )
 }
 
-function ExpiryRegimeChangeStrip({ event }: { event: ExpiryPositioningEvent }) {
-  const pinRisk = getExpiryRiskLabel(event.concentrationScore, [18, 10])
-  const resetRisk = getExpiryRiskLabel(event.importanceScore, [66, 48])
-  const compression = getExpiryRiskLabel(event.urgencyScore, [86, 62])
+type OpexDesk = {
+  session: ExpiryPositioningEvent
+  anchor: {
+    event: ExpiryPositioningEvent
+    sameAsSession: boolean
+    reason: string
+  }
+  magnets: ExpiryPositioningEvent['topStrikes']
+  horizon: Array<{ event: ExpiryPositioningEvent; role: string }>
+  read: {
+    sessionMode: 'PIN ZONE' | 'TWO-WAY' | 'FLOW DAY'
+    magnet: 'High' | 'Med' | 'Low'
+    release: 'High' | 'Med' | 'Low'
+    skew: 'Upside' | 'Downside' | 'Balanced'
+    skewTone: 'High' | 'Med' | 'Low'
+    summary: string
+  }
+}
+
+function buildOpexDesk(events: ExpiryPositioningEvent[]): OpexDesk | null {
+  if (events.length === 0) {
+    return null
+  }
+
+  // Session front = soonest by clock. This is today's print risk, not "importance".
+  const byTime = [...events].sort((a, b) => a.hoursToExpiry - b.hoursToExpiry)
+  const session = byTime[0]
+
+  // Range anchor = largest structural book. Prefer weekly+ size; never just urgency.
+  const anchor = pickRangeAnchor(events, session)
+
+  // Magnets: ranked by OI × proximity (GEX is displayed, not used for rank).
+  const magnets = [...session.topStrikes]
+    .map((strike) => ({
+      strike,
+      score: strike.openInterest / (1 + Math.abs(strike.distanceFromSpotPercent) * 1.35),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((row) => row.strike)
+
+  // Horizon: next few by calendar, but never drop the range anchor when it sits further out.
+  const horizon = buildHorizonRows(byTime, session, anchor.event)
+
+  const read = buildSessionTradeRead(session, anchor.event, magnets)
+
+  return { session, anchor, magnets, horizon, read }
+}
+
+/** Next few expiries by clock, always including the range anchor when distinct. */
+function buildHorizonRows(
+  byTime: ExpiryPositioningEvent[],
+  session: ExpiryPositioningEvent,
+  anchor: ExpiryPositioningEvent,
+): OpexDesk['horizon'] {
+  const maxRows = 4
+  const picked: ExpiryPositioningEvent[] = []
+  const seen = new Set<string>()
+
+  const push = (event: ExpiryPositioningEvent) => {
+    if (seen.has(event.expiry)) return
+    seen.add(event.expiry)
+    picked.push(event)
+  }
+
+  for (const event of byTime) {
+    if (picked.length >= maxRows) break
+    push(event)
+  }
+
+  // Ensure range anchor is visible even when it falls outside the next few dailies.
+  if (!seen.has(anchor.expiry)) {
+    if (picked.length < maxRows) {
+      push(anchor)
+    } else {
+      // Prefer keeping session front; replace the furthest non-session row.
+      const replaceIndex = [...picked]
+        .map((event, index) => ({ event, index }))
+        .reverse()
+        .find((row) => row.event.expiry !== session.expiry)?.index
+      if (replaceIndex !== undefined) {
+        seen.delete(picked[replaceIndex].expiry)
+        picked[replaceIndex] = anchor
+        seen.add(anchor.expiry)
+      } else {
+        push(anchor)
+      }
+    }
+  }
+
+  return [...picked]
+    .sort((a, b) => a.hoursToExpiry - b.hoursToExpiry)
+    .map((event) => ({
+      event,
+      role: getHorizonRole(event, session, anchor),
+    }))
+}
+
+function pickRangeAnchor(
+  events: ExpiryPositioningEvent[],
+  session: ExpiryPositioningEvent,
+): OpexDesk['anchor'] {
+  const structuralWeight = (event: ExpiryPositioningEvent) => {
+    const kindBoost = event.kind === 'quarterly' ? 18
+      : event.kind === 'monthly' ? 14
+        : event.kind === 'weekly' ? 8
+          : 0
+    // Size + OI share dominate; urgency is intentionally ignored so 0DTE does not always win.
+    return event.sizeScore * 0.55
+      + event.openInterestSharePercent * 0.35
+      + kindBoost
+      + Math.min(event.daysToExpiry, 30) * 0.15
+  }
+
+  const ranked = [...events].sort((a, b) => structuralWeight(b) - structuralWeight(a))
+  const best = ranked[0]
+  const bestNonSession = ranked.find((event) => event.expiry !== session.expiry)
+  const chosen = bestNonSession && structuralWeight(bestNonSession) >= structuralWeight(session) * 0.72
+    ? bestNonSession
+    : best
+
+  const sameAsSession = chosen.expiry === session.expiry
+  const reason = sameAsSession
+    ? 'Front book also holds the largest share of listed OI — session and structure are the same print.'
+    : chosen.kind === 'monthly' || chosen.kind === 'quarterly'
+      ? 'Largest structural OI beyond the session front.'
+      : 'Largest non-session book by size × OI share.'
+
+  return { event: chosen, sameAsSession, reason }
+}
+
+function getHorizonRole(
+  event: ExpiryPositioningEvent,
+  session: ExpiryPositioningEvent,
+  anchor: ExpiryPositioningEvent,
+): string {
+  if (event.expiry === session.expiry) return 'Front'
+  if (event.expiry === anchor.expiry) return 'Anchor'
+  if (event.kind === 'weekly') return 'Week'
+  if (event.kind === 'monthly') return 'Month'
+  if (event.kind === 'quarterly') return 'Qtr'
+  return 'Next'
+}
+
+function buildSessionTradeRead(
+  session: ExpiryPositioningEvent,
+  anchor: ExpiryPositioningEvent,
+  magnets: ExpiryPositioningEvent['topStrikes'],
+): OpexDesk['read'] {
+  // Pin intensity: near-spot OI share of this expiry (concentrationScore is the same field upstream).
+  const nearSpotOiPct = session.nearSpotOpenInterestSharePercent
+  const magnet: OpexDesk['read']['magnet'] = nearSpotOiPct >= 42
+    ? 'High'
+    : nearSpotOiPct >= 22
+      ? 'Med'
+      : 'Low'
+
+  // Release risk: large book rolling off soon (post-expiry expansion), not pin itself.
+  const releaseScore = session.sizeScore * 0.5
+    + session.openInterestSharePercent * 0.25
+    + (session.hoursToExpiry < 18 ? 25 : session.hoursToExpiry < 48 ? 12 : 0)
+  const release: OpexDesk['read']['release'] = releaseScore >= 55
+    ? 'High'
+    : releaseScore >= 32
+      ? 'Med'
+      : 'Low'
+
+  // Bias from magnet OI only (contracts above vs below spot). Do not mix GEX dollars into this.
+  const aboveSpot = magnets.filter((s) => s.distanceFromSpotPercent >= 0)
+  const belowSpot = magnets.filter((s) => s.distanceFromSpotPercent < 0)
+  const upsideOi = sum(aboveSpot.map((s) => s.openInterest))
+  const downsideOi = sum(belowSpot.map((s) => s.openInterest))
+
+  let skew: OpexDesk['read']['skew'] = 'Balanced'
+  let skewTone: OpexDesk['read']['skewTone'] = 'Low'
+  if (upsideOi > downsideOi * 1.35) {
+    skew = 'Upside'
+    skewTone = 'Med'
+  } else if (downsideOi > upsideOi * 1.35) {
+    skew = 'Downside'
+    skewTone = 'Med'
+  }
+
+  const sessionMode: OpexDesk['read']['sessionMode'] = magnet === 'High'
+    ? 'PIN ZONE'
+    : magnet === 'Med'
+      ? 'TWO-WAY'
+      : 'FLOW DAY'
+
+  const magnetStrike = magnets[0]
+  const magnetText = magnetStrike
+    ? `$${formatStrike(magnetStrike.strike)} (${formatSignedPercent(magnetStrike.distanceFromSpotPercent)})`
+    : null
+
+  // Observational only — expiry / pin structure, no Levels/Regime role language.
+  const pinPhrase = magnet === 'High'
+    ? `Near-spot OI is heavy into ${session.expiry} (${formatWholePercent(nearSpotOiPct)})`
+    : magnet === 'Med'
+      ? `Near-spot OI is moderate into ${session.expiry} (${formatWholePercent(nearSpotOiPct)})`
+      : `Near-spot OI is light into ${session.expiry} (${formatWholePercent(nearSpotOiPct)})`
+
+  const magnetPhrase = magnetText
+    ? `top magnet ${magnetText}`
+    : 'no near-spot magnet'
+
+  const releasePhrase = release === 'High'
+    ? `${formatWholePercent(session.openInterestSharePercent)} OI rolls off in ${formatExpiryTime(session)}`
+    : release === 'Med'
+      ? `moderate roll-off size on ${session.expiry}`
+      : `limited roll-off size on ${session.expiry}`
+
+  const anchorPhrase = anchor.expiry === session.expiry
+    ? 'session is also the range anchor'
+    : `range anchor ${anchor.expiry} holds ${formatWholePercent(anchor.openInterestSharePercent)} OI`
+
+  const skewPhrase = skew === 'Balanced'
+    ? 'magnet OI bias balanced'
+    : skew === 'Upside'
+      ? 'magnet OI bias to the upside'
+      : 'magnet OI bias to the downside'
+
+  const summary = `${pinPhrase}; ${magnetPhrase}. ${releasePhrase}; ${anchorPhrase}; ${skewPhrase}.`
+
+  return { sessionMode, magnet, release, skew, skewTone, summary }
+}
+
+function OpexStat({
+  label,
+  value,
+  hint,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  hint?: string
+  tone?: 'neutral' | 'warn' | 'accent'
+}) {
+  const valueClass = tone === 'warn'
+    ? 'opex-desk__stat-value--warn'
+    : tone === 'accent'
+      ? 'opex-desk__stat-value--accent'
+      : undefined
 
   return (
-    <div className="mt-auto border-t border-[var(--terminal-rule)] pt-1.5">
-      <div className="mb-1.5 text-[8px] font-semibold uppercase text-[var(--terminal-muted)]">
-        Positioning Read
-      </div>
-      <div className="grid grid-cols-3 gap-1.5">
-        <ExpiryReadout label="Pin Risk" value={pinRisk} tone={pinRisk} />
-        <ExpiryReadout label="Post Expiry" value={resetRisk} tone={resetRisk} />
-        <ExpiryReadout label="Compression" value={compression} tone={compression} />
-      </div>
+    <div className="opex-desk__stat">
+      <div className="opex-desk__stat-label">{label}</div>
+      <div className={cn('opex-desk__stat-value', valueClass)}>{value}</div>
+      {hint ? <div className="opex-desk__stat-hint">{hint}</div> : null}
     </div>
   )
 }
 
-function ExpiryReadout({
+function OpexReadout({
   label,
   value,
   tone,
 }: {
   label: string
-  value: 'High' | 'Med' | 'Low'
+  value: string
   tone: 'High' | 'Med' | 'Low'
 }) {
-  const toneClassName = {
-    High: 'text-[var(--terminal-red-strong)]',
-    Med: 'text-[var(--terminal-yellow)]',
-    Low: 'text-[var(--terminal-muted)]',
+  const toneClass = {
+    High: 'opex-desk__stat-value--high',
+    Med: 'opex-desk__stat-value--med',
+    Low: 'opex-desk__stat-value--low',
   }[tone]
 
   return (
-    <div className="min-w-0 border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)] px-1.5 py-1">
-      <div className="mb-1 truncate text-[7.5px] font-semibold uppercase text-[var(--terminal-muted)]">{label}</div>
-      <div className={`terminal-value text-[10px] font-semibold ${toneClassName}`}>{value}</div>
-    </div>
-  )
-}
-
-function ExpiryMetric({
-  label,
-  value,
-  align = 'left',
-}: {
-  label: string
-  value: string
-  align?: 'left' | 'right'
-}) {
-  return (
-    <div className={align === 'right' ? 'text-right' : ''}>
-      <div className="mb-1 text-[7.5px] font-semibold uppercase text-[var(--terminal-muted)]">{label}</div>
-      <div className="terminal-value text-[9.5px] font-semibold text-[var(--terminal-heading)]">{value}</div>
-    </div>
-  )
-}
-
-function ExpiryDriverBar({ label, value, weight }: { label: string; value: number; weight: string }) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-1 flex items-center justify-between gap-1 text-[7.5px] font-semibold uppercase text-[var(--terminal-muted)]">
-        <span>{label}</span>
-        <span>{weight}</span>
-      </div>
-      <div className="h-1.5 border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)]">
-        <div
-          className="h-full bg-[var(--terminal-blue)]"
-          style={{ width: `${clamp(value, 0, 100)}%` }}
-        />
-      </div>
-    </div>
-  )
-}
-
-function ExpiryCompositeBar({ event }: { event: ExpiryPositioningEvent }) {
-  const sizeWidth = clamp(event.sizeScore * 0.4, 0, 40)
-  const pinWidth = clamp(event.concentrationScore * 0.35, 0, 35)
-  const urgencyWidth = clamp(event.urgencyScore * 0.25, 0, 25)
-
-  return (
-    <div className="flex h-1.5 overflow-hidden border border-[var(--terminal-border)] bg-[var(--terminal-bg-soft)]">
-      <span className="h-full bg-[var(--terminal-blue)]" style={{ width: `${sizeWidth}%` }} />
-      <span className="h-full bg-[var(--terminal-yellow)]" style={{ width: `${pinWidth}%` }} />
-      <span className="h-full bg-[var(--terminal-green-strong)]" style={{ width: `${urgencyWidth}%` }} />
+    <div className="opex-desk__stat">
+      <div className="opex-desk__stat-label">{label}</div>
+      <div className={cn('opex-desk__stat-value', toneClass)}>{value}</div>
     </div>
   )
 }
 
 function ExpiryKindBadge({ kind }: { kind: ExpiryKind }) {
   return (
-    <span className={`shrink-0 border px-1.5 py-0.5 text-[7.5px] font-semibold uppercase leading-none ${getExpiryKindBadgeClassName(kind)}`}>
+    <span className={cn('opex-desk__badge', getExpiryKindBadgeClassName(kind))}>
       {kind}
     </span>
   )
 }
 
-function getNextExpiryEventsByKind(events: ExpiryPositioningEvent[]) {
-  const kinds: ExpiryKind[] = ['daily', 'weekly', 'monthly', 'quarterly']
-
-  return kinds
-    .map((kind) => events
-      .filter((event) => event.kind === kind)
-      .sort((a, b) => a.daysToExpiry - b.daysToExpiry)[0])
-    .filter((event): event is ExpiryPositioningEvent => Boolean(event))
-}
-
 function getExpiryKindBadgeClassName(kind: ExpiryKind) {
-  if (kind === 'quarterly') {
-    return 'border-[var(--terminal-yellow)] text-[var(--terminal-yellow)] bg-[color-mix(in_srgb,var(--terminal-yellow)_10%,transparent)]'
-  }
-
-  if (kind === 'monthly') {
-    return 'border-[var(--terminal-blue)] text-[var(--terminal-blue)] bg-[color-mix(in_srgb,var(--terminal-blue)_10%,transparent)]'
-  }
-
-  if (kind === 'weekly') {
-    return 'border-[var(--terminal-green)] text-[var(--terminal-green-strong)] bg-[var(--terminal-green-soft)]'
-  }
-
-  return 'border-[var(--terminal-border-strong)] text-[var(--terminal-muted)] bg-[var(--terminal-bg-soft)]'
+  if (kind === 'quarterly') return 'opex-desk__badge--quarterly'
+  if (kind === 'monthly') return 'opex-desk__badge--monthly'
+  if (kind === 'weekly') return 'opex-desk__badge--weekly'
+  return undefined
 }
 
-function getImportanceToneClassName(score: number) {
-  if (score >= 70) return 'text-[var(--terminal-red-strong)]'
-  if (score >= 52) return 'text-[var(--terminal-yellow)]'
-  if (score >= 36) return 'text-[var(--terminal-green-strong)]'
-
-  return 'text-[var(--terminal-muted)]'
+function getSessionModeClassName(mode: OpexDesk['read']['sessionMode']) {
+  if (mode === 'PIN ZONE') return 'opex-desk__mode opex-desk__mode--pin'
+  if (mode === 'TWO-WAY') return 'opex-desk__mode opex-desk__mode--twoway'
+  return 'opex-desk__mode opex-desk__mode--flow'
 }
 
-function getExpiryRiskLabel(value: number, thresholds: [number, number]): 'High' | 'Med' | 'Low' {
-  if (value >= thresholds[0]) return 'High'
-  if (value >= thresholds[1]) return 'Med'
-
-  return 'Low'
-}
-
-function formatImportanceScore(score: number) {
-  return Math.round(score).toString()
-}
-
+/**
+ * Compact remaining time. Expired / zero hours show "0h" (never forced to "1h").
+ * Sub-30m remaining shows "<1h" so the countdown does not round to zero while live.
+ */
 function formatExpiryTime(event: ExpiryPositioningEvent) {
-  if (event.hoursToExpiry < 36) {
-    return `${Math.max(1, Math.round(event.hoursToExpiry))}h`
+  return formatExpiryCountdown(event).text
+}
+
+function formatExpiryCountdown(event: ExpiryPositioningEvent): { text: string; showLeft: boolean } {
+  const hours = event.hoursToExpiry
+
+  if (!Number.isFinite(hours) || hours <= 0) {
+    return { text: '0h', showLeft: false }
   }
 
-  return `${event.daysToExpiry < 10 ? event.daysToExpiry.toFixed(1) : Math.round(event.daysToExpiry)}d`
+  if (hours < 36) {
+    const rounded = Math.round(hours)
+    if (rounded === 0) {
+      return { text: '<1h', showLeft: true }
+    }
+    return { text: `${rounded}h`, showLeft: true }
+  }
+
+  const daysText = event.daysToExpiry < 10
+    ? event.daysToExpiry.toFixed(1)
+    : String(Math.round(event.daysToExpiry))
+  return { text: `${daysText}d`, showLeft: true }
 }
 
 function formatCompactUsd(value: number) {
@@ -1108,184 +1183,7 @@ function formatCompactUsd(value: number) {
   return formatUsd(value)
 }
 
-function getRegimeContext(snapshot: TerminalSnapshot) {
-  const dealerGammaScore = getRegimeScore(snapshot)
-  const flipStrike = getAdvancedLevelValue(snapshot, 'Gamma Flip Zones') ?? getAdvancedLevelValue(snapshot, 'Zero Gamma')
-  const supportStrike = getLevelStrike(snapshot, 'Put Support')
-  const resistanceStrike = getLevelStrike(snapshot, 'Call Resistance')
-  const corridorValues = [supportStrike, flipStrike, resistanceStrike, snapshot.spot].filter((value): value is number => value !== undefined)
-  const corridorMin = corridorValues.length > 0 ? Math.min(...corridorValues) : snapshot.spot
-  const corridorMax = corridorValues.length > 0 ? Math.max(...corridorValues) : snapshot.spot
-  const corridorRange = corridorMax - corridorMin
-  const positionFor = (value: number | undefined) => {
-    if (value === undefined || corridorRange === 0) return 50
-
-    return clamp(((value - corridorMin) / corridorRange) * 100, 0, 100)
-  }
-  const fallbackFlipStrike = flipStrike ?? snapshot.spot
-  const flipDistance = snapshot.spot - fallbackFlipStrike
-  const flipDistancePercent = fallbackFlipStrike === 0 ? 0 : (flipDistance / fallbackFlipStrike) * 100
-  const pinPressureScore = getPinPressureScore(snapshot)
-  const expansionRiskScore = getExpansionRiskScore(dealerGammaScore, flipDistancePercent, pinPressureScore)
-  const dealerGammaLabel = getDealerGammaLabel(dealerGammaScore)
-  const pinPressureLabel = getRegimeRiskLabel(pinPressureScore, [58, 32])
-  const expansionRiskLabel = getRegimeRiskLabel(expansionRiskScore, [60, 35])
-  const tradeRegime = getTradeRegime({
-    dealerGammaScore,
-    flipDistancePercent,
-    pinPressureLabel,
-    expansionRiskLabel,
-  })
-
-  return {
-    dealerGammaScore,
-    dealerGammaLabel,
-    dealerGammaTone: getDealerGammaTone(dealerGammaScore),
-    pinPressureScore,
-    pinPressureLabel,
-    pinPressureTone: getPressureTone(pinPressureLabel),
-    expansionRiskScore,
-    expansionRiskLabel,
-    expansionRiskTone: getExpansionTone(expansionRiskLabel),
-    tradeRegimeLabel: tradeRegime.label,
-    tradeRegimeTone: tradeRegime.tone,
-    flipStrike,
-    supportStrike,
-    resistanceStrike,
-    flipDistance,
-    flipDistancePercent,
-    flipPosition: positionFor(flipStrike),
-    spotPosition: positionFor(snapshot.spot),
-  }
+function sum(values: number[]) {
+  return values.reduce((total, value) => total + value, 0)
 }
 
-function getRegimeScore(snapshot: TerminalSnapshot) {
-  const flipPoint = getAdvancedLevelValue(snapshot, 'Gamma Flip Zones') ?? getAdvancedLevelValue(snapshot, 'Zero Gamma')
-  const maxVolatility = getLevelStrike(snapshot, 'Put Support')
-  const maxStability = getLevelStrike(snapshot, 'Call Resistance')
-
-  if (flipPoint === undefined || maxVolatility === undefined || maxStability === undefined) {
-    return 0
-  }
-
-  const regimeRange = Math.abs(maxStability - maxVolatility)
-  if (regimeRange === 0) return 0
-
-  return clamp((snapshot.spot - flipPoint) / regimeRange, -1, 1)
-}
-
-function getPinPressureScore(snapshot: TerminalSnapshot) {
-  const validRows = snapshot.gammaBars.filter((row) => (
-    Number.isFinite(row.strike)
-    && Number.isFinite(row.gammaExposureUsd)
-    && Math.abs(row.gammaExposureUsd) > 0
-  ))
-  const totalAbsGexUsd = validRows.reduce((total, row) => total + Math.abs(row.gammaExposureUsd), 0)
-  if (totalAbsGexUsd === 0) return 0
-
-  const nearSpotRows = validRows.filter((row) => {
-    const distanceFromSpotPercent = getDistanceFromSpotPercent(row.strike, snapshot.spot)
-
-    return distanceFromSpotPercent !== undefined && Math.abs(distanceFromSpotPercent) <= 2.5
-  })
-  const nearSpotAbsGexUsd = nearSpotRows.reduce((total, row) => total + Math.abs(row.gammaExposureUsd), 0)
-  const largestNearSpotWallUsd = Math.max(0, ...nearSpotRows.map((row) => Math.abs(row.gammaExposureUsd)))
-  const nearSpotShare = (nearSpotAbsGexUsd / totalAbsGexUsd) * 100
-  const largestWallShare = (largestNearSpotWallUsd / totalAbsGexUsd) * 100
-
-  return clamp((nearSpotShare * 1.25) + (largestWallShare * 2.5), 0, 100)
-}
-
-function getExpansionRiskScore(dealerGammaScore: number, flipDistancePercent: number, pinPressureScore: number) {
-  const shortGammaPressure = clamp(-dealerGammaScore * 100, 0, 100)
-  const flipProximity = clamp((1 - (Math.abs(flipDistancePercent) / 2.5)) * 100, 0, 100)
-
-  return clamp((shortGammaPressure * 0.55) + (flipProximity * 0.25) + (pinPressureScore * 0.2), 0, 100)
-}
-
-function getDealerGammaLabel(score: number) {
-  if (score > 0.12) return 'Long Gamma'
-  if (score < -0.12) return 'Short Gamma'
-
-  return 'Transition'
-}
-
-function getDealerGammaTone(score: number): RegimeTone {
-  if (score > 0.12) return 'green'
-  if (score < -0.12) return 'red'
-
-  return 'amber'
-}
-
-function getRegimeRiskLabel(score: number, thresholds: [number, number]) {
-  if (score >= thresholds[0]) return 'High'
-  if (score >= thresholds[1]) return 'Medium'
-
-  return 'Low'
-}
-
-function getPressureTone(label: 'High' | 'Medium' | 'Low'): RegimeTone {
-  if (label === 'High') return 'amber'
-  if (label === 'Medium') return 'green'
-
-  return 'muted'
-}
-
-function getExpansionTone(label: 'High' | 'Medium' | 'Low'): RegimeTone {
-  if (label === 'High') return 'red'
-  if (label === 'Medium') return 'amber'
-
-  return 'muted'
-}
-
-function getTradeRegime({
-  dealerGammaScore,
-  flipDistancePercent,
-  pinPressureLabel,
-  expansionRiskLabel,
-}: {
-  dealerGammaScore: number
-  flipDistancePercent: number
-  pinPressureLabel: 'High' | 'Medium' | 'Low'
-  expansionRiskLabel: 'High' | 'Medium' | 'Low'
-}): { label: string; tone: RegimeTone } {
-  const nearFlip = Math.abs(dealerGammaScore) <= 0.12 || Math.abs(flipDistancePercent) <= 0.35
-  if (nearFlip) return { label: 'Transition', tone: 'amber' }
-
-  if (dealerGammaScore > 0) {
-    if (pinPressureLabel === 'High') return { label: 'Compression', tone: 'green' }
-
-    return { label: 'Mean Reversion', tone: 'green' }
-  }
-
-  if (expansionRiskLabel === 'High') return { label: 'Momentum', tone: 'red' }
-
-  return { label: 'Fragile', tone: 'amber' }
-}
-
-function getAdvancedLevelValue(snapshot: TerminalSnapshot, label: string) {
-  const metric = snapshot.levels.advanced.find((item) => item.label === label)
-  if (!metric) return undefined
-
-  const parsed = Number(metric.value.replace(/[^\d.-]/g, ''))
-
-  return Number.isFinite(parsed) ? parsed : undefined
-}
-
-function getLevelStrike(snapshot: TerminalSnapshot, label: string) {
-  return snapshot.levels.allExpiry.find((item) => item.label === label)?.strike
-}
-
-function formatRegimeScore(score: number) {
-  return `${score >= 0 ? '+' : ''}${score.toFixed(2)}`
-}
-
-function formatSignedUsd(value: number) {
-  const sign = value >= 0 ? '+' : '-'
-
-  return `${sign}${formatUsd(Math.abs(value))}`
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
-}

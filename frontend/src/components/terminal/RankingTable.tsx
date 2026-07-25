@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import type { CSSProperties, ReactNode } from 'react'
+import { memo, type CSSProperties, type ReactNode } from 'react'
 import { Panel } from '@/components/terminal/Panel'
 import { Button } from '@/components/ui/button'
 import { getSpotDistanceColor } from '@/data/levelColors'
@@ -7,7 +7,8 @@ import type { RankingRow } from '@/data/mockTerminal'
 import { formatMillions, formatSignedPercent, formatStrike } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
 
-export type RankingScope = 'allExpiry' | 'zeroDte'
+/** Opaque key prefix for ranking row React keys (panel identity). */
+export type RankingScope = string
 
 type RankingTableProps = {
   title: string
@@ -16,13 +17,22 @@ type RankingTableProps = {
   collapsed?: boolean
   titleAccessory?: ReactNode
   onCollapsedChange?: (collapsed: boolean) => void
+  className?: string
 }
 
 const spotProximityThresholdPercent = 0.5
 const tradingPatternThresholdPercent = 0.25
 const tradingSignatureThresholdPercent = 0.1
 
-export function RankingTable({ title, scope, rows, collapsed = false, titleAccessory, onCollapsedChange }: RankingTableProps) {
+export const RankingTable = memo(function RankingTable({
+  title,
+  scope,
+  rows,
+  collapsed = false,
+  titleAccessory,
+  onCollapsedChange,
+  className,
+}: RankingTableProps) {
   const maxAbs = Math.max(1, ...rows.map((row) => Math.abs(row.gammaExposureUsd)))
 
   return (
@@ -35,7 +45,6 @@ export function RankingTable({ title, scope, rows, collapsed = false, titleAcces
             <Button
               aria-expanded={!collapsed}
               aria-label={collapsed ? 'Expand lower panels' : 'Collapse lower panels'}
-              title={collapsed ? 'Expand lower panels' : 'Collapse lower panels'}
               variant={collapsed ? 'active' : 'default'}
               size="icon"
               className="h-[20px] w-[20px] px-0"
@@ -47,27 +56,29 @@ export function RankingTable({ title, scope, rows, collapsed = false, titleAcces
         </div>
       ) : null}
       className={cn(
-        'flex h-full min-h-0 flex-col',
-        collapsed ? 'justify-center py-2' : 'min-h-[292px]',
+        'flex h-full min-h-0 flex-col overflow-hidden',
+        collapsed ? 'justify-center py-2' : '',
+        className,
       )}
     >
       {collapsed ? null : (
-        <>
-          <div className={cn(rankingGridColumns, 'grid border-b border-[var(--terminal-rule)] px-1 pb-1 text-[9.5px] font-semibold uppercase tracking-[0.1em] text-[var(--terminal-muted)]')}>
+        <div className="gex-ranking-well flex min-h-0 flex-1 flex-col">
+          <div className={cn(rankingGridColumns, 'gex-ranking-header grid px-1.5 pb-1.5 pt-0.5 text-[8.5px] font-semibold uppercase tracking-[0.1em] text-[var(--terminal-muted)]')}>
             <div>Rank</div>
             <div>Strike</div>
             <div>Dist</div>
-            <div>Gamma Exposure</div>
-            <div />
+            <div>Net GEX</div>
+            <div className="text-right">GEX</div>
           </div>
           <div className="grid flex-1" style={{ gridTemplateRows: `repeat(${rows.length}, minmax(var(--terminal-table-row), 1fr))` }}>
             {rows.map((row) => {
               const positive = row.gammaExposureUsd >= 0
-              const width = `${Math.max(12, (Math.abs(row.gammaExposureUsd) / maxAbs) * 100)}%`
+              const width = `${Math.max(10, (Math.abs(row.gammaExposureUsd) / maxAbs) * 100)}%`
               const key = getRankingRowKey(scope, row)
               const highlightColor = positive ? 'var(--terminal-green-strong)' : 'var(--terminal-red-strong)'
               const proximityTier = getTradingProximityTier(row.distanceFromSpotPercent)
               const highlightStyle = getTradingHighlightStyle(row.distanceFromSpotPercent, highlightColor, proximityTier)
+              const topRank = row.rank <= 3
 
               return (
                 <div
@@ -76,36 +87,46 @@ export function RankingTable({ title, scope, rows, collapsed = false, titleAcces
                   style={highlightStyle}
                 >
                   <TradingLevelFlow color={highlightColor} tier={proximityTier} />
-                  <div className="terminal-value relative z-10 text-[10.5px] text-[var(--terminal-muted)]">{row.rank}</div>
-                  <div className="terminal-value relative z-10 min-w-0 whitespace-nowrap text-[11px] font-semibold text-[var(--terminal-heading)]">
+                  <div className={cn(
+                    'relative z-10 text-[10px] tabular-nums',
+                    topRank
+                      ? 'font-semibold text-[var(--terminal-heading)]'
+                      : 'font-medium text-[var(--terminal-muted)]',
+                  )}>
+                    {row.rank}
+                  </div>
+                  <div className="relative z-10 min-w-0 whitespace-nowrap text-[11px] font-semibold tabular-nums text-[var(--terminal-heading)]">
                     ${formatStrike(row.strike)}
                   </div>
                   <div
-                    className="terminal-value relative z-10 whitespace-nowrap text-[9.75px]"
+                    className="relative z-10 whitespace-nowrap text-[10px] tabular-nums font-medium"
                     style={{ color: getSpotDistanceColor(row.distanceFromSpotPercent) }}
                   >
                     {formatSignedPercent(row.distanceFromSpotPercent)}
                   </div>
-                  <div className="relative z-10 h-px bg-[color-mix(in_srgb,var(--terminal-border)_62%,transparent)]">
+                  <div className="gex-ranking-bar relative z-10">
                     <div
-                      className={positive ? 'h-full bg-[var(--chart-positive-edge)]' : 'h-full bg-[var(--chart-negative-edge)]'}
+                      className={positive ? 'gex-ranking-bar__fill gex-ranking-bar__fill--pos' : 'gex-ranking-bar__fill gex-ranking-bar__fill--neg'}
                       style={{ width }}
                     />
                   </div>
-                  <div className={positive ? 'terminal-value relative z-10 text-right text-[10.75px] text-[var(--terminal-green-strong)]' : 'terminal-value relative z-10 text-right text-[10.75px] text-[var(--terminal-red-strong)]'}>
+                  <div className={cn(
+                    'relative z-10 text-right text-[10.5px] font-semibold tabular-nums',
+                    positive ? 'text-[var(--terminal-green-strong)]' : 'text-[var(--terminal-red-strong)]',
+                  )}>
                     {formatMillions(row.gammaExposureUsd)}
                   </div>
                 </div>
               )
             })}
           </div>
-        </>
+        </div>
       )}
     </Panel>
   )
-}
+})
 
-const rankingGridColumns = 'grid-cols-[44px_112px_64px_minmax(224px,1fr)_78px]'
+const rankingGridColumns = 'grid-cols-[40px_108px_60px_minmax(200px,1fr)_82px]'
 
 function getRankingRowKey(scope: RankingScope, row: Pick<RankingRow, 'strike'>) {
   return `${scope}:${row.strike}`
@@ -153,7 +174,7 @@ function getTradingHighlightStyle(
 
   const distance = Math.abs(distanceFromSpotPercent)
   const intensity = 1 - Math.min(distance / spotProximityThresholdPercent, 1)
-  const edgeMix = 12 + intensity * 20
+  const edgeMix = 14 + intensity * 22
 
   return {
     boxShadow: `inset 2px 0 0 color-mix(in srgb, ${color} ${edgeMix}%, transparent)`,
@@ -162,9 +183,9 @@ function getTradingHighlightStyle(
 
 function getRowClassName(highlighted: boolean) {
   const baseClassName = cn(
-    'group relative grid w-full items-center overflow-hidden border-b border-[var(--terminal-rule)] bg-transparent px-1 py-0 text-left text-[10.75px] font-normal leading-[16px] transition-[background-color,box-shadow,color] last:border-b-0 hover:bg-[var(--terminal-surface-2)]',
     rankingGridColumns,
+    'gex-ranking-row group relative grid w-full items-center overflow-hidden px-1.5 py-0 text-left text-[10.75px] font-normal leading-[16px] transition-[background-color,box-shadow,color]',
   )
 
-  return highlighted ? `${baseClassName} hover:bg-[color-mix(in_srgb,var(--terminal-surface-2)_78%,transparent)]` : baseClassName
+  return highlighted ? `${baseClassName} gex-ranking-row--prox` : baseClassName
 }

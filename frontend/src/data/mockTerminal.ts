@@ -23,14 +23,31 @@ export type LevelItem = {
   strike: number
   distanceFromSpotPercent?: number
   color: string
+  /** Signed net GEX at the level strike when provided by the backend. */
+  netGex?: number
+  /** Expiry tag for tenor-scoped groups (weekly / monthly / quarterly). */
+  scopeLabel?: string
 }
 
+/** Reference metrics (Gamma Flip, Max Pain, Expected Move). Formerly AdvancedMetric. */
 export type AdvancedMetric = {
   label: string
   value: string
   change?: string
   color: string
+  /** book = full listed surface; session = front expiry */
+  scope?: 'book' | 'session'
+  /** Expiry tag for session-scoped metrics (or ALL for book). */
+  scopeLabel?: string
+  /** Gamma Flip only: "ok" when a real cross exists, "no_cross" when unavailable. */
+  status?: 'ok' | 'no_cross'
+  /** Locked empty-state copy when status is no_cross (one-sided short/long/neutral). */
+  note?: string
 }
+
+export type GammaFlipStatus = 'ok' | 'no_cross'
+
+export type ReferenceMetric = AdvancedMetric
 
 export type RankingRow = {
   rank: number
@@ -102,23 +119,194 @@ export type GexHistoryPoint = {
   putGexUsd: number
 }
 
+/** Full-surface (ALL) stats for the Regime desk footer. */
+export type BookStats = {
+  netGexUsd: number
+  callOpenInterest: number
+  putOpenInterest: number
+  putCallOiRatio: number | null
+  dvol: number | null
+  /** short_rv / long_rv (1h closes); null when offline. */
+  rvRatio?: number | null
+  /** Expanding | Neutral | Compressing — light Regime confirmation only. */
+  rvTrend?: 'Expanding' | 'Neutral' | 'Compressing' | null
+  /** Annualized short-window realized vol (%). */
+  rvShort?: number | null
+  /** Annualized longer-window realized vol (%). */
+  rvLong?: number | null
+}
+
+export type FlowHorizonAgreement = 'Aligned' | 'Mixed' | 'Fighting'
+
+/**
+ * Vol-compare series point (DVOL / RV / spread). Values are percent vol.
+ */
+export type VolSeriesPoint = {
+  tsMs: number
+  value: number
+}
+
+/**
+ * Deribit DVOL vs Hyperliquid rolling RV for Regime lower zone.
+ * Units: percent annualized vol. spread = DVOL − RV (percent points).
+ * Does not alter main Dealer Γ / Flip / Net GEX / RV Trend scoring.
+ */
+export type VolCompare = {
+  version?: string
+  dvolSeries: VolSeriesPoint[]
+  rvSeries: VolSeriesPoint[]
+  spreadSeries: VolSeriesPoint[]
+  meta?: {
+    asOfMs?: number
+    window?: string
+    units?: 'percent' | string
+    dvolSource?: string
+    rvSource?: string
+    spreadDefinition?: string
+    showRvDefault?: boolean
+    showSpreadDefault?: boolean
+    dvolPointCount?: number
+    rvPointCount?: number
+    spreadPointCount?: number
+    error?: string
+  }
+  error?: string | null
+}
+
+/**
+ * 25Δ normalized skew for display-only Regime chips (Tail risk / term ATM).
+ * Formula: (IV_25Δ_put − IV_25Δ_call) / ATM_IV. Positive = puts richer.
+ * Does not alter Dealer Γ / Flip / Net GEX / RV Trend / Context scoring inputs.
+ */
+export type Skew25d = {
+  formula?: string
+  primaryTenor?: string | null
+  /**
+   * Normalized skew by tenor (decimal, e.g. 0.064 = +6.4% Glassnode-style).
+   * Primary chip: 1m → 1w → 3m. Display multiplies by 100 for percent readout.
+   */
+  levels: {
+    '1w': number | null
+    '1m': number | null
+    '3m': number | null
+    '6m'?: number | null
+  }
+  series?: VolSeriesPoint[]
+  /**
+   * Per-tenor ATM IV in **percent** vol (converted from backend decimal).
+   * Long-leg fallback for term structure when DVOL missing (1m).
+   */
+  atmIvPercent?: {
+    '1w': number | null
+    '1m': number | null
+    '3m'?: number | null
+  }
+  /**
+   * Front term leg: ATM IV on nearest listed expiry with DTE ≥ MIN_DTE (~0.35d).
+   * Percent vol. Not the closest-to-7d tenor match.
+   */
+  frontAtm?: {
+    atmIvPercent: number | null
+    dteDays: number | null
+    expiryTsMs: number | null
+    status?: string | null
+  } | null
+  meta?: {
+    asOfMs?: number
+    chartTenor?: string | null
+    chainPointCount?: number
+    historySampleCount?: number
+  }
+  error?: string | null
+}
+
+/**
+ * Secondary Regime analytics (Horizon polarity + DVOL/RV vol compare + 25Δ skew).
+ * Does not alter main Dealer Γ / Flip / Net GEX / RV Trend.
+ */
+export type FlowRegime = {
+  version?: string
+  asOfMs?: number
+  spot?: number | null
+  deltaGexDefinition?: string
+  historySampleCount?: number
+  horizon: {
+    fullScore: number | null
+    sessionScore: number | null
+    sessionNetGex: number | null
+    agreement: FlowHorizonAgreement | null
+    read: string | null
+    sessionAvailable: boolean
+    sessionAnchorTsMs: number | null
+    /** ok | empty | pre_open | unavailable | error */
+    sessionStatus?: string | null
+    sessionReason?: string | null
+  }
+  /** DVOL time series + optional RV overlay + DVOL−RV spread. */
+  volCompare?: VolCompare
+  /** 25Δ normalized skew (display chips only). */
+  skew25d?: Skew25d
+}
+
 export type TerminalSnapshot = {
   asOfUtc: string
   symbol: 'BTC'
   expiry: GexExpiry
+  expiries?: GexExpiry[]
+  /**
+   * Materialize GEX spot (median option underlying). Used for Flip window /
+   * Expected Move methodology — not the chart spot line when liveIndex is set.
+   */
   spot: number
+  /**
+   * Live Deribit btc_usd settlement index (same feed as Price panel Index).
+   * null/undefined when unavailable → charts/DIST fall back to ``spot``.
+   */
+  liveIndex?: number | null
+  /** Production net GEX by strike (blocks + combos excluded). */
   gammaBars: GammaBar[]
+  /**
+   * ARCHIVED: secondary include-OTC bars (not used by the live desk).
+   * See project/docs/archived_include_otc_prints.md
+   */
+  gammaBarsIncludeOtc?: GammaBar[]
+  /** ARCHIVED: true when backend attached include-OTC profile. */
+  includeOtcPrintsAvailable?: boolean
   totalNetGexUsd: number
   totalCallGexUsd: number
   totalPutGexUsd: number
   maxPositiveGammaStrike: number
   maxNegativeGammaStrike: number
-  zeroGamma: number
+  /**
+   * Gamma Flip level (legacy alias of gammaFlip).
+   * null when gammaFlipStatus === 'no_cross' — never a flattest-bar fake Flip.
+   */
+  zeroGamma: number | null
+  /** Explicit Flip level from mass-valid cumulative zero-cross; null if none. */
+  gammaFlip: number | null
+  gammaFlipStatus: GammaFlipStatus
+  /**
+   * Locked empty-state copy when gammaFlipStatus === 'no_cross'
+   * (e.g. "No local flip · GEX one-sided (short)"). Null/undefined when ok.
+   */
+  gammaFlipNote?: string | null
   marketSources: MarketSource[]
+  bookStats?: BookStats
+  /** Secondary Regime analytics (Horizon polarity + DVOL/RV vol compare). */
+  flowRegime?: FlowRegime
+  /** Sibling when materialize omitted flow_regime (API injects vol_compare live). */
+  volCompare?: VolCompare
   levels: {
     allExpiry: LevelItem[]
     zeroDte: LevelItem[]
-    advanced: AdvancedMetric[]
+    /** Nearest weekly expiry Positive/Negative Gamma peaks. */
+    weekly: LevelItem[]
+    /** Nearest monthly (non-quarter last-Friday) peaks. */
+    monthly: LevelItem[]
+    /** Nearest quarterly last-Friday peaks. */
+    quarterly: LevelItem[]
+    /** Reference metrics (Gamma Flip, Max Pain, Expected Move). */
+    reference: ReferenceMetric[]
   }
   rankings: {
     allExpiry: RankingRow[]
@@ -140,29 +328,75 @@ export function getTerminalSnapshot(expiry: GexExpiry = 'ALL'): TerminalSnapshot
     .filter((snapshot): snapshot is MockGexSnapshot => Boolean(snapshot))
   const spot = allExpiry.spot
 
+  const callOi = allExpiry.gammaBars.reduce(
+    (total, row) => total + estimateOpenInterest(row.strike, 'call', row.callGammaExposureUsd ?? 0),
+    0,
+  )
+  const putOi = allExpiry.gammaBars.reduce(
+    (total, row) => total + estimateOpenInterest(row.strike, 'put', row.putGammaExposureUsd ?? 0),
+    0,
+  )
+
   return {
     ...gexSnapshot,
+    // Mock: live index equals GEX spot (no lag).
+    liveIndex: spot,
+    expiries,
     marketSources,
+    bookStats: {
+      netGexUsd: allExpiry.totalNetGexUsd,
+      callOpenInterest: callOi,
+      putOpenInterest: putOi,
+      putCallOiRatio: callOi > 0 ? putOi / callOi : null,
+      dvol: 48.6,
+      rvRatio: 1.05,
+      rvTrend: 'Neutral',
+      rvShort: 42.0,
+      rvLong: 40.0,
+    },
+    flowRegime: buildMockFlowRegime(allExpiry.totalNetGexUsd),
     levels: {
       allExpiry: [
-        { label: 'HVL', strike: 80_000, distanceFromSpotPercent: percentFromSpot(80_000, spot), color: '#d0bc62' },
-        { label: 'Call Resistance', strike: 81_500, distanceFromSpotPercent: percentFromSpot(81_500, spot), color: '#94c970' },
-        { label: 'Put Support', strike: 68_000, distanceFromSpotPercent: percentFromSpot(68_000, spot), color: '#ee5f66' },
+        { label: 'Positive Gamma', strike: 81_500, distanceFromSpotPercent: percentFromSpot(81_500, spot), color: levelColors.positiveGamma },
+        { label: 'Negative Gamma', strike: 68_000, distanceFromSpotPercent: percentFromSpot(68_000, spot), color: levelColors.negativeGamma },
       ],
       zeroDte: [
-        { label: '0DTE HVL', strike: frontExpiry.maxPositiveGammaStrike, distanceFromSpotPercent: percentFromSpot(frontExpiry.maxPositiveGammaStrike, spot), color: '#86a9c7' },
-        { label: '0DTE Call', strike: 80_000, distanceFromSpotPercent: percentFromSpot(80_000, spot), color: levelColors.zeroDteCall },
-        { label: '0DTE Put', strike: frontExpiry.maxNegativeGammaStrike, distanceFromSpotPercent: percentFromSpot(frontExpiry.maxNegativeGammaStrike, spot), color: levelColors.zeroDtePut },
+        { label: '0DTE Positive Gamma', strike: frontExpiry.maxPositiveGammaStrike, distanceFromSpotPercent: percentFromSpot(frontExpiry.maxPositiveGammaStrike, spot), color: levelColors.positiveGamma },
+        { label: '0DTE Negative Gamma', strike: frontExpiry.maxNegativeGammaStrike, distanceFromSpotPercent: percentFromSpot(frontExpiry.maxNegativeGammaStrike, spot), color: levelColors.negativeGamma },
       ],
-      advanced: [
-        { label: 'Zero Gamma', value: '$76,132', color: levelColors.zeroGamma },
-        { label: 'Max Pain', value: '$77,000', change: formatSignedPercent(percentFromSpot(77_000, spot)), color: '#d35fe9' },
+      ...buildMockTenorLevels(datedSnapshots, spot),
+      reference: [
+        (() => {
+          // Same estimator as mock GEX / backend — no hardcoded far Flip.
+          const flip = allExpiry.gammaFlip
+          const status = allExpiry.gammaFlipStatus
+          return {
+            label: 'Gamma Flip' as const,
+            value: flip != null ? `$${Math.round(flip).toLocaleString('en-US')}` : '—',
+            change:
+              flip != null ? formatSignedPercent(percentFromSpot(flip, spot)) : undefined,
+            color: levelColors.gammaFlip,
+            scope: 'book' as const,
+            scopeLabel: 'ALL',
+            status,
+            note: status === 'no_cross' ? (allExpiry.gammaFlipNote ?? undefined) : undefined,
+          }
+        })(),
+        {
+          label: 'Max Pain',
+          value: '$77,000',
+          change: formatSignedPercent(percentFromSpot(77_000, spot)),
+          color: '#d35fe9',
+          scope: 'session',
+          scopeLabel: frontExpiryId === 'ALL' ? undefined : frontExpiryId,
+        },
         {
           label: 'Expected Move',
           value: '$73,500-$82,000',
           color: levelColors.expectedMove,
+          scope: 'session',
+          scopeLabel: frontExpiryId === 'ALL' ? undefined : frontExpiryId,
         },
-        { label: 'Gamma Flip Zones', value: '$76,132', color: levelColors.gammaFlip },
       ],
     },
     rankings: {
@@ -175,9 +409,93 @@ export function getTerminalSnapshot(expiry: GexExpiry = 'ALL'): TerminalSnapshot
 }
 
 const marketSources: MarketSource[] = [
-  { name: 'Index (Deribit)', value: 77_041, note: 'options settle', color: '#d35fe9' },
+  { name: 'Index (Deribit)', value: 77_041, note: 'settlement index', color: '#d35fe9' },
   { name: 'Perps (Hyperliquid)', value: 77_118, note: 'basis +77.00', color: '#27a7dc' },
 ]
+
+/** Offline mock for Regime secondary modes (Horizon + DVOL/RV vol compare). */
+function buildMockFlowRegime(netGexUsd: number): FlowRegime {
+  const now = Date.now()
+  const stepMs = 60 * 60_000
+  const dvolSeries = Array.from({ length: 168 }, (_, i) => {
+    const t = now - (167 - i) * stepMs
+    const wave = Math.sin(i / 18) * 1.8 + Math.cos(i / 31) * 0.9
+    return { tsMs: t, value: 42 + wave + (netGexUsd >= 0 ? 0 : 1.5) }
+  })
+  const rvSeries = dvolSeries.map((p, i) => ({
+    tsMs: p.tsMs,
+    value: p.value - 4.5 + Math.sin(i / 12) * 1.2,
+  }))
+  const spreadSeries = dvolSeries.map((p, i) => ({
+    tsMs: p.tsMs,
+    value: p.value - (rvSeries[i]?.value ?? p.value),
+  }))
+
+  return {
+    version: 'flow_regime.v1',
+    horizon: {
+      fullScore: netGexUsd >= 0 ? 0.22 : -0.22,
+      sessionScore: netGexUsd >= 0 ? 0.18 : 0.15,
+      sessionNetGex: netGexUsd * 0.15,
+      agreement: netGexUsd >= 0 ? 'Aligned' : 'Fighting',
+      read: netGexUsd >= 0 ? null : 'Session long while full book short',
+      sessionAvailable: true,
+      sessionAnchorTsMs: Date.now() - 6 * 3600_000,
+      sessionStatus: 'ok',
+      sessionReason: null,
+    },
+    volCompare: {
+      version: 'vol_compare.v1',
+      dvolSeries,
+      rvSeries,
+      spreadSeries,
+      meta: {
+        asOfMs: now,
+        window: '7d',
+        units: 'percent',
+        dvolSource: 'mock deribit dvol',
+        rvSource: 'mock hyperliquid rolling 7d rv',
+        spreadDefinition: 'DVOL − RV (percent points)',
+        showRvDefault: true,
+        showSpreadDefault: true,
+        dvolPointCount: dvolSeries.length,
+        rvPointCount: rvSeries.length,
+        spreadPointCount: spreadSeries.length,
+      },
+    },
+    // Display-only Tail / term chips — not used in Dealer Γ or Context math.
+    skew25d: {
+      formula: '(IV_25d_put - IV_25d_call) / ATM_IV',
+      primaryTenor: '1m',
+      levels: {
+        '1w': 0.055,
+        '1m': 0.072,
+        '3m': 0.068,
+      },
+      series: Array.from({ length: 48 }, (_, i) => ({
+        tsMs: now - (47 - i) * stepMs,
+        value: 0.06 + Math.sin(i / 9) * 0.02,
+      })),
+      atmIvPercent: {
+        '1w': 44.5,
+        '1m': 47.8,
+        '3m': 49.2,
+      },
+      frontAtm: {
+        atmIvPercent: 42.1,
+        dteDays: 0.9,
+        expiryTsMs: now + 0.9 * 86_400_000,
+        status: 'ok',
+      },
+      meta: {
+        asOfMs: now,
+        chartTenor: '1m',
+        chainPointCount: 240,
+        historySampleCount: 48,
+      },
+    },
+  }
+}
 
 export const terminalSnapshot = getTerminalSnapshot('ALL')
 
@@ -364,6 +682,49 @@ function getExpiryKind(expiry: GexExpiry): ExpiryKind {
   return date.getUTCDay() === 5 ? 'weekly' : 'daily'
 }
 
+/** Nearest upcoming weekly / monthly / quarterly peak levels for the mock desk. */
+function buildMockTenorLevels(
+  datedSnapshots: MockGexSnapshot[],
+  spot: number,
+): Pick<TerminalSnapshot['levels'], 'weekly' | 'monthly' | 'quarterly'> {
+  const pick = (kind: ExpiryKind): LevelItem[] => {
+    const candidates = datedSnapshots
+      .filter((snapshot) => snapshot.expiry !== 'ALL' && getExpiryKind(snapshot.expiry) === kind)
+      .map((snapshot) => {
+        const { hoursToExpiry } = getExpiryTime(snapshot.expiry)
+        return { snapshot, hoursToExpiry }
+      })
+      .filter((entry) => entry.hoursToExpiry > 0)
+      .sort((a, b) => a.hoursToExpiry - b.hoursToExpiry)
+
+    const nearest = candidates[0]?.snapshot
+    if (!nearest) return []
+
+    return [
+      {
+        label: 'Positive Gamma',
+        strike: nearest.maxPositiveGammaStrike,
+        distanceFromSpotPercent: percentFromSpot(nearest.maxPositiveGammaStrike, spot),
+        color: levelColors.positiveGamma,
+        scopeLabel: nearest.expiry,
+      },
+      {
+        label: 'Negative Gamma',
+        strike: nearest.maxNegativeGammaStrike,
+        distanceFromSpotPercent: percentFromSpot(nearest.maxNegativeGammaStrike, spot),
+        color: levelColors.negativeGamma,
+        scopeLabel: nearest.expiry,
+      },
+    ]
+  }
+
+  return {
+    weekly: pick('weekly'),
+    monthly: pick('monthly'),
+    quarterly: pick('quarterly'),
+  }
+}
+
 function isLastFridayOfMonth(date: Date) {
   if (date.getUTCDay() !== 5) return false
 
@@ -442,8 +803,24 @@ function sum(values: number[]) {
   return values.reduce((total, value) => total + value, 0)
 }
 
+/** Distance convention (Levels + rankings): (level − spot) / spot × 100. */
 function percentFromSpot(strike: number, spot: number) {
   return ((strike - spot) / spot) * 100
+}
+
+/**
+ * Trading UI spot: live Deribit btc_usd when present, else materialize GEX spot.
+ * Chart spot lines, Regime corridor marker, and DIST % recompute use this.
+ * GEX bar heights / Flip level stay on snapshot methodology (not revalued here).
+ */
+export function getDisplaySpot(
+  snapshot: Pick<TerminalSnapshot, 'spot' | 'liveIndex'>,
+): number {
+  const live = snapshot.liveIndex
+  if (live != null && Number.isFinite(live) && live > 0) {
+    return live
+  }
+  return snapshot.spot
 }
 
 function clamp(value: number, min: number, max: number) {

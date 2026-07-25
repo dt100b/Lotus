@@ -223,6 +223,26 @@ class RawStore:
         )
         self.conn.commit()
 
+    def reset_empty_completed_cursors(self, job_name: str) -> int:
+        """
+        Delete completed cursors that fetched zero rows so they can be re-run.
+
+        Needed when a prior backfill against the main Deribit host marked older
+        chunks complete with empty pages (public ~24h retention). Re-running
+        against history.deribit.com must re-open those chunks.
+        """
+        cursor = self.conn.execute(
+            """
+            DELETE FROM backfill_cursors
+            WHERE job_name = ?
+              AND status = 'completed'
+              AND fetched_rows = 0
+            """,
+            (job_name,),
+        )
+        self.conn.commit()
+        return int(cursor.rowcount)
+
     def upsert_instruments(self, instruments: Iterable[dict[str, Any]]) -> int:
         rows = [
             (

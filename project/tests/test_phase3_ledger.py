@@ -62,6 +62,54 @@ class Phase3LedgerTests(unittest.TestCase):
         self.assertEqual(second.dealer_position_delta, Decimal("1"))
         self.assertEqual(second.dealer_position_after, Decimal("-1"))
 
+    def test_include_otc_policy_applies_block_and_combo_trades(self) -> None:
+        from ledger.rules import include_otc_ledger_policy, production_ledger_policy
+
+        events = [
+            self.make_event(
+                event_id="evt-1",
+                source_trade_id="raw-1",
+                trade_seq=1,
+                amount="2",
+                taker_side="buy",
+            ),
+            self.make_event(
+                event_id="evt-2",
+                source_trade_id="raw-2",
+                trade_seq=2,
+                amount="5",
+                taker_side="sell",
+                is_block_trade=True,
+            ),
+            self.make_event(
+                event_id="evt-3",
+                source_trade_id="raw-3",
+                trade_seq=3,
+                amount="1",
+                taker_side="buy",
+                is_combo_trade=True,
+                is_single_leg=False,
+            ),
+        ]
+
+        prod = LedgerReplayer(production_ledger_policy(methodology_version="phase3.test")).replay(
+            events
+        )
+        otc = LedgerReplayer(include_otc_ledger_policy()).replay(events)
+
+        # Production: only the listed single-leg taker buy (−2).
+        self.assertEqual(
+            prod.snapshots[-1].positions.get("BTC-26APR26-90000-C"),
+            Decimal("-2"),
+        )
+        self.assertEqual(prod.manifest["applied_event_count"], 1)
+        # Include-OTC: buy −2, block sell +5, combo buy −1 → net +2.
+        self.assertEqual(
+            otc.snapshots[-1].positions.get("BTC-26APR26-90000-C"),
+            Decimal("2"),
+        )
+        self.assertEqual(otc.manifest["applied_event_count"], 3)
+
     def test_block_and_combo_trades_are_auditable_but_not_applied(self) -> None:
         events = [
             self.make_event(

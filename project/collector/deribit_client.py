@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from collector.config import Settings
 
 
 class DeribitClientError(RuntimeError):
@@ -19,10 +22,11 @@ class DeribitPublicClient:
         retry_backoff_s: float = 1.5,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
+        self.base_url = base_url.rstrip("/")
         self.max_retries = max_retries
         self.retry_backoff_s = retry_backoff_s
         self._client = httpx.Client(
-            base_url=base_url.rstrip("/"),
+            base_url=self.base_url,
             timeout=timeout_s,
             headers={"Accept": "application/json"},
             transport=transport,
@@ -145,6 +149,56 @@ class DeribitPublicClient:
         if not isinstance(result, dict):
             raise RuntimeError("Unexpected get_last_trades_by_currency result shape")
         return result
+
+
+def build_live_client(
+    settings: "Settings",
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> DeribitPublicClient:
+    """Client for the main Deribit host (instruments, live/hot trades)."""
+    return DeribitPublicClient(
+        base_url=settings.deribit_base_url,
+        timeout_s=settings.request_timeout_s,
+        max_retries=settings.max_retries,
+        retry_backoff_s=settings.retry_backoff_s,
+        transport=transport,
+    )
+
+
+def build_history_client(
+    settings: "Settings",
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> DeribitPublicClient:
+    """Client for history.deribit.com (deep public trade history)."""
+    return DeribitPublicClient(
+        base_url=settings.deribit_history_base_url,
+        timeout_s=settings.request_timeout_s,
+        max_retries=settings.max_retries,
+        retry_backoff_s=settings.retry_backoff_s,
+        transport=transport,
+    )
+
+
+def build_clients(
+    settings: "Settings",
+    *,
+    live_transport: httpx.BaseTransport | None = None,
+    history_transport: httpx.BaseTransport | None = None,
+) -> tuple[DeribitPublicClient, DeribitPublicClient | None]:
+    """
+    Return (live_client, history_client).
+
+    history_client is None when DERIBIT_USE_HISTORY_FOR_BACKFILL is false.
+    """
+    live = build_live_client(settings, transport=live_transport)
+    history = (
+        build_history_client(settings, transport=history_transport)
+        if settings.use_history_for_backfill
+        else None
+    )
+    return live, history
 
 
 DeribitClient = DeribitPublicClient

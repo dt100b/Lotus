@@ -13,6 +13,7 @@ import pytest
 from greeks.gex_engine import compute_gex_profile, write_profile_artifacts
 from greeks.providers import load_greeks_snapshot_json, write_greeks_snapshot_json
 from greeks.types import DealerInventoryRow, GreekSnapshot
+from pipeline.dashboard_snapshot import build_phase5_snapshot_payload
 
 
 def sha256_file(path: Path) -> str:
@@ -71,10 +72,137 @@ def test_compute_gex_profile_aggregates_by_strike_and_expiry() -> None:
     assert strike_row.put_gex == pytest.approx(-15000.0)
     assert strike_row.net_gex == pytest.approx(25000.0)
     assert strike_row.gross_gex == pytest.approx(55000.0)
+    assert profile.instrument_rows[0].open_interest is None
+    assert profile.instrument_rows[0].mark_iv is None
 
     expiry_row = profile.by_expiry[0]
     assert expiry_row.net_gex == pytest.approx(25000.0)
     assert profile.to_summary()["total_net_gex"] == pytest.approx(25000.0)
+
+
+def test_phase5_snapshot_payload_carries_open_interest_and_iv() -> None:
+    inventory_rows = [
+        DealerInventoryRow(
+            instrument_name="BTC-31DEC26-100000-C",
+            option_type="call",
+            strike=100000.0,
+            expiry_ts=1798675200000,
+            net_contracts=2.0,
+            contract_multiplier=1.0,
+        ),
+        DealerInventoryRow(
+            instrument_name="BTC-31DEC26-100000-P",
+            option_type="put",
+            strike=100000.0,
+            expiry_ts=1798675200000,
+            net_contracts=-1.0,
+            contract_multiplier=1.0,
+        ),
+    ]
+    greeks = {
+        "BTC-31DEC26-100000-C": GreekSnapshot(
+            instrument_name="BTC-31DEC26-100000-C",
+            gamma=0.0002,
+            spot_price=100000.0,
+            snapshot_ts=1,
+            open_interest=150.0,
+            mark_iv=0.62,
+        ),
+        "BTC-31DEC26-100000-P": GreekSnapshot(
+            instrument_name="BTC-31DEC26-100000-P",
+            gamma=0.00015,
+            spot_price=100000.0,
+            snapshot_ts=1,
+            open_interest=90.0,
+            mark_iv=0.7,
+        ),
+    }
+
+    profile = compute_gex_profile(
+        inventory_rows=inventory_rows,
+        greeks_by_instrument=greeks,
+        methodology_version="phase4-test",
+        as_of_ts=1,
+    )
+    payload = build_phase5_snapshot_payload(profile)
+
+    row = payload["rows"][0]
+    assert row["call_open_interest"] == 150.0
+    assert row["put_open_interest"] == 90.0
+    assert row["open_interest"] == 240.0
+    assert row["call_mark_iv"] == 0.62
+    assert row["put_mark_iv"] == 0.7
+    assert row["mark_iv"] == pytest.approx(((0.62 * 150) + (0.7 * 90)) / 240)
+
+
+def test_put_gex_sign_follows_dealer_inventory_not_option_type() -> None:
+    """Taker-flow GEX: puts are not force-negated; sign comes from net_contracts only."""
+    long_put = DealerInventoryRow(
+        instrument_name="BTC-31DEC26-100000-P",
+        option_type="put",
+        strike=100000.0,
+        expiry_ts=1798675200000,
+        net_contracts=2.0,
+        contract_multiplier=1.0,
+        include_in_gex=True,
+    )
+    short_put = DealerInventoryRow(
+        instrument_name="BTC-31DEC26-95000-P",
+        option_type="put",
+        strike=95000.0,
+        expiry_ts=1798675200000,
+        net_contracts=-3.0,
+        contract_multiplier=1.0,
+        include_in_gex=True,
+    )
+    long_call = DealerInventoryRow(
+        instrument_name="BTC-31DEC26-100000-C",
+        option_type="call",
+        strike=100000.0,
+        expiry_ts=1798675200000,
+        net_contracts=1.0,
+        contract_multiplier=1.0,
+        include_in_gex=True,
+    )
+    greeks = {
+        "BTC-31DEC26-100000-P": GreekSnapshot(
+            instrument_name="BTC-31DEC26-100000-P",
+            gamma=0.0001,
+            spot_price=100000.0,
+            snapshot_ts=1,
+        ),
+        "BTC-31DEC26-95000-P": GreekSnapshot(
+            instrument_name="BTC-31DEC26-95000-P",
+            gamma=0.0001,
+            spot_price=100000.0,
+            snapshot_ts=1,
+        ),
+        "BTC-31DEC26-100000-C": GreekSnapshot(
+            instrument_name="BTC-31DEC26-100000-C",
+            gamma=0.0001,
+            spot_price=100000.0,
+            snapshot_ts=1,
+        ),
+    }
+
+    profile = compute_gex_profile(
+        inventory_rows=[long_put, short_put, long_call],
+        greeks_by_instrument=greeks,
+        methodology_version="phase4-test",
+        as_of_ts=1,
+    )
+
+    by_strike = {row.strike: row for row in profile.by_strike}
+    # 2 * 0.0001 * 100000^2 * 0.01 = +20_000
+    assert by_strike[100000.0].put_gex == pytest.approx(20_000.0)
+    assert by_strike[100000.0].call_gex == pytest.approx(10_000.0)
+    assert by_strike[100000.0].net_gex == pytest.approx(30_000.0)
+    # -3 * 0.0001 * 100000^2 * 0.01 = -30_000
+    assert by_strike[95000.0].put_gex == pytest.approx(-30_000.0)
+    assert by_strike[95000.0].net_gex == pytest.approx(-30_000.0)
+
+    for row in profile.by_strike:
+        assert row.net_gex == pytest.approx(row.call_gex + row.put_gex)
 
 
 def test_missing_greeks_are_reported_and_skipped() -> None:

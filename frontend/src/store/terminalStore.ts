@@ -1,50 +1,51 @@
 import { create } from 'zustand'
 import type { GexExpiry } from '@/api/mockGexData'
 import {
+  clampHeatmapIntensity,
+  getStoredHeatmapIntensity,
+  getStoredHeatmapPaletteId,
+  persistHeatmapIntensity,
+  persistHeatmapPaletteId,
+  type HeatmapPaletteId,
+} from '@/data/heatmapPalettes'
+import {
   getStoredTerminalThemeId,
   persistTerminalThemeId,
   type TerminalThemeId,
 } from '@/data/terminalThemes'
+import { defaultHeatmapDataWindowPct } from '@/components/terminal/gexModes'
 
-export type ExposureMode = 'net' | 'split' | 'call' | 'put' | 'abs' | 'profile'
+/** Active chart/table exposure modes. Split/ABS/Profile archived — see gexModes.ts. */
+export type ExposureMode = 'net' | 'heatmap'
 export type DataWindowMode = 'percent' | 'full'
-export type LevelVisibility = {
-  allExpiryHvl: boolean
-  allExpiryCallResistance: boolean
-  allExpiryPutSupport: boolean
-  zeroDteHvl: boolean
-  zeroDteCall: boolean
-  zeroDtePut: boolean
-  advancedZeroGamma: boolean
-  advancedMaxPain: boolean
-  advancedExpectedMove: boolean
-  advancedGammaFlipZones: boolean
-}
-export type LevelVisibilityKey = keyof LevelVisibility
+export type { HeatmapPaletteId }
 
 type TerminalState = {
   symbol: 'BTC'
   theme: TerminalThemeId
   expiry: GexExpiry
   exposureMode: ExposureMode
-  splitChartEnabled: boolean
-  zeroDteExposureMode: ExposureMode
+  /** Independent second chart (top-right pane). */
+  chartTwoExposureMode: ExposureMode
   dataWindowMode: DataWindowMode
   dataWindowPct: number
-  zeroDteDataWindowMode: DataWindowMode
-  zeroDteDataWindowPct: number
-  levelVisibility: LevelVisibility
+  chartTwoDataWindowMode: DataWindowMode
+  chartTwoDataWindowPct: number
+  /** Heatmap surface color template (shared across all heatmap panels). */
+  heatmapPalette: HeatmapPaletteId
+  /** TRACE surface opacity/brightness (20–100). Shared across heatmap panels. */
+  heatmapIntensity: number
   strikeRange: string
   setTheme: (theme: TerminalThemeId) => void
   setExpiry: (expiry: GexExpiry) => void
   setExposureMode: (mode: ExposureMode) => void
-  setSplitChartEnabled: (enabled: boolean) => void
-  setZeroDteExposureMode: (mode: ExposureMode) => void
+  setChartTwoExposureMode: (mode: ExposureMode) => void
   setDataWindowMode: (mode: DataWindowMode) => void
   setDataWindowPct: (pct: number) => void
-  setZeroDteDataWindowMode: (mode: DataWindowMode) => void
-  setZeroDteDataWindowPct: (pct: number) => void
-  setLevelVisibility: (level: LevelVisibilityKey, visible: boolean) => void
+  setChartTwoDataWindowMode: (mode: DataWindowMode) => void
+  setChartTwoDataWindowPct: (pct: number) => void
+  setHeatmapPalette: (palette: HeatmapPaletteId) => void
+  setHeatmapIntensity: (intensity: number) => void
   setStrikeRange: (range: string) => void
 }
 
@@ -53,24 +54,15 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   theme: getStoredTerminalThemeId(),
   expiry: 'ALL',
   exposureMode: 'net',
-  splitChartEnabled: false,
-  zeroDteExposureMode: 'net',
+  /** Default top-right pane: heatmap. */
+  chartTwoExposureMode: 'heatmap',
   dataWindowMode: 'percent',
-  dataWindowPct: 25,
-  zeroDteDataWindowMode: 'percent',
-  zeroDteDataWindowPct: 25,
-  levelVisibility: {
-    allExpiryHvl: true,
-    allExpiryCallResistance: true,
-    allExpiryPutSupport: true,
-    zeroDteHvl: false,
-    zeroDteCall: false,
-    zeroDtePut: false,
-    advancedZeroGamma: false,
-    advancedMaxPain: false,
-    advancedExpectedMove: false,
-    advancedGammaFlipZones: false,
-  },
+  /** Home layout uses a mid-band ±15% window on the primary Net chart. */
+  dataWindowPct: 15,
+  chartTwoDataWindowMode: 'percent',
+  chartTwoDataWindowPct: defaultHeatmapDataWindowPct,
+  heatmapPalette: getStoredHeatmapPaletteId(),
+  heatmapIntensity: getStoredHeatmapIntensity(),
   strikeRange: 'Auto',
   setTheme: (theme) => {
     persistTerminalThemeId(theme)
@@ -78,19 +70,20 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   },
   setExpiry: (expiry) => set({ expiry }),
   setExposureMode: (exposureMode) => set({ exposureMode }),
-  setSplitChartEnabled: (splitChartEnabled) => set({ splitChartEnabled }),
-  setZeroDteExposureMode: (zeroDteExposureMode) => set({ zeroDteExposureMode }),
+  setChartTwoExposureMode: (chartTwoExposureMode) => set({ chartTwoExposureMode }),
   setDataWindowMode: (dataWindowMode) => set({ dataWindowMode }),
   setDataWindowPct: (dataWindowPct) => set({ dataWindowPct: clampWindowPct(dataWindowPct) }),
-  setZeroDteDataWindowMode: (zeroDteDataWindowMode) => set({ zeroDteDataWindowMode }),
-  setZeroDteDataWindowPct: (zeroDteDataWindowPct) => set({ zeroDteDataWindowPct: clampWindowPct(zeroDteDataWindowPct) }),
-  setLevelVisibility: (level, visible) =>
-    set((state) => ({
-      levelVisibility: {
-        ...state.levelVisibility,
-        [level]: visible,
-      },
-    })),
+  setChartTwoDataWindowMode: (chartTwoDataWindowMode) => set({ chartTwoDataWindowMode }),
+  setChartTwoDataWindowPct: (chartTwoDataWindowPct) => set({ chartTwoDataWindowPct: clampWindowPct(chartTwoDataWindowPct) }),
+  setHeatmapPalette: (heatmapPalette) => {
+    persistHeatmapPaletteId(heatmapPalette)
+    set({ heatmapPalette })
+  },
+  setHeatmapIntensity: (heatmapIntensity) => {
+    const next = clampHeatmapIntensity(heatmapIntensity)
+    persistHeatmapIntensity(next)
+    set({ heatmapIntensity: next })
+  },
   setStrikeRange: (strikeRange) => set({ strikeRange }),
 }))
 

@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import { scaleLinear, scaleLog } from 'd3-scale'
+import { GexHoverCard, type GexHoverSide } from '@/components/terminal/GexHoverCard'
 import type { RankingRow, TerminalSnapshot } from '@/data/mockTerminal'
 import { formatMillions, formatStrike } from '@/lib/formatters'
+import { cn } from '@/lib/utils'
 
 type WallSignificanceChartProps = {
   snapshot: TerminalSnapshot
@@ -9,6 +11,7 @@ type WallSignificanceChartProps = {
 
 type WallDatum = {
   id: string
+  /** OI-aware rank: 1 = highest significanceScore (not pure |GEX|). */
   rank: number
   strike: number
   openInterest: number
@@ -16,6 +19,7 @@ type WallDatum = {
   callGammaExposureUsd: number
   putGammaExposureUsd: number
   absGexUsd: number
+  /** |net GEX| × [log10(OI + 10)]² */
   significanceScore: number
 }
 
@@ -23,10 +27,8 @@ type HoveredWall = {
   datum: WallDatum
   xPct: number
   yPct: number
-  side: TooltipSide
+  side: GexHoverSide
 }
-
-type TooltipSide = 'left' | 'right'
 
 const dimensions = {
   width: 360,
@@ -42,38 +44,52 @@ const minBubbleRadius = 4.4
 const maxBubbleRadius = 22
 const yTickCandidates = [100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000, 100_000]
 
+/**
+ * OI-aware wall score: |net GEX| × [log10(OI + 10)]²
+ *
+ * Squaring the log term is a close variant of |GEX|×log10(OI+10) that gives
+ * open-interest mass real leverage — pure max-|GEX| thin books (e.g. 64.5k
+ * with huge GEX but tiny OI) no longer dominate high-OI walls (e.g. 70k).
+ */
+export function wallSignificanceScore(absGexUsd: number, openInterest: number): number {
+  const oiMass = Math.log10(openInterest + 10)
+  return absGexUsd * oiMass * oiMass
+}
+
 export function WallSignificanceChart({ snapshot }: WallSignificanceChartProps) {
   const [hovered, setHovered] = useState<HoveredWall | null>(null)
   const data = useMemo(() => prepareWallData(snapshot.rankings.allExpiry), [snapshot.rankings.allExpiry])
   const layout = useMemo(() => getWallMapLayout(data, snapshot.spot), [data, snapshot.spot])
+  // Highest OI-aware significance — not pure max |GEX|.
   const strongestWall = data[0]
 
   if (data.length === 0) {
     return (
-      <div className="flex h-full min-h-0 items-center justify-center text-[11px] text-[var(--terminal-muted)]">
+      <div className="flex h-full min-h-0 items-center justify-center text-[10px] text-[var(--desk-label,var(--terminal-muted))]">
         No wall data available
       </div>
     )
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <div className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+    <div className="walls-desk">
+      <div className="walls-desk__head">
         <div className="min-w-0">
-          <h3 className="text-[10.5px] font-semibold uppercase leading-none text-[var(--terminal-heading)]">
-            Wall Significance
-          </h3>
-          <div className="mt-1 text-[9px] text-[var(--terminal-muted)]">
-            OI-weighted gamma levels
-          </div>
+          <h3 className="walls-desk__title">OI Weighted GEX</h3>
+          <div className="walls-desk__subtitle">Net GEX × open interest</div>
         </div>
-        <div className="text-right">
-          <div className={strongestWall.gammaExposureUsd >= 0 ? 'terminal-value text-[12px] font-semibold text-[var(--terminal-green-strong)]' : 'terminal-value text-[12px] font-semibold text-[var(--terminal-red-strong)]'}>
+        <div>
+          <div
+            className={cn(
+              'walls-desk__top-strike',
+              strongestWall.gammaExposureUsd >= 0
+                ? 'walls-desk__top-strike--pos'
+                : 'walls-desk__top-strike--neg',
+            )}
+          >
             ${formatStrike(strongestWall.strike)}
           </div>
-          <div className="mt-1 text-[8.5px] text-[var(--terminal-muted)]">
-            top wall
-          </div>
+          <div className="walls-desk__top-label">top wall</div>
         </div>
       </div>
 
@@ -81,16 +97,34 @@ export function WallSignificanceChart({ snapshot }: WallSignificanceChartProps) 
         viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
         className="block min-h-0 w-full flex-1"
         role="img"
-        aria-label="Wall significance bubble map by strike and open interest"
+        aria-label="OI-weighted GEX wall bubble map by strike and open interest"
         onMouseLeave={() => setHovered(null)}
       >
+        <defs>
+          <filter id="wall-bubble-glow" x="-60%" y="-60%" width="220%" height="220%" colorInterpolationFilters="sRGB">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
         <rect
           x={dimensions.margin.left}
           y={dimensions.margin.top}
           width={layout.innerWidth}
           height={layout.innerHeight}
-          fill="var(--terminal-surface)"
-          opacity="0.2"
+          fill="var(--chart-well-fill)"
+        />
+        <rect
+          x={dimensions.margin.left + 0.5}
+          y={dimensions.margin.top + 0.5}
+          width={layout.innerWidth - 1}
+          height={layout.innerHeight - 1}
+          fill="none"
+          stroke="var(--chart-well-edge)"
+          strokeOpacity={0.42}
         />
 
         {layout.xTicks.map((tick) => (
@@ -101,14 +135,15 @@ export function WallSignificanceChart({ snapshot }: WallSignificanceChartProps) 
               y1={dimensions.margin.top}
               y2={dimensions.margin.top + layout.innerHeight}
               stroke="var(--terminal-grid)"
-              strokeDasharray="2 6"
+              strokeDasharray="1 6"
+              strokeOpacity={0.55}
             />
             <text
               x={layout.xScale(tick)}
               y={dimensions.height - 25}
               textAnchor="middle"
-              fill="var(--terminal-muted)"
-              fontSize="9"
+              fill="var(--desk-label, var(--terminal-muted))"
+              fontSize="8.5"
               fontFamily="var(--font-mono)"
             >
               {formatStrike(tick)}
@@ -124,15 +159,18 @@ export function WallSignificanceChart({ snapshot }: WallSignificanceChartProps) 
               y1={layout.yScale(tick)}
               y2={layout.yScale(tick)}
               stroke="var(--terminal-grid)"
+              strokeDasharray="1 6"
+              strokeOpacity={0.55}
             />
             <text
               x={dimensions.margin.left - 8}
               y={layout.yScale(tick)}
               textAnchor="end"
               dominantBaseline="middle"
-              fill="var(--terminal-muted)"
-              fontSize="9"
+              fill="var(--desk-label, var(--terminal-muted))"
+              fontSize="8.5"
               fontFamily="var(--font-mono)"
+              opacity={0.78}
             >
               {formatOpenInterestTick(tick)}
             </text>
@@ -144,17 +182,27 @@ export function WallSignificanceChart({ snapshot }: WallSignificanceChartProps) 
           x2={layout.spotX}
           y1={dimensions.margin.top}
           y2={dimensions.margin.top + layout.innerHeight}
-          stroke="var(--terminal-heading)"
-          strokeDasharray="4 5"
-          strokeOpacity="0.72"
+          stroke="var(--chart-spot-line)"
+          strokeWidth={3.5}
+          strokeOpacity={0.06}
+          pointerEvents="none"
+        />
+        <line
+          x1={layout.spotX}
+          x2={layout.spotX}
+          y1={dimensions.margin.top}
+          y2={dimensions.margin.top + layout.innerHeight}
+          stroke="var(--chart-spot-line)"
+          strokeWidth={1}
+          strokeOpacity={0.78}
           pointerEvents="none"
         />
         <text
           x={layout.spotX}
           y={dimensions.margin.top - 8}
           textAnchor="middle"
-          fill="var(--terminal-heading)"
-          fontSize="9"
+          fill="var(--desk-value, var(--terminal-heading))"
+          fontSize="8.5"
           fontFamily="var(--font-mono)"
           fontWeight="600"
         >
@@ -166,26 +214,41 @@ export function WallSignificanceChart({ snapshot }: WallSignificanceChartProps) 
           const y = layout.yScale(datum.openInterest)
           const radius = layout.getRadius(datum)
           const positive = datum.gammaExposureUsd >= 0
+          const isHovered = hovered?.datum.id === datum.id
+          const isTopWall = datum.rank === 1
+          const fill = positive ? 'var(--desk-wall-pos, var(--chart-positive-edge))' : 'var(--desk-wall-neg, var(--chart-negative-edge))'
+          const glow = positive
+            ? 'color-mix(in srgb, var(--desk-wall-pos, var(--chart-positive-edge)) 36%, transparent)'
+            : 'color-mix(in srgb, var(--desk-wall-neg, var(--chart-negative-edge)) 34%, transparent)'
 
           return (
-            <circle
-              key={datum.id}
-              cx={x}
-              cy={y}
-              r={radius}
-              fill={positive ? 'var(--terminal-green-strong)' : 'var(--terminal-red-strong)'}
-              fillOpacity={hovered?.datum.id === datum.id ? 0.62 : 0.4}
-              stroke={positive ? 'var(--chart-positive-edge)' : 'var(--chart-negative-edge)'}
-              strokeOpacity={hovered?.datum.id === datum.id ? 0.96 : 0.78}
-              strokeWidth={hovered?.datum.id === datum.id ? 1.6 : 1}
-              onMouseEnter={() => setHovered(getHoverState(datum, layout))}
-              onMouseMove={() => setHovered(getHoverState(datum, layout))}
-              onMouseLeave={() => setHovered(null)}
-            >
-              <title>
-                {`Strike ${formatStrike(datum.strike)}, OI ${formatOpenInterest(datum.openInterest)}, GEX ${formatMillions(datum.gammaExposureUsd)}`}
-              </title>
-            </circle>
+            <g key={datum.id}>
+              {datum.rank <= 6 || isHovered ? (
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={radius + (isTopWall ? 4.5 : 3.5)}
+                  fill={glow}
+                  opacity={isHovered || isTopWall ? 0.34 : 0.16}
+                  filter="url(#wall-bubble-glow)"
+                  pointerEvents="none"
+                />
+              ) : null}
+              <circle
+                cx={x}
+                cy={y}
+                r={radius}
+                fill={fill}
+                fillOpacity={isHovered ? 0.58 : isTopWall ? 0.48 : 0.34}
+                stroke={fill}
+                strokeOpacity={isHovered || isTopWall ? 0.82 : 0.58}
+                strokeWidth={isHovered || isTopWall ? 1.5 : 0.95}
+                aria-label={`Strike ${formatStrike(datum.strike)}, OI ${formatOpenInterest(datum.openInterest)}, GEX ${formatMillions(datum.gammaExposureUsd)}`}
+                onMouseEnter={() => setHovered(getHoverState(datum, layout))}
+                onMouseMove={() => setHovered(getHoverState(datum, layout))}
+                onMouseLeave={() => setHovered(null)}
+              />
+            </g>
           )
         })}
 
@@ -193,53 +256,49 @@ export function WallSignificanceChart({ snapshot }: WallSignificanceChartProps) 
           x={dimensions.margin.left + layout.innerWidth / 2}
           y={dimensions.height - 6}
           textAnchor="middle"
-          fill="var(--terminal-muted)"
-          fontSize="9.5"
+          fill="var(--desk-label, var(--terminal-muted))"
+          fontSize="8.5"
         >
-          Strike price
+          Strike (USD)
         </text>
         <text
           x={16}
           y={dimensions.margin.top + layout.innerHeight / 2}
           textAnchor="middle"
-          fill="var(--terminal-muted)"
-          fontSize="9.5"
+          fill="var(--desk-label, var(--terminal-muted))"
+          fontSize="8.5"
           transform={`rotate(-90 16 ${dimensions.margin.top + layout.innerHeight / 2})`}
         >
           Open interest log
         </text>
       </svg>
 
-      <div className="mt-2 inline-grid grid-cols-[auto_auto] items-center gap-x-3 gap-y-1 self-start text-[8.5px] text-[var(--terminal-muted)]">
-        <BubbleLegendItem color="var(--terminal-green-strong)" label="Positive GEX" />
-        <BubbleLegendItem color="var(--terminal-red-strong)" label="Negative GEX" />
-        <BubbleLegendItem color="var(--terminal-heading)" label="Size = |GEX|" />
-        <BubbleLegendItem color="var(--terminal-heading)" label="Spot" dashed />
+      <div className="walls-desk__legend">
+        <BubbleLegendItem color="var(--desk-wall-pos, var(--chart-positive-edge))" label="Positive GEX" />
+        <BubbleLegendItem color="var(--desk-wall-neg, var(--chart-negative-edge))" label="Negative GEX" />
+        <BubbleLegendItem color="var(--desk-value, var(--terminal-heading))" label="Size = |GEX|" />
+        <BubbleLegendItem color="var(--desk-value, var(--terminal-heading))" label="Spot" dashed />
       </div>
 
       {hovered ? (
-        <div
-          className="pointer-events-none absolute z-10 min-w-44 rounded-[var(--terminal-radius-sm)] border border-[var(--terminal-border-strong)] bg-[var(--terminal-surface)]/95 px-3 py-2 text-left text-[11px] text-[var(--terminal-text)] shadow-2xl backdrop-blur"
-          style={{
-            left: `${hovered.xPct}%`,
-            top: `${hovered.yPct}%`,
-            transform: hovered.side === 'left' ? 'translate(calc(-100% - 10px), -50%)' : 'translate(10px, -50%)',
+        <GexHoverCard
+          side={hovered.side}
+          xPct={hovered.xPct}
+          yPct={hovered.yPct}
+          model={{
+            strike: hovered.datum.strike,
+            netGexUsd: hovered.datum.gammaExposureUsd,
+            callGexUsd: hovered.datum.callGammaExposureUsd,
+            putGexUsd: hovered.datum.putGammaExposureUsd,
+            extras: [
+              {
+                label: 'Open interest',
+                value: formatOpenInterest(hovered.datum.openInterest),
+                tone: 'muted',
+              },
+            ],
           }}
-        >
-          <div className="mb-1 text-[var(--terminal-heading)]">Strike {formatStrike(hovered.datum.strike)}</div>
-          <div className={hovered.datum.gammaExposureUsd >= 0 ? 'terminal-value text-[var(--terminal-green-strong)]' : 'terminal-value text-[var(--terminal-red-strong)]'}>
-            Net GEX {formatMillions(hovered.datum.gammaExposureUsd)}
-          </div>
-          <div className="terminal-value mt-1 text-[var(--terminal-text)]">
-            OI {formatOpenInterest(hovered.datum.openInterest)}
-          </div>
-          <div className="terminal-value text-[var(--terminal-green)]">
-            Calls {formatMillions(hovered.datum.callGammaExposureUsd)}
-          </div>
-          <div className="terminal-value text-[var(--terminal-red)]">
-            Puts {formatMillions(hovered.datum.putGammaExposureUsd)}
-          </div>
-        </div>
+        />
       ) : null}
     </div>
   )
@@ -265,18 +324,35 @@ function prepareWallData(rows: RankingRow[]): WallDatum[] {
       const absGexUsd = Math.abs(row.gammaExposureUsd)
 
       return {
-        id: `${row.strike}-${row.rank}`,
-        rank: row.rank,
+        id: `gravity-${row.strike}`,
+        // Placeholder; replaced after OI-aware sort so rank 1 = top wall.
+        rank: 0,
         strike: row.strike,
         openInterest: row.openInterest,
         gammaExposureUsd: row.gammaExposureUsd,
         callGammaExposureUsd: row.callGammaExposureUsd,
         putGammaExposureUsd: row.putGammaExposureUsd,
         absGexUsd,
-        significanceScore: absGexUsd * Math.log10(row.openInterest + 10),
+        significanceScore: wallSignificanceScore(absGexUsd, row.openInterest),
       }
     })
-    .sort((a, b) => b.significanceScore - a.significanceScore)
+    .sort((a, b) => {
+      if (b.significanceScore !== a.significanceScore) {
+        return b.significanceScore - a.significanceScore
+      }
+      // Tie-break: higher |GEX|, then higher OI, then lower strike for stability.
+      if (b.absGexUsd !== a.absGexUsd) {
+        return b.absGexUsd - a.absGexUsd
+      }
+      if (b.openInterest !== a.openInterest) {
+        return b.openInterest - a.openInterest
+      }
+      return a.strike - b.strike
+    })
+    .map((datum, index) => ({
+      ...datum,
+      rank: index + 1,
+    }))
 }
 
 function getWallMapLayout(data: WallDatum[], spot: number) {

@@ -68,6 +68,8 @@ def compute_gex_profile(
             contract_multiplier=row.contract_multiplier,
             gamma=greek.gamma,
             spot_price=greek.spot_price,
+            open_interest=greek.open_interest,
+            mark_iv=greek.mark_iv,
             position_gamma=position_gamma,
             dollar_gamma_per_1pct=dollar_gamma_per_1pct,
             snapshot_ts=greek.snapshot_ts,

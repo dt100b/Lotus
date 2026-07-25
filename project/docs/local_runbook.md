@@ -16,7 +16,13 @@
   using live Deribit ticker greeks or a frozen greeks JSON.
 - Phase 5 dashboard/API:
   `uvicorn project.api.main:app`
-  reads `project/greeks/data/latest_gex_snapshot.json`.
+  reads `project/greeks/data/latest_gex_snapshot.json` and serves the built
+  Vite frontend from `frontend/dist` when present.
+- Phase 6 live ops:
+  production-depth historical backfill into
+  `project/data/phase1_history.sqlite3`, continuous
+  `refresh_dashboard_live.py`, and the Vite terminal defaulting to live
+  `/api/v1/terminal-snapshot`. See `project/docs/phase6_live_ops.md`.
 
 For agent-facing architecture, methodology, invariants, and task boundaries,
 start with `project/docs/agent_handbook.md`.
@@ -24,10 +30,11 @@ start with `project/docs/agent_handbook.md`.
 ## Startup Order
 
 1. Create a Python 3.11+ virtual environment and install the package.
-2. Populate or refresh the Phase 1 SQLite database.
+2. Populate a production-depth Phase 1 database (`phase1_history.sqlite3`) via
+   historical backfill (Phase 6). Do not rely on the thin prototype DB alone.
 3. Materialize the Phase 5 snapshot file from that database.
 4. Start the FastAPI server.
-5. For a live-ish local terminal, keep a refresher worker running in a second terminal.
+5. Keep the Phase 6 live refresher running in a second terminal.
 
 ## Fresh Setup
 
@@ -48,7 +55,16 @@ Copy-Item .env.example .env
 
 ## One-Shot Bring-Up Using Live Deribit Data
 
-Populate a rolling three-hour database window and build the dashboard snapshot:
+**Preferred (Phase 6):** use a history-backed DB so dealer inventory has depth.
+If `phase1_history.sqlite3` is empty, run historical backfill first (see below).
+
+Populate recent trades on the history DB and build the dashboard snapshot:
+
+```powershell
+python project/scripts/refresh_dashboard_live.py --once --db-path project/data/phase1_history.sqlite3 --artifacts-dir project/runtime/dashboard_build --snapshot-path project/greeks/data/latest_gex_snapshot.json --lookback-minutes 180
+```
+
+Prototype-only smoke (thin DB, not production-depth inventory):
 
 ```powershell
 python project/scripts/refresh_dashboard_live.py --once --db-path project/data/phase1.sqlite3 --artifacts-dir project/runtime/dashboard_build --snapshot-path project/greeks/data/latest_gex_snapshot.json --lookback-minutes 180
@@ -66,19 +82,31 @@ Open:
 http://127.0.0.1:8000/dashboard
 ```
 
-The current `/dashboard` route is a mock-data-first holding page. The previous
-static dashboard is archived at:
+The `/dashboard` route serves the production Vite terminal after
+`npm run build` has produced `frontend/dist`. If no build exists, it falls back
+to the old holding page. The previous static dashboard is archived at:
 
 ```text
 http://127.0.0.1:8000/legacy-dashboard
 ```
 
-## Continuous Local Refresh
+## Continuous Local Refresh (Phase 6)
 
-Terminal 1:
+Terminal 1 (history-backed live worker):
 
 ```powershell
-python project/scripts/refresh_dashboard_live.py --db-path project/data/phase1.sqlite3 --artifacts-dir project/runtime/dashboard_build --snapshot-path project/greeks/data/latest_gex_snapshot.json --lookback-minutes 180 --interval-seconds 30
+python project/scripts/refresh_dashboard_live.py --db-path project/data/phase1_history.sqlite3 --artifacts-dir project/runtime/dashboard_build --snapshot-path project/greeks/data/latest_gex_snapshot.json --job-name btc_options_live_phase6 --lookback-minutes 180 --interval-seconds 120
+
+# Live materialize defaults to --materialize-mode auto (inventory checkpoint).
+# Sync start self-heals from MAX(raw_trades.timestamp_ms) when the worker was
+# down longer than lookback (capped at ~20h on the main host).
+# Force a full YTD replay only after methodology bumps or checkpoint issues:
+# python project/scripts/refresh_dashboard_live.py --once --materialize-mode full ...
+#
+# Prefer a supervised process in production (see project/docs/phase6_live_ops.md §2b):
+#   Linux:  deploy/lotus-live-refresh.service
+#   Docker: deploy/docker-compose.live.yml
+#   Windows: deploy/windows/Register-LotusLiveRefresh.ps1
 ```
 
 Terminal 2:
@@ -95,16 +123,28 @@ Raw DB summary:
 python project/scripts/inspect_phase1_db.py --db-path project/data/phase1.sqlite3
 ```
 
-Manual Phase 1 backfill for a fixed window:
+Manual Phase 1 backfill for a fixed window (trades via history host by default):
 
 ```powershell
 python project/scripts/backfill_phase1.py --start 2026-04-25T00:00:00Z --end 2026-04-26T00:00:00Z --db-path project/data/phase1.sqlite3 --job-name btc_options_2026_04_25
 ```
 
-Production-depth 90-day historical workflow, isolated from the prototype DB:
+Re-open empty completed chunks after switching to the history host:
 
 ```powershell
-python project/scripts/historical_backfill.py --start 2026-01-26T00:00:00Z --end 2026-04-26T00:00:00Z --db-path project/data/phase1_history.sqlite3 --job-name btc_options_history_2026_01_26_2026_04_26 --validate-remote
+python project/scripts/backfill_phase1.py --start <UTC-start> --end <UTC-end> --db-path project/data/phase1_history.sqlite3 --job-name btc_options_history_<label> --reset-empty-cursors
+```
+
+Production-depth **YTD** historical workflow (default ship bar), isolated from the prototype DB:
+
+```powershell
+python project/scripts/historical_backfill.py --db-path project/data/phase1_history.sqlite3 --validate-remote
+```
+
+Optional full public history (custom start, dedicated job name):
+
+```powershell
+python project/scripts/historical_backfill.py --start 2019-01-01T00:00:00Z --db-path project/data/phase1_history.sqlite3 --job-name btc_options_history_full --validate-remote
 ```
 
 Rerun validation/materialization against an existing historical DB:
@@ -128,7 +168,7 @@ python project/scripts/validate_dashboard_pipeline.py --db-path project/data/pha
 This writes `project/runtime/validation_build/validation_report.json` and will fail the history audit by default unless the raw trade window spans at least 24 hours.
 
 The historical workflow writes `project/runtime/history_validation/validation_report.json`
-and defaults to a 90-day coverage threshold.
+and defaults to a **YTD** coverage threshold (span of 1 Jan UTC → now, minus 24h slack).
 
 ## Verification Commands
 
@@ -150,6 +190,12 @@ Net GEX profile:
 Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/v1/gex-profile?expiry=ALL&view=net" -UseBasicParsing | Select-Object -ExpandProperty Content
 ```
 
+Terminal snapshot:
+
+```powershell
+Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/v1/terminal-snapshot?expiry=ALL" -UseBasicParsing | Select-Object -ExpandProperty Content
+```
+
 Local tests:
 
 ```powershell
@@ -165,8 +211,8 @@ python -m pytest -q
 - `materialize_dashboard_snapshot.py` reports non-zero `inventory_row_count` and `snapshot_row_count`.
 - `/api/v1/health` returns `200` with `row_count > 0`.
 - `/api/v1/gex-profile?expiry=ALL&view=net` returns `points` with length greater than zero.
-- `/legacy-dashboard` shows the archived prototype dashboard; `/dashboard` stays
-  mock-data-first until the production frontend is approved.
+- `/legacy-dashboard` shows the archived prototype dashboard; `/dashboard`
+  shows the production terminal when `frontend/dist` exists.
 
 ## Troubleshooting
 

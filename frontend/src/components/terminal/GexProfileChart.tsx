@@ -1,36 +1,70 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
-import { scaleLinear } from 'd3-scale'
-import type { ScaleLinear } from 'd3-scale'
-import { area, curveMonotoneX, line } from 'd3-shape'
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react'
+import {
+  BaselineSeries,
+  ColorType,
+  CrosshairMode,
+  HistogramSeries,
+  LineStyle,
+  createChartEx,
+  createOptionsChart,
+  type ChartOptionsImpl,
+  type DataItem,
+  type HistogramData,
+  type HorzScaleItemConverterToInternalObj,
+  type IChartApiBase,
+  type IHorzScaleBehavior,
+  type InternalHorzScaleItem,
+  type InternalHorzScaleItemKey,
+  type IPriceLine,
+  type ISeriesApi,
+  type LocalizationOptions,
+  type Logical,
+  type LogicalRange,
+  type MouseEventParams,
+  type Mutable,
+  type SeriesDataItemTypeMap,
+  type SeriesType,
+  type SingleValueData,
+  type TickMark,
+  type TickMarkWeightValue,
+  type TimeMark,
+  type TimeScalePoint,
+} from 'lightweight-charts'
 import { getGexChartTitle } from '@/components/terminal/gexModes'
+import { GexHoverCard, type GexHoverSide } from '@/components/terminal/GexHoverCard'
+import {
+  magnitudeBarColor,
+  readGexSeriesColors,
+  type GexSeriesColors,
+} from '@/data/gexChartColors'
 import { formatAxisMillions, formatMillions, formatStrike } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
 
-export type GexMode = 'net' | 'split' | 'call' | 'put' | 'abs' | 'profile'
+/**
+ * Chart render modes.
+ * UI tab strip only offers Strike (`net`) — see gexModes.ts.
+ * Profile remains routable here for restore; split/abs are normalize-only.
+ *
+ * Strike (mode id `net`):
+ *   LWC HistogramSeries — strike on X, Net GEX on Y (theme + magnitude color).
+ * Profile (archived from tabs):
+ *   LWC BaselineSeries with light display-only MA smooth — strike on X, Net GEX on Y.
+ */
+export type GexMode = 'net' | 'split' | 'abs' | 'profile'
 
 export type GexSnapshot = {
+  /** Live Deribit index when available (same as dashboard Index (Deribit)). */
   spot: number
   gammaBars: GexSourceRow[]
 }
-
-export type GexLevelMarker = {
-  id: string
-  label: string
-  strike: number
-  color: string
-  glyph?: LevelMarkerGlyphVariant
-  axisOnly?: boolean
-  components?: GexLevelMarker[]
-}
-
-export type LevelMarkerGlyphVariant =
-  | 'diamond'
-  | 'chevronUp'
-  | 'chevronDown'
-  | 'crosshair'
-  | 'slash'
-  | 'bracket'
-  | 'flipZone'
 
 type GexSourceRow = {
   strike: number
@@ -40,14 +74,20 @@ type GexSourceRow = {
   netGammaExposureUsd?: number
 }
 
+export type GexColorPalette = 'production' | 'include_otc'
+
 export type GexProfileChartProps = {
   snapshot: GexSnapshot
   mode: GexMode
   dataWindowPct: number | 'full'
-  levelMarkers?: GexLevelMarker[]
+  onDataWindowPctChange?: (pct: number) => void
+  /** Full header bar (candlestick-style). Preferred over titleAccessory. */
+  header?: ReactNode
+  /** @deprecated Prefer `header` — kept for lightweight title-only embeds. */
   titleAccessory?: ReactNode
   titleOverride?: string
   minHeight?: number
+  colorPalette?: GexColorPalette
 }
 
 type ChartDatum = {
@@ -55,8 +95,7 @@ type ChartDatum = {
   netGexUsd: number
   callGexUsd: number
   putGexUsd: number
-  positiveGexUsd: number
-  negativeGexUsd: number
+  grossGexUsd: number
   displayGexUsd: number
 }
 
@@ -64,1892 +103,2162 @@ type HoverState = {
   datum: ChartDatum
   xPct: number
   yPct: number
-  side: TooltipSide
+  side: GexHoverSide
 }
 
-type TooltipSide = 'left' | 'right'
-
-type ChartDimensions = {
-  width: number
-  height: number
-  margin: {
-    top: number
-    right: number
-    bottom: number
-    left: number
-  }
+/** Vertical spot overlay at live Deribit index (strike on X). */
+type SpotOverlay = {
+  pos: number
+  visible: boolean
 }
 
-type AreaChartLayout = {
-  data: ChartDatum[]
-  profileData: ChartDatum[]
-  innerWidth: number
-  innerHeight: number
-  xScale: ScaleLinear<number, number>
-  yScale: ScaleLinear<number, number>
-  xTicks: number[]
-  yTicks: number[]
-  zeroY: number
-  spotX: number
-  levelMarkers: PositionedAreaLevelMarker[]
-  axisMarkers: PositionedAreaLevelMarker[]
-}
-
-type PositionedBarLevelMarker = GexLevelMarker & {
-  y: number
-  components?: GexLevelMarker[]
-}
-
-type StrikeAxisTick = {
+/** Top-N wall callout markers. */
+type WallCallout = {
   strike: number
-  y: number
-}
-
-type PositionedAreaLevelMarker = GexLevelMarker & {
+  netGexUsd: number
   x: number
-  components?: GexLevelMarker[]
+  y: number
+  side: 'above' | 'below'
 }
 
-const defaultWidth = 1120
-const minChartWidth = 720
-const defaultChartHeight = 516
-const margin = { top: 60, right: 102, bottom: 54, left: 78 }
-const areaMargin = { top: 54, right: 30, bottom: 50, left: 104 }
-const areaYAxisLabelX = 22
-const barChartDomainPadding = 1.35
-const areaChartDomainPadding = 1.35
-const profileNegativeDomainBuffer = 10_000_000
-const levelHighlightBandSize = 8
-const barSpotLabelNormalOffsetX = -6
-const barSpotLabelWidth = 74
-const barSpotLabelHeight = 18
-const barLevelLabelSpotThreshold = 24
-const barLevelLabelSpotGap = 8
-const areaSpotLabelWidth = 78
-const areaSpotLabelHeight = 18
+type NetHandle = {
+  chart: IChartApiBase<number>
+  series: ISeriesApi<'Histogram', number>
+  zeroLine: IPriceLine | null
+  strikeKey: string
+  windowKey: string
+  /** Fingerprint of bar values/colors — skip setData when unchanged (kills refresh jitter). */
+  dataSig: string
+  /** Full X ladder including empty-flank axis anchors (whitespace strikes). */
+  seriesStrikes: number[]
+  /** Expand-only trim lock so live ticks don't grow/shrink the ladder. */
+  trimLoStrike: number | null
+  trimHiStrike: number | null
+  /** True after first successful fit — live ticks must not re-home the camera. */
+  hasInitialFit: boolean
+  /** True after user pan/zoom — only dblclick / data-window change re-fits. */
+  userAdjustedRange: boolean
+  /** Guard so our own setVisibleRange does not mark userAdjusted. */
+  programmaticRange: boolean
+}
 
-export function GexProfileChart({
+type ProfileHandle = {
+  chart: IChartApiBase<number>
+  series: ISeriesApi<'Baseline', number>
+  zeroLine: IPriceLine | null
+  strikeKey: string
+  windowKey: string
+  /** Fingerprint of series values — skip setData when unchanged. */
+  dataSig: string
+  /** Values currently in the series (for Y autoscale padding). */
+  displayValues: number[]
+  /** Full X ladder including empty-flank axis anchors (whitespace strikes). */
+  seriesStrikes: number[]
+  trimLoStrike: number | null
+  trimHiStrike: number | null
+  hasInitialFit: boolean
+  userAdjustedRange: boolean
+  programmaticRange: boolean
+}
+
+const defaultChartHeight = 516
+const minChartWidth = 120
+const TIME_SCALE_MIN_HEIGHT = 26
+/**
+ * Top-N wall callouts on the plot (strike + GEX chips).
+ * Hidden for now — keep helper code for a quick re-enable.
+ */
+const SHOW_WALL_CALLOUTS = false
+const WALL_CALLOUT_MAX = 3
+
+export const GexProfileChart = memo(function GexProfileChart({
   snapshot,
   mode,
   dataWindowPct,
-  levelMarkers = [],
+  onDataWindowPctChange,
+  header,
   titleAccessory,
   titleOverride,
   minHeight = defaultChartHeight,
+  colorPalette = 'production',
 }: GexProfileChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const gradientIdPrefix = useId().replace(/:/g, '')
-  const { width: measuredWidth, height: measuredHeight } = useContainerSize(containerRef, defaultWidth, minHeight, minHeight)
-  const areaMode = mode === 'abs' || mode === 'profile'
-  const validLevelMarkers = useMemo(() => levelMarkers.filter((marker) => Number.isFinite(marker.strike)), [levelMarkers])
+  const chartMode = normalizeRenderMode(mode)
+  const chartTitle = titleOverride ?? getGexChartTitle(chartMode)
+  const useOtcPalette = colorPalette === 'include_otc'
+  const resolvedHeader = header ?? null
+
   const data = useMemo(
-    () => prepareChartData(snapshot, mode, dataWindowPct),
-    [snapshot, mode, dataWindowPct],
+    () => prepareChartData(snapshot, chartMode),
+    [snapshot, chartMode],
   )
-  const visibleLevelMarkers = useMemo(
-    () => getVisibleLevelMarkers(validLevelMarkers, data),
-    [data, validLevelMarkers],
-  )
-  const visibleLineLevelMarkers = useMemo(
-    () => groupLevelMarkers(visibleLevelMarkers.filter((marker) => !marker.axisOnly)),
-    [visibleLevelMarkers],
-  )
-  const visibleAxisLevelMarkers = useMemo(
-    () => groupLevelMarkers(visibleLevelMarkers),
-    [visibleLevelMarkers],
-  )
-  const dimensions = areaMode ? getAreaChartDimensions(measuredWidth, measuredHeight) : getChartDimensions(measuredWidth, measuredHeight)
-  const barLayout = useMemo(
-    () => getChartLayout(data, snapshot.spot, dimensions, mode, dataWindowPct, visibleLineLevelMarkers, visibleAxisLevelMarkers),
-    [data, dataWindowPct, dimensions, mode, snapshot.spot, visibleAxisLevelMarkers, visibleLineLevelMarkers],
-  )
-  const areaLayout = useMemo(
-    () => getAreaChartLayout(data, snapshot.spot, dimensions, mode, visibleLineLevelMarkers, visibleAxisLevelMarkers),
-    [data, dimensions, mode, snapshot.spot, visibleAxisLevelMarkers, visibleLineLevelMarkers],
-  )
-  const [hovered, setHovered] = useState<HoverState | null>(null)
-  if (areaMode) {
+
+  if (chartMode === 'net') {
     return (
-      <div ref={containerRef} className={cn('relative h-full w-full overflow-hidden')} style={{ minHeight }}>
-        {titleAccessory ? (
-          <div className="absolute right-[18px] top-[12px] z-20">
-            {titleAccessory}
-          </div>
-        ) : null}
-        <AreaGexChart
-          data={data}
-          dimensions={dimensions}
-          gradientIdPrefix={gradientIdPrefix}
-          hovered={hovered}
-          layout={areaLayout}
-          mode={mode}
-          setHovered={setHovered}
-          spot={snapshot.spot}
-          titleOverride={titleOverride}
-        />
-      </div>
+      <NetStrikeLwcChart
+        data={data}
+        spot={snapshot.spot}
+        dataWindowPct={dataWindowPct}
+        onDataWindowPctChange={onDataWindowPctChange}
+        title={chartTitle}
+        header={resolvedHeader}
+        titleAccessory={titleAccessory}
+        minHeight={minHeight}
+        useOtcPalette={useOtcPalette}
+      />
     )
   }
 
-  const layout = barLayout
-  const yAxisTickStrikes = new Set(layout.yAxisTicks.map((tick) => tick.strike))
-  const levelAxisStrikes = new Set(layout.levelMarkers.map((marker) => marker.strike))
-  const barLevelAxisLabels = getBarLevelAxisLabels(layout.levelMarkers, layout.yAxisTicks)
-  const chartRight = dimensions.margin.left + layout.innerWidth
-  const barLevelMarkerScale = getLevelMarkerScale(layout.levelMarkers.map((marker) => marker.y), dataWindowPct)
-  const barLevelLabelYById = getBarLevelLabelYById(
-    layout.levelMarkers,
-    dimensions.margin.top,
-    dimensions.margin.top + layout.innerHeight,
-    barLevelMarkerScale,
+  return (
+    <ProfileLwcChart
+      data={data}
+      spot={snapshot.spot}
+      dataWindowPct={dataWindowPct}
+      onDataWindowPctChange={onDataWindowPctChange}
+      title={chartTitle}
+      header={resolvedHeader}
+      titleAccessory={titleAccessory}
+      minHeight={minHeight}
+      useOtcPalette={useOtcPalette}
+    />
   )
-  const barSpotLabelX = chartRight + barSpotLabelNormalOffsetX
+})
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Shared LWC options-chart chrome (strike on X, GEX on Y)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+function markWithGreaterWeight(a: TimeMark, b: TimeMark): TimeMark {
+  return a.weight > b.weight ? a : b
+}
+
+/**
+ * Price-based horizontal scale tuned for BTC option strikes.
+ * Mirrors Lightweight Charts' built-in HorzScaleBehaviorPrice with:
+ *  - compact k-suffix tick labels
+ *  - strike-friendly tick weights (500 / 1k / 2.5k / 5k / 10k)
+ */
+class StrikeHorzScaleBehavior implements IHorzScaleBehavior<number> {
+  private _options!: ChartOptionsImpl<number>
+
+  options(): ChartOptionsImpl<number> {
+    return this._options
+  }
+
+  setOptions(options: ChartOptionsImpl<number>): void {
+    this._options = options
+  }
+
+  preprocessData(_data: DataItem<number> | DataItem<number>[]): void {
+    // no-op — strikes need no preprocessing
+  }
+
+  updateFormatter(options: LocalizationOptions<number>): void {
+    if (!this._options) return
+    this._options.localization = options
+  }
+
+  createConverterToInternalObj(
+    _data: SeriesDataItemTypeMap<number>[SeriesType][],
+  ): HorzScaleItemConverterToInternalObj<number> {
+    return (price: number) => price as unknown as InternalHorzScaleItem
+  }
+
+  key(internalItem: InternalHorzScaleItem | number): InternalHorzScaleItemKey {
+    return internalItem as InternalHorzScaleItemKey
+  }
+
+  cacheKey(internalItem: InternalHorzScaleItem): number {
+    return internalItem as unknown as number
+  }
+
+  convertHorzItemToInternal(item: number): InternalHorzScaleItem {
+    return item as unknown as InternalHorzScaleItem
+  }
+
+  formatHorzItem(item: InternalHorzScaleItem): string {
+    return formatStrikeTick(item as unknown as number)
+  }
+
+  formatTickmark(
+    item: TickMark,
+    _localizationOptions: LocalizationOptions<number>,
+  ): string {
+    return formatStrikeTick(item.time as unknown as number)
+  }
+
+  maxTickMarkWeight(marks: TimeMark[]): TickMarkWeightValue {
+    return marks.reduce(markWithGreaterWeight, marks[0]!).weight
+  }
+
+  fillWeightsForPoints(
+    sortedTimePoints: readonly Mutable<TimeScalePoint>[],
+    startIndex: number,
+  ): void {
+    // Integer-modulo weights (float equality was dropping many round strikes).
+    // Keep 1k / 2k competitive so mid zooms still get a full ladder of labels
+    // (not a single leftover tick like "58k").
+    const strikeWeight = (price: number): number => {
+      const p = Math.round(price)
+      if (p % 25_000 === 0) return 20
+      if (p % 10_000 === 0) return 18
+      if (p % 5_000 === 0) return 16
+      if (p % 2_500 === 0) return 12
+      if (p % 2_000 === 0) return 11
+      if (p % 1_000 === 0) return 10
+      if (p % 500 === 0) return 6
+      if (p % 250 === 0) return 3
+      return 0
+    }
+    for (let index = startIndex; index < sortedTimePoints.length; index += 1) {
+      sortedTimePoints[index]!.timeWeight = strikeWeight(
+        sortedTimePoints[index]!.time as unknown as number,
+      ) as TickMarkWeightValue
+    }
+  }
+}
+
+function createGexOptionsChart(
+  container: HTMLElement,
+  options: Parameters<typeof createOptionsChart>[1],
+): IChartApiBase<number> {
+  try {
+    return createChartEx(container, new StrikeHorzScaleBehavior(), options)
+  } catch {
+    return createOptionsChart(container, options)
+  }
+}
+
+function buildGexChartOptions(width: number, height: number, colors: GexSeriesColors) {
+  return {
+    width,
+    height,
+    autoSize: false,
+    layout: {
+      background: { type: ColorType.Solid, color: 'transparent' },
+      textColor: colors.text,
+      fontSize: 11,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      attributionLogo: false,
+    },
+    localization: {
+      precision: 0,
+      priceFormatter: (price: number) => formatAxisMillions(price),
+      timeFormatter: (strike: number) => formatStrikeTick(strike),
+    },
+    grid: {
+      vertLines: { visible: false },
+      horzLines: { visible: false },
+    },
+    crosshair: {
+      mode: CrosshairMode.Magnet,
+      vertLine: {
+        color: colors.crosshair,
+        width: 1 as const,
+        style: LineStyle.Dashed,
+        labelVisible: true,
+        labelBackgroundColor: colors.crosshairLabelBg,
+      },
+      horzLine: {
+        color: colors.crosshair,
+        width: 1 as const,
+        style: LineStyle.Dashed,
+        labelVisible: true,
+        labelBackgroundColor: colors.crosshairLabelBg,
+      },
+    },
+    rightPriceScale: {
+      visible: true,
+      borderVisible: false,
+      entireTextOnly: true,
+      // Modest pane margins; real Y headroom comes from autoscaleInfoProvider.
+      scaleMargins: { top: 0.06, bottom: 0.06 },
+      autoScale: true,
+    },
+    leftPriceScale: {
+      visible: false,
+      borderVisible: false,
+    },
+    timeScale: {
+      visible: true,
+      borderVisible: false,
+      // Allow empty flanks past first/last strike so spot can sit centered.
+      fixLeftEdge: false,
+      fixRightEdge: false,
+      minBarSpacing: 0.45,
+      maxBarSpacing: 0,
+      barSpacing: 6,
+      rightOffset: 0,
+      tickMarkMaxCharacterLength: 6,
+      minimumHeight: TIME_SCALE_MIN_HEIGHT,
+      ticksVisible: false,
+      // false = weight-ranked labels at real strikes (uniform was leaving 0–1 ticks).
+      uniformDistribution: false,
+      shiftVisibleRangeOnNewBar: false,
+      allowShiftVisibleRangeOnWhitespaceReplacement: false,
+      lockVisibleTimeRangeOnResize: true,
+      allowBoldLabels: true,
+    },
+    handleScroll: {
+      mouseWheel: false,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
+      vertTouchDrag: false,
+    },
+    handleScale: {
+      axisPressedMouseMove: { time: true, price: true },
+      // Custom wheel handler anchors zoom on spot — disable native wheel scale.
+      mouseWheel: false,
+      pinch: true,
+      // Time axis: custom host dblclick runs spot-centered fitStrikeContent.
+      axisDoubleClickReset: { time: false, price: true },
+    },
+    kineticScroll: {
+      mouse: false,
+      touch: false,
+    },
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * STRIKE — LWC vertical histogram (strike X, Net GEX Y)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+function NetStrikeLwcChart({
+  data,
+  spot,
+  dataWindowPct,
+  onDataWindowPctChange,
+  title,
+  header,
+  titleAccessory,
+  minHeight,
+  useOtcPalette,
+}: {
+  data: ChartDatum[]
+  spot: number
+  dataWindowPct: number | 'full'
+  onDataWindowPctChange?: (pct: number) => void
+  title: string
+  header?: ReactNode
+  titleAccessory?: ReactNode
+  minHeight: number
+  useOtcPalette: boolean
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const hostRef = useRef<HTMLDivElement>(null)
+  const handleRef = useRef<NetHandle | null>(null)
+  const dataRef = useRef(data)
+  const spotRef = useRef(spot)
+  const dataWindowPctRef = useRef(dataWindowPct)
+  const colorsRef = useRef<GexSeriesColors>(readGexSeriesColors())
+
+  const [error, setError] = useState<string | null>(null)
+  const [hovered, setHovered] = useState<HoverState | null>(null)
+  const [spotOverlay, setSpotOverlay] = useState<SpotOverlay>({
+    pos: 0,
+    visible: false,
+  })
+  const [wallCallouts, setWallCallouts] = useState<WallCallout[]>([])
+
+  useEffect(() => {
+    dataRef.current = data
+    spotRef.current = spot
+    dataWindowPctRef.current = dataWindowPct
+  }, [data, spot, dataWindowPct])
+
+  useDataWindowWheelZoom(wrapRef, dataWindowPct, onDataWindowPctChange)
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+
+    let disposed = false
+    let raf = 0
+    let spotRaf = 0
+    let ro: ResizeObserver | null = null
+    let handle: NetHandle | null = null
+    let themeObserver: MutationObserver | null = null
+
+    const colors = readGexSeriesColors(host)
+    colorsRef.current = colors
+
+    const refreshOverlays = () => {
+      if (disposed || !handle) return
+      const strikes = handle.seriesStrikes.length > 0
+        ? handle.seriesStrikes
+        : dataRef.current.map((d) => d.strike)
+      const x = spotToCoordinate(handle.chart, strikes, spotRef.current)
+      if (x == null || !Number.isFinite(x)) {
+        setSpotOverlay((prev) => (prev.visible ? { pos: 0, visible: false } : prev))
+      } else {
+        setSpotOverlay((prev) => (
+          prev.visible && Math.abs(prev.pos - x) < 0.5
+            ? prev
+            : { pos: x, visible: true }
+        ))
+      }
+      if (SHOW_WALL_CALLOUTS) {
+        setWallCallouts(computeWallCallouts(handle.chart, handle.series, dataRef.current))
+      }
+    }
+
+    const scheduleOverlays = () => {
+      if (spotRaf) cancelAnimationFrame(spotRaf)
+      spotRaf = requestAnimationFrame(refreshOverlays)
+    }
+
+    const onCrosshair = (param: MouseEventParams<number>) => {
+      if (disposed || !handle || !wrapRef.current) return
+      if (!param.point || param.time === undefined || param.point.x < 0 || param.point.y < 0) {
+        setHovered(null)
+        return
+      }
+      const strike = typeof param.time === 'number' ? param.time : Number(param.time)
+      if (!Number.isFinite(strike)) {
+        setHovered(null)
+        return
+      }
+      const datum = findNearestDatum(dataRef.current, strike)
+      if (!datum) {
+        setHovered(null)
+        return
+      }
+      const rect = wrapRef.current.getBoundingClientRect()
+      const w = Math.max(rect.width, 1)
+      const h = Math.max(rect.height, 1)
+      const xPct = (param.point.x / w) * 100
+      const yPct = (param.point.y / h) * 100
+      setHovered({
+        datum,
+        xPct,
+        yPct,
+        side: xPct > 62 ? 'left' : 'right',
+      })
+    }
+
+    try {
+      host.replaceChildren()
+      const { w, h } = measure(host)
+
+      const chart = createGexOptionsChart(host, buildGexChartOptions(w, h, colors))
+
+      // Expand-only Y lock: live ticks can grow the scale, not shrink it (vertical jitter).
+      let yRangeLock: { min: number; max: number } | null = null
+
+      const series = chart.addSeries(HistogramSeries, {
+        color: colors.positive,
+        base: 0,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        autoscaleInfoProvider: (
+          original: () => { priceRange: { minValue: number; maxValue: number } | null } | null,
+        ) => {
+          const base = original()
+          if (!base?.priceRange) return base
+          const min = Math.min(base.priceRange.minValue, 0)
+          const max = Math.max(base.priceRange.maxValue, 0)
+          const span = Math.max(max - min, 1)
+          const pad = span * 0.28
+          let minV = min - pad
+          let maxV = max + pad
+          if (yRangeLock) {
+            minV = Math.min(yRangeLock.min, minV)
+            maxV = Math.max(yRangeLock.max, maxV)
+          }
+          yRangeLock = { min: minV, max: maxV }
+          return {
+            priceRange: {
+              minValue: minV,
+              maxValue: maxV,
+            },
+          }
+        },
+        priceFormat: {
+          type: 'custom',
+          minMove: 1,
+          formatter: (price: number) => formatAxisMillions(price),
+        },
+      })
+
+      const zeroLine = series.createPriceLine({
+        price: 0,
+        color: colors.zero,
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: false,
+        title: '',
+      })
+
+      const nextHandle: NetHandle = {
+        chart,
+        series,
+        zeroLine,
+        strikeKey: '',
+        windowKey: '',
+        dataSig: '',
+        seriesStrikes: [],
+        trimLoStrike: null,
+        trimHiStrike: null,
+        hasInitialFit: false,
+        userAdjustedRange: false,
+        programmaticRange: false,
+      }
+      handle = nextHandle
+      handleRef.current = nextHandle
+
+      applyNetData(nextHandle, dataRef.current, {
+        fit: true,
+        spot: spotRef.current,
+        dataWindowPct: dataWindowPctRef.current,
+        colors: colorsRef.current,
+      })
+      try {
+        chart.priceScale('right').applyOptions({ autoScale: true, scaleMargins: { top: 0.06, bottom: 0.06 } })
+      } catch {
+        // ignore
+      }
+      scheduleOverlays()
+
+      chart.subscribeCrosshairMove(onCrosshair)
+      chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        if (handle && !handle.programmaticRange) {
+          handle.userAdjustedRange = true
+        }
+        scheduleOverlays()
+      })
+
+      const onDblClick = (ev: MouseEvent) => {
+        const h = handle
+        if (disposed || !h) return
+        ev.preventDefault()
+        h.userAdjustedRange = false
+        yRangeLock = null // allow Y to re-fit to current data
+        applyProgrammaticRange(h, () => {
+          fitStrikeContent(
+            h.chart,
+            h.seriesStrikes,
+            spotRef.current,
+            dataWindowPctRef.current,
+          )
+        })
+        try {
+          chart.priceScale('right').applyOptions({ autoScale: true })
+        } catch {
+          // ignore
+        }
+        scheduleOverlays()
+      }
+      host.addEventListener('dblclick', onDblClick)
+
+      const onWheelZoom = makeSpotAnchoredWheelHandler({
+        getHandle: () => handle,
+        getStrikes: () => handle?.seriesStrikes ?? [],
+        getSpot: () => spotRef.current,
+        onAfter: () => {
+          if (handle) handle.userAdjustedRange = true
+          scheduleOverlays()
+        },
+        disposed: () => disposed,
+      })
+      host.addEventListener('wheel', onWheelZoom, { passive: false })
+
+      const syncSize = () => {
+        if (disposed || !handle) return
+        const next = measure(host)
+        handle.chart.resize(next.w, next.h, true)
+        scheduleOverlays()
+      }
+
+      ro = new ResizeObserver(() => {
+        if (raf) cancelAnimationFrame(raf)
+        raf = requestAnimationFrame(syncSize)
+      })
+      ro.observe(host)
+
+      // Re-read theme tokens when data-theme flips on <html>.
+      themeObserver = new MutationObserver(() => {
+        if (disposed || !handle) return
+        const nextColors = readGexSeriesColors(host)
+        colorsRef.current = nextColors
+        try {
+          handle.zeroLine?.applyOptions({ color: nextColors.zero })
+          // Force bar color rewrite (dataSig skip would otherwise no-op).
+          handle.dataSig = ''
+          applyNetData(handle, dataRef.current, {
+            spot: spotRef.current,
+            dataWindowPct: dataWindowPctRef.current,
+            colors: nextColors,
+          })
+          scheduleOverlays()
+        } catch {
+          // ignore
+        }
+      })
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme', 'class'],
+      })
+
+      raf = requestAnimationFrame(() => {
+        syncSize()
+        // Do not re-fit here — applyNetData(fit:true) already set the camera.
+        scheduleOverlays()
+      })
+
+      queueMicrotask(() => {
+        if (!disposed) setError(null)
+      })
+
+      return () => {
+        disposed = true
+        if (raf) cancelAnimationFrame(raf)
+        if (spotRaf) cancelAnimationFrame(spotRaf)
+        ro?.disconnect()
+        themeObserver?.disconnect()
+        host.removeEventListener('dblclick', onDblClick)
+        host.removeEventListener('wheel', onWheelZoom)
+        try {
+          handle?.chart.unsubscribeCrosshairMove(onCrosshair)
+          handle?.chart.timeScale().unsubscribeVisibleLogicalRangeChange(scheduleOverlays)
+        } catch {
+          // ignore
+        }
+        handleRef.current = null
+        try {
+          handle?.chart.remove()
+        } catch {
+          // ignore
+        }
+        host.replaceChildren()
+        queueMicrotask(() => {
+          setSpotOverlay({ pos: 0, visible: false })
+          setWallCallouts([])
+          setHovered(null)
+        })
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      queueMicrotask(() => setError(msg))
+      console.error('[GexProfileChart] strike chart create failed', err)
+      return () => {
+        disposed = true
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const handle = handleRef.current
+    if (!handle) return
+    try {
+      const colors = readGexSeriesColors(hostRef.current)
+      colorsRef.current = colors
+      applyNetData(handle, data, {
+        spot,
+        dataWindowPct,
+        colors,
+      })
+      const x = spotToCoordinate(handle.chart, handle.seriesStrikes, spot)
+      queueMicrotask(() => {
+        if (x == null || !Number.isFinite(x)) {
+          setSpotOverlay({ pos: 0, visible: false })
+        } else {
+          setSpotOverlay({ pos: x, visible: true })
+        }
+        if (SHOW_WALL_CALLOUTS) {
+          setWallCallouts(computeWallCallouts(handle.chart, handle.series, data))
+        }
+        setHovered(null)
+        setError(null)
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      queueMicrotask(() => setError(msg))
+    }
+  }, [data, spot, dataWindowPct])
 
   return (
-    <div ref={containerRef} className={cn('relative h-full w-full overflow-hidden')} style={{ minHeight }}>
-      {titleAccessory ? (
-        <div className="absolute right-[18px] top-[12px] z-20">
-          {titleAccessory}
-        </div>
-      ) : null}
-      <svg
-        width="100%"
-        height={dimensions.height}
-        viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
-        role="img"
-        aria-label="BTC gamma exposure profile by strike"
-        className="block"
-        onMouseLeave={() => setHovered(null)}
-      >
-        <defs>
-          <linearGradient id={`${gradientIdPrefix}-chart-panel-fill`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--chart-panel-fill-top)" />
-            <stop offset="55%" stopColor="var(--chart-panel-fill-mid)" />
-            <stop offset="100%" stopColor="var(--chart-panel-fill-bottom)" />
-          </linearGradient>
-          <linearGradient id={`${gradientIdPrefix}-positive-gex-fill`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="var(--chart-positive-start)" />
-            <stop offset="100%" stopColor="var(--chart-positive-edge)" />
-          </linearGradient>
-          <linearGradient id={`${gradientIdPrefix}-negative-gex-fill`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="var(--chart-negative-edge)" />
-            <stop offset="100%" stopColor="var(--chart-negative-end)" />
-          </linearGradient>
-          <linearGradient id={`${gradientIdPrefix}-profile-gex-fill`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="var(--chart-profile-fill-start)" />
-            <stop offset="50%" stopColor="var(--chart-profile-fill-mid)" />
-            <stop offset="100%" stopColor="var(--chart-profile-fill-end)" />
-          </linearGradient>
-        </defs>
-
-        <rect width={dimensions.width} height={dimensions.height} fill={`url(#${gradientIdPrefix}-chart-panel-fill)`} />
-        <rect
-          x={dimensions.margin.left}
-          y={dimensions.margin.top}
-          width={layout.innerWidth}
-          height={layout.innerHeight}
-          fill="var(--terminal-surface)"
-          opacity="0.14"
+    <div
+      ref={wrapRef}
+      className={cn(
+        'relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden',
+        useOtcPalette && 'gex-palette-otc',
+      )}
+      style={{ minHeight: Math.min(minHeight, 120) }}
+    >
+      {header ?? (
+        <ChartTitleOverlay
+          title={title}
+          subtitle="STRIKE (X) · NET GEX (Y)"
+          titleAccessory={titleAccessory}
         />
+      )}
 
-        <text x={22} y={29} fill="var(--terminal-heading)" fontSize={14} fontWeight={700} letterSpacing={1.4}>
-          {titleOverride ?? getGexChartTitle(mode)}
-        </text>
-
-        <text x={22} y={53} fill="var(--terminal-muted)" fontSize={10.5} letterSpacing={1.1}>
-          STRIKE (USD)
-        </text>
-
-        {layout.xTicks.map((tick) => (
-          <g key={tick}>
-            <line
-              x1={layout.xScale(tick)}
-              x2={layout.xScale(tick)}
-              y1={dimensions.margin.top}
-              y2={dimensions.margin.top + layout.innerHeight}
-              stroke={tick === 0 ? 'var(--terminal-heading)' : 'var(--terminal-grid)'}
-              strokeDasharray={tick === 0 ? undefined : '2 6'}
-              strokeOpacity={tick === 0 ? 0.78 : 1}
-              strokeWidth={tick === 0 ? 1.25 : 1}
-            />
-            <text
-              x={layout.xScale(tick)}
-              y={dimensions.height - 34}
-              textAnchor="middle"
-              fill="var(--terminal-muted)"
-              fontSize={11}
-              fontFamily="var(--font-mono)"
-            >
-              {formatAxisMillions(tick)}
-            </text>
-          </g>
-        ))}
-
-        {layout.yAxisTicks.map((tick) => (
-          <YAxisStrikeLabel
-            key={tick.strike}
-            marker={getLevelMarkerAtStrike(layout.levelMarkers, tick.strike)}
-            strike={tick.strike}
-            x={50}
-            y={tick.y}
-            highlighted={false}
-          />
-        ))}
-
-        {barLevelAxisLabels.map((marker) => (
-          <YAxisStrikeLabel
-            key={`level-axis-${marker.id}`}
-            marker={marker}
-            strike={marker.strike}
-            x={50}
-            y={marker.y}
-            highlighted={false}
-          />
-        ))}
-
-        {data.map((datum) => {
-          const rowCenter = layout.yScale(datum.strike)
-          const rowHeight = layout.rowHeight
-          const rowTop = rowCenter - rowHeight / 2
-          const isHovered = hovered?.datum.strike === datum.strike
-          const showHoverStrikeLabel = isHovered && !yAxisTickStrikes.has(datum.strike) && !levelAxisStrikes.has(datum.strike)
-          const bar = getBarGeometry(datum.displayGexUsd, layout.xScale, rowCenter)
-          const barHeight = getBarHeight(rowHeight)
-          const positive = datum.displayGexUsd >= 0
-          const stroke = positive ? 'var(--chart-positive-edge)' : 'var(--chart-negative-edge)'
-          const positiveBar = getBarGeometry(datum.positiveGexUsd, layout.xScale, rowCenter)
-          const negativeBar = getBarGeometry(datum.negativeGexUsd, layout.xScale, rowCenter)
-
-          return (
-            <g key={datum.strike}>
-              {isHovered ? (
-                <rect
-                  x={dimensions.margin.left}
-                  y={rowTop}
-                  width={layout.innerWidth}
-                  height={rowHeight}
-                  fill="var(--terminal-surface-2)"
-                  opacity="0.72"
-                />
-              ) : null}
-              {showHoverStrikeLabel ? (
-                <YAxisStrikeLabel
-                  strike={datum.strike}
-                  x={50}
-                  y={rowCenter}
-                  highlighted
-                />
-              ) : null}
-              {mode === 'split' ? (
-                <SplitBars
-                  datum={datum}
-                  negativeFillId={`${gradientIdPrefix}-negative-gex-fill`}
-                  positiveFillId={`${gradientIdPrefix}-positive-gex-fill`}
-                  xScale={layout.xScale}
-                  y={rowCenter}
-                  rowHeight={barHeight}
-                />
-              ) : (
-                <SingleBar
-                  bar={bar}
-                  fillId={positive ? `${gradientIdPrefix}-positive-gex-fill` : `${gradientIdPrefix}-negative-gex-fill`}
-                  positive={positive}
-                  stroke={stroke}
-                  height={barHeight}
-                />
-              )}
-              {mode === 'split' ? (
-                <>
-                  <BarHoverTarget
-                    bar={negativeBar}
-                    datum={datum}
-                    dimensions={dimensions}
-                    height={barHeight}
-                    setHovered={setHovered}
-                    side="left"
-                  />
-                  <BarHoverTarget
-                    bar={positiveBar}
-                    datum={datum}
-                    dimensions={dimensions}
-                    height={barHeight}
-                    setHovered={setHovered}
-                    side="right"
-                  />
-                </>
-              ) : (
-                <BarHoverTarget
-                  bar={bar}
-                  datum={datum}
-                  dimensions={dimensions}
-                  height={barHeight}
-                  setHovered={setHovered}
-                  side={positive ? 'right' : 'left'}
-                />
-              )}
-            </g>
-          )
-        })}
-
-        <line
-          x1={dimensions.margin.left}
-          x2={chartRight}
-          y1={layout.spotY}
-          y2={layout.spotY}
-          stroke="var(--terminal-heading)"
-          strokeWidth={1}
-          strokeDasharray="4 6"
-          strokeOpacity="0.6"
-          pointerEvents="none"
-        />
-
-        {layout.levelMarkers.map((marker) => (
-          <BarLevelMarker
-            key={marker.id}
-            marker={marker}
-            chartLeft={dimensions.margin.left}
-            spotLabelX={barSpotLabelX}
-            labelY={barLevelLabelYById.get(marker.id) ?? marker.y}
-            markerScale={barLevelMarkerScale}
-            spotY={layout.spotY}
-          />
-        ))}
-        <g transform={`translate(${barSpotLabelX} ${layout.spotY})`}>
-          <rect
-            x="0"
-            y={-barSpotLabelHeight / 2}
-            width={barSpotLabelWidth}
-            height={barSpotLabelHeight}
-            rx="2"
-            fill="var(--terminal-surface)"
-            stroke="var(--terminal-border-strong)"
-          />
-          <text
-            x={barSpotLabelWidth / 2}
-            y="1"
-            fill="var(--terminal-heading)"
-            fontSize={9.5}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontFamily="var(--font-mono)"
-            fontWeight={600}
-          >
-            Spot {formatStrike(snapshot.spot)}
-          </text>
-        </g>
-
-        <text
-          x={dimensions.margin.left + layout.innerWidth / 2}
-          y={dimensions.height - 12}
-          textAnchor="middle"
-          fill="var(--terminal-muted)"
-          fontSize={10.5}
-          letterSpacing={1.2}
-        >
-          GAMMA EXPOSURE (USD)
-        </text>
-      </svg>
-
-      {hovered ? (
+      <div className={cn('gex-lwc-wrap', !header && 'gex-lwc-wrap--overlay')}>
         <div
-          className="pointer-events-none absolute z-10 min-w-44 rounded-[var(--terminal-radius-sm)] border border-[var(--terminal-border-strong)] bg-[var(--terminal-surface)]/95 px-3 py-2 text-left text-[11px] text-[var(--terminal-text)] shadow-2xl backdrop-blur"
-          style={{
-            left: `${hovered.xPct}%`,
-            top: `${hovered.yPct}%`,
-            transform: getTooltipTransform(hovered.side),
-          }}
-        >
-          <div className="mb-1 text-[var(--terminal-heading)]">Strike {formatStrike(hovered.datum.strike)}</div>
-          <div className={hovered.datum.netGexUsd >= 0 ? 'terminal-value text-[var(--terminal-green-strong)]' : 'terminal-value text-[var(--terminal-red-strong)]'}>
-            Net GEX {formatMillions(hovered.datum.netGexUsd)}
+          ref={hostRef}
+          className="gex-lwc-canvas"
+          role="img"
+          aria-label="BTC net gamma exposure by strike — vertical bars, strike on X axis, net GEX on Y axis"
+        />
+
+        {spotOverlay.visible ? (
+          <div
+            className="gex-lwc-spot gex-lwc-spot--vertical pointer-events-none absolute z-[4]"
+            style={{ left: spotOverlay.pos, top: 0, bottom: 0 }}
+            aria-hidden
+          >
+            <div className="gex-lwc-spot__glow" />
+            <div className="gex-lwc-spot__line" />
+            <div className="gex-lwc-spot__label gex-lwc-spot__label--axis">
+              <span className="gex-lwc-spot__label-tick" />
+              <span className="gex-lwc-spot__label-text">{formatStrike(spot)}</span>
+            </div>
           </div>
-          {mode === 'split' ? (
-            <>
-              <div className="terminal-value mt-1 text-[var(--terminal-green)]">Long Gamma {formatMillions(hovered.datum.positiveGexUsd)}</div>
-              <div className="terminal-value text-[var(--terminal-red)]">Short Gamma {formatMillions(hovered.datum.negativeGexUsd)}</div>
-            </>
-          ) : (
-            <>
-              <div className="terminal-value mt-1 text-[var(--terminal-green)]">Calls {formatMillions(hovered.datum.callGexUsd)}</div>
-              <div className="terminal-value text-[var(--terminal-red)]">Puts {formatMillions(hovered.datum.putGexUsd)}</div>
-            </>
-          )}
-        </div>
-      ) : null}
+        ) : null}
+
+        {SHOW_WALL_CALLOUTS
+          ? wallCallouts.map((wall) => (
+          <div
+            key={`wall-${wall.strike}`}
+            className={cn(
+              'gex-wall-callout pointer-events-none absolute z-[3]',
+              wall.side === 'above' ? 'gex-wall-callout--above' : 'gex-wall-callout--below',
+            )}
+            style={{ left: wall.x, top: wall.y }}
+            aria-hidden
+          >
+            <span className="gex-wall-callout__strike">{formatStrike(wall.strike)}</span>
+            <span
+              className={cn(
+                'gex-wall-callout__val',
+                wall.netGexUsd >= 0 ? 'gex-wall-callout__val--pos' : 'gex-wall-callout__val--neg',
+              )}
+            >
+              {formatMillions(wall.netGexUsd)}
+            </span>
+          </div>
+            ))
+          : null}
+
+        {error ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 px-3 text-center text-[10px] text-[var(--terminal-red-strong)]">
+            Chart error: {error}
+          </div>
+        ) : null}
+
+        {data.length === 0 && !error ? (
+          <div className="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center text-[10px] uppercase tracking-[0.12em] text-[var(--terminal-muted)]">
+            No GEX data in window
+          </div>
+        ) : null}
+
+        {hovered ? (
+          <GexHoverCard
+            side={hovered.side}
+            xPct={hovered.xPct}
+            yPct={hovered.yPct}
+            model={{
+              strike: hovered.datum.strike,
+              netGexUsd: hovered.datum.netGexUsd,
+              callGexUsd: hovered.datum.callGexUsd,
+              putGexUsd: hovered.datum.putGexUsd,
+            }}
+          />
+        ) : null}
+      </div>
     </div>
   )
 }
 
-function AreaGexChart({
+function applyNetData(
+  handle: NetHandle,
+  data: ChartDatum[],
+  options?: {
+    fit?: boolean
+    spot?: number
+    dataWindowPct?: number | 'full'
+    colors?: GexSeriesColors
+  },
+) {
+  const sorted = [...data].sort((a, b) => a.strike - b.strike)
+  // Drop dead high/low tail so axis does not run to 250k with no GEX.
+  // Expand-only lock prevents live ticks from jittering the ladder edges.
+  const deduped = trimGexLadder(dedupeByStrike(sorted), {
+    loStrike: handle.trimLoStrike,
+    hiStrike: handle.trimHiStrike,
+  })
+  if (deduped.length > 0) {
+    handle.trimLoStrike = deduped[0]!.strike
+    handle.trimHiStrike = deduped[deduped.length - 1]!.strike
+  }
+
+  const nextStrikeKey = deduped.map((d) => d.strike).join(',')
+  const nextWindowKey = String(options?.dataWindowPct ?? 'full')
+  const windowChanged = nextWindowKey !== handle.windowKey
+  const ladderChanged = nextStrikeKey !== handle.strikeKey
+  handle.strikeKey = nextStrikeKey
+  handle.windowKey = nextWindowKey
+
+  const colors = options?.colors ?? readGexSeriesColors()
+  const maxAbs = Math.max(1, ...deduped.map((d) => Math.abs(d.displayGexUsd)))
+  const realByStrike = new Map(deduped.map((d) => [d.strike, d]))
+
+  // Reuse the X ladder when real strikes are unchanged — spot-driven anchors
+  // must not rewrite indices on every live refresh (that was the horizontal jitter).
+  let seriesStrikes = handle.seriesStrikes
+  if (ladderChanged || seriesStrikes.length === 0) {
+    seriesStrikes = extendStrikesWithAxisAnchors(
+      deduped.map((d) => d.strike),
+      options?.spot,
+    )
+    handle.seriesStrikes = seriesStrikes
+  }
+
+  const points: Array<HistogramData<number> | { time: number }> = seriesStrikes.map((strike) => {
+    const d = realByStrike.get(strike)
+    if (d) {
+      return {
+        time: strike,
+        value: d.displayGexUsd,
+        color: magnitudeBarColor(d.displayGexUsd, maxAbs, colors),
+      }
+    }
+    return { time: strike }
+  })
+
+  // Coarse fingerprint: ignore sub-$1k noise / color churn so tiny ticks don't setData.
+  const dataSig = `${Math.round(maxAbs / 100_000)}|${points
+    .map((p) => {
+      if (!('value' in p) || p.value == null) return `${p.time}:_`
+      return `${p.time}:${Math.round((p.value as number) / 1_000)}`
+    })
+    .join('|')}`
+
+  if (
+    dataSig === handle.dataSig
+    && !windowChanged
+    && !ladderChanged
+    && options?.fit !== true
+  ) {
+    return
+  }
+  handle.dataSig = dataSig
+
+  const ts = handle.chart.timeScale()
+  const prevLogical = ts.getVisibleLogicalRange()
+  const prevTimeRange = ts.getVisibleRange()
+
+  handle.series.setData(points as HistogramData<number>[])
+
+  // Camera policy:
+  //  - data-window change → re-home
+  //  - first fit only (until user pans/zooms)
+  //  - live GEX refreshes → restore prior camera (never re-fit)
+  if (windowChanged) {
+    handle.userAdjustedRange = false
+    applyProgrammaticRange(handle, () => {
+      fitStrikeContent(handle.chart, seriesStrikes, options?.spot, options?.dataWindowPct)
+    })
+    handle.hasInitialFit = true
+  } else if ((options?.fit === true || !handle.hasInitialFit) && !handle.userAdjustedRange) {
+    applyProgrammaticRange(handle, () => {
+      fitStrikeContent(handle.chart, seriesStrikes, options?.spot, options?.dataWindowPct)
+    })
+    handle.hasInitialFit = true
+  } else if (ladderChanged) {
+    // Ladder edges moved: re-apply price range (indices shifted).
+    restoreVisibleStrikeRange(handle, prevTimeRange, prevLogical)
+  } else {
+    // Same ladder — restore logical range (stable across value-only setData).
+    restoreVisibleStrikeRange(handle, prevTimeRange, prevLogical)
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * PROFILE — BaselineSeries + light display MA (strike X, Net GEX Y)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+function ProfileLwcChart({
   data,
-  dimensions,
-  gradientIdPrefix,
-  hovered,
-  layout,
-  mode,
-  setHovered,
   spot,
-  titleOverride,
+  dataWindowPct,
+  onDataWindowPctChange,
+  title,
+  header,
+  titleAccessory,
+  minHeight,
+  useOtcPalette,
 }: {
   data: ChartDatum[]
-  dimensions: ChartDimensions
-  gradientIdPrefix: string
-  hovered: HoverState | null
-  layout: AreaChartLayout
-  mode: 'abs' | 'profile'
-  setHovered: (hovered: HoverState | null) => void
   spot: number
-  titleOverride?: string
+  dataWindowPct: number | 'full'
+  onDataWindowPctChange?: (pct: number) => void
+  title: string
+  header?: ReactNode
+  titleAccessory?: ReactNode
+  minHeight: number
+  useOtcPalette: boolean
 }) {
-  const isAbsMode = mode === 'abs'
-  const chartRight = dimensions.margin.left + layout.innerWidth
-  const chartBottom = dimensions.margin.top + layout.innerHeight
-  const callAreaPath = isAbsMode
-    ? getAreaPath(layout.data, layout.xScale, layout.yScale, (datum) => Math.abs(datum.callGexUsd))
-    : null
-  const putAreaPath = isAbsMode
-    ? getAreaPath(layout.data, layout.xScale, layout.yScale, (datum) => Math.abs(datum.putGexUsd))
-    : null
-  const callLinePath = isAbsMode
-    ? getLinePath(layout.data, layout.xScale, layout.yScale, (datum) => Math.abs(datum.callGexUsd))
-    : null
-  const putLinePath = isAbsMode
-    ? getLinePath(layout.data, layout.xScale, layout.yScale, (datum) => Math.abs(datum.putGexUsd))
-    : null
-  const positiveAreaPath = isAbsMode
-    ? null
-    : getSignedAreaPath(layout.profileData, layout.xScale, layout.yScale, (datum) => datum.netGexUsd >= 0)
-  const negativeAreaPath = isAbsMode
-    ? null
-    : getSignedAreaPath(layout.profileData, layout.xScale, layout.yScale, (datum) => datum.netGexUsd <= 0)
-  const positiveLinePath = isAbsMode
-    ? null
-    : getSignedLinePath(layout.profileData, layout.xScale, layout.yScale, (datum) => datum.netGexUsd >= 0)
-  const negativeLinePath = isAbsMode
-    ? null
-    : getSignedLinePath(layout.profileData, layout.xScale, layout.yScale, (datum) => datum.netGexUsd <= 0)
-  const hoveredDatum = hovered && layout.data.length > 0 ? getClosestDatumByStrike(layout.data, hovered.datum.strike) : null
-  const hoverX = hoveredDatum ? layout.xScale(hoveredDatum.strike) : null
-  const spotLabelX = getClampedLabelX(layout.spotX, dimensions.margin.left + areaSpotLabelWidth / 2, chartRight - areaSpotLabelWidth / 2)
-  const spotLabelY = dimensions.margin.top + 13
-  const spotGuideTop = spotLabelY - areaSpotLabelHeight / 2
-  const areaLevelLabelYById = getAreaGlyphLabelYById(layout.levelMarkers, dimensions, spotLabelX)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const hostRef = useRef<HTMLDivElement>(null)
+  const handleRef = useRef<ProfileHandle | null>(null)
+  const dataRef = useRef(data)
+  const spotRef = useRef(spot)
+  const dataWindowPctRef = useRef(dataWindowPct)
+  const colorsRef = useRef<GexSeriesColors>(readGexSeriesColors())
 
-  return (
-    <>
-      <svg
-        width="100%"
-        height={dimensions.height}
-        viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
-        role="img"
-        aria-label={isAbsMode ? 'BTC absolute call and put gamma exposure by strike' : 'BTC net gamma exposure profile by strike'}
-        className="block"
-        onMouseLeave={() => setHovered(null)}
-      >
-        <defs>
-          <linearGradient id={`${gradientIdPrefix}-chart-panel-fill`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--chart-panel-fill-top)" />
-            <stop offset="55%" stopColor="var(--chart-panel-fill-mid)" />
-            <stop offset="100%" stopColor="var(--chart-panel-fill-bottom)" />
-          </linearGradient>
-          <linearGradient id={`${gradientIdPrefix}-abs-call-area-fill`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--chart-positive-edge)" stopOpacity="0.68" />
-            <stop offset="100%" stopColor="var(--chart-positive)" stopOpacity="0.08" />
-          </linearGradient>
-          <linearGradient id={`${gradientIdPrefix}-abs-put-area-fill`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--chart-negative-edge)" stopOpacity="0.64" />
-            <stop offset="100%" stopColor="var(--chart-negative)" stopOpacity="0.07" />
-          </linearGradient>
-          <linearGradient id={`${gradientIdPrefix}-profile-positive-area-fill`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--chart-positive-edge)" stopOpacity="0.7" />
-            <stop offset="100%" stopColor="var(--chart-positive)" stopOpacity="0.12" />
-          </linearGradient>
-          <linearGradient id={`${gradientIdPrefix}-profile-negative-area-fill`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--chart-negative)" stopOpacity="0.12" />
-            <stop offset="100%" stopColor="var(--chart-negative-edge)" stopOpacity="0.68" />
-          </linearGradient>
-        </defs>
-
-        <rect width={dimensions.width} height={dimensions.height} fill={`url(#${gradientIdPrefix}-chart-panel-fill)`} />
-        <rect
-          x={dimensions.margin.left}
-          y={dimensions.margin.top}
-          width={layout.innerWidth}
-          height={layout.innerHeight}
-          fill="var(--terminal-surface)"
-          opacity="0.14"
-        />
-
-        <text x={22} y={29} fill="var(--terminal-heading)" fontSize={14} fontWeight={700} letterSpacing={1.4}>
-          {titleOverride ?? getGexChartTitle(mode)}
-        </text>
-
-        {layout.yTicks.map((tick) => {
-          const y = layout.yScale(tick)
-          const isZero = Math.abs(tick) < 1e-9
-
-          return (
-            <g key={`y-${tick}`}>
-              <line
-                x1={dimensions.margin.left}
-                x2={chartRight}
-                y1={y}
-                y2={y}
-                stroke={isZero ? 'var(--terminal-heading)' : 'var(--terminal-grid)'}
-                strokeDasharray={isZero ? undefined : '2 6'}
-                strokeOpacity={isZero ? 0.78 : 1}
-                strokeWidth={isZero ? 1.25 : 1}
-              />
-              <text
-                x={dimensions.margin.left - 10}
-                y={y + 4}
-                textAnchor="end"
-                fill="var(--terminal-muted)"
-                fontSize={11}
-                fontFamily="var(--font-mono)"
-              >
-                {formatAxisMillions(tick)}
-              </text>
-            </g>
-          )
-        })}
-
-        {layout.xTicks.map((tick) => {
-          const x = layout.xScale(tick)
-          const levelMarker = getLevelMarkerAtStrike(layout.axisMarkers, tick)
-
-          return (
-            <g key={`x-${tick}`}>
-              <text
-                x={x}
-                y={dimensions.height - 34}
-                textAnchor="middle"
-                fill={levelMarker?.color ?? 'var(--terminal-muted)'}
-                fontSize={11}
-                fontFamily="var(--font-mono)"
-                fontWeight={levelMarker ? 700 : 400}
-              >
-                {formatStrike(tick)}
-              </text>
-            </g>
-          )
-        })}
-
-        {data.length > 0 && isAbsMode ? (
-          <g pointerEvents="none">
-            {callAreaPath ? <path d={callAreaPath} fill={`url(#${gradientIdPrefix}-abs-call-area-fill)`} /> : null}
-            {putAreaPath ? <path d={putAreaPath} fill={`url(#${gradientIdPrefix}-abs-put-area-fill)`} /> : null}
-            {callLinePath ? (
-              <path d={callLinePath} fill="none" stroke="var(--chart-positive-edge)" strokeLinecap="round" strokeWidth={1.6} />
-            ) : null}
-            {putLinePath ? (
-              <path d={putLinePath} fill="none" stroke="var(--chart-negative-edge)" strokeLinecap="round" strokeWidth={1.6} />
-            ) : null}
-          </g>
-        ) : null}
-
-        {data.length > 0 && !isAbsMode ? (
-          <g pointerEvents="none">
-            {positiveAreaPath ? <path d={positiveAreaPath} fill={`url(#${gradientIdPrefix}-profile-positive-area-fill)`} /> : null}
-            {negativeAreaPath ? <path d={negativeAreaPath} fill={`url(#${gradientIdPrefix}-profile-negative-area-fill)`} /> : null}
-            {positiveLinePath ? (
-              <path d={positiveLinePath} fill="none" stroke="var(--chart-positive-edge)" strokeLinecap="round" strokeWidth={1.6} />
-            ) : null}
-            {negativeLinePath ? (
-              <path d={negativeLinePath} fill="none" stroke="var(--chart-negative-edge)" strokeLinecap="round" strokeWidth={1.6} />
-            ) : null}
-          </g>
-        ) : null}
-
-        <line
-          x1={layout.spotX}
-          x2={layout.spotX}
-          y1={spotGuideTop}
-          y2={chartBottom}
-          stroke="var(--terminal-heading)"
-          strokeWidth={1}
-          strokeDasharray="4 6"
-          strokeOpacity="0.58"
-        />
-
-        {layout.levelMarkers.map((marker) => (
-          <AreaLevelMarker
-            key={marker.id}
-            marker={marker}
-            chartBottom={chartBottom}
-            chartTop={dimensions.margin.top}
-            dimensions={dimensions}
-            labelY={areaLevelLabelYById.get(marker.id) ?? dimensions.margin.top + 13}
-          />
-        ))}
-
-        <g transform={`translate(${spotLabelX} ${spotLabelY})`}>
-          <rect
-            x={-areaSpotLabelWidth / 2}
-            y={-areaSpotLabelHeight / 2}
-            width={areaSpotLabelWidth}
-            height={areaSpotLabelHeight}
-            rx="2"
-            fill="var(--terminal-surface)"
-            stroke="var(--terminal-border-strong)"
-          />
-          <text
-            x="0"
-            y="1"
-            fill="var(--terminal-heading)"
-            fontSize={9.5}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontFamily="var(--font-mono)"
-            fontWeight={600}
-          >
-            Spot {formatStrike(spot)}
-          </text>
-        </g>
-
-        {hoveredDatum && hoverX !== null ? (
-          <g pointerEvents="none">
-            <line
-              x1={hoverX}
-              x2={hoverX}
-              y1={dimensions.margin.top}
-              y2={chartBottom}
-              stroke="var(--terminal-heading)"
-              strokeOpacity="0.34"
-              strokeWidth={1}
-            />
-            {isAbsMode ? (
-              <>
-                <circle cx={hoverX} cy={layout.yScale(Math.abs(hoveredDatum.callGexUsd))} r={3.5} fill="var(--chart-positive-edge)" />
-                <circle cx={hoverX} cy={layout.yScale(Math.abs(hoveredDatum.putGexUsd))} r={3.5} fill="var(--chart-negative-edge)" />
-              </>
-            ) : (
-              <circle
-                cx={hoverX}
-                cy={layout.yScale(hoveredDatum.netGexUsd)}
-                r={3.5}
-                fill={hoveredDatum.netGexUsd >= 0 ? 'var(--chart-positive-edge)' : 'var(--chart-negative-edge)'}
-              />
-            )}
-          </g>
-        ) : null}
-
-        {data.length === 0 ? (
-          <text
-            x={dimensions.margin.left + layout.innerWidth / 2}
-            y={dimensions.margin.top + layout.innerHeight / 2}
-            textAnchor="middle"
-            fill="var(--terminal-muted)"
-            fontSize={12}
-          >
-            No chart data available
-          </text>
-        ) : null}
-
-        <rect
-          x={dimensions.margin.left}
-          y={dimensions.margin.top}
-          width={layout.innerWidth}
-          height={layout.innerHeight}
-          fill="transparent"
-          onMouseMove={(event) => handleAreaMouseMove(event, layout, dimensions, mode, setHovered)}
-          onMouseLeave={() => setHovered(null)}
-        />
-
-        <text
-          x={dimensions.margin.left + layout.innerWidth / 2}
-          y={dimensions.height - 12}
-          textAnchor="middle"
-          fill="var(--terminal-muted)"
-          fontSize={10.5}
-          letterSpacing={1.2}
-        >
-          STRIKE (USD)
-        </text>
-        <text
-          x={areaYAxisLabelX}
-          y={dimensions.margin.top + layout.innerHeight / 2}
-          textAnchor="middle"
-          fill="var(--terminal-muted)"
-          fontSize={10.5}
-          letterSpacing={1.2}
-          transform={`rotate(-90 ${areaYAxisLabelX} ${dimensions.margin.top + layout.innerHeight / 2})`}
-        >
-          GAMMA EXPOSURE (USD)
-        </text>
-
-      </svg>
-
-      {hoveredDatum && hovered ? (
-        <div
-          className="pointer-events-none absolute z-10 min-w-44 rounded-[var(--terminal-radius-sm)] border border-[var(--terminal-border-strong)] bg-[var(--terminal-surface)]/95 px-3 py-2 text-left text-[11px] text-[var(--terminal-text)] shadow-2xl backdrop-blur"
-          style={{
-            left: `${hovered.xPct}%`,
-            top: `${hovered.yPct}%`,
-            transform: getTooltipTransform(hovered.side),
-          }}
-        >
-          <div className="mb-1 text-[var(--terminal-heading)]">Strike {formatStrike(hoveredDatum.strike)}</div>
-          {isAbsMode ? (
-            <>
-              <div className="terminal-value text-[var(--terminal-green-strong)]">
-                Call ABS {formatMillions(Math.abs(hoveredDatum.callGexUsd))}
-              </div>
-              <div className="terminal-value text-[var(--terminal-red-strong)]">
-                Put ABS {formatMillions(Math.abs(hoveredDatum.putGexUsd))}
-              </div>
-              <div className={hoveredDatum.netGexUsd >= 0 ? 'terminal-value mt-1 text-[var(--terminal-green)]' : 'terminal-value mt-1 text-[var(--terminal-red)]'}>
-                Net {formatMillions(hoveredDatum.netGexUsd)}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className={hoveredDatum.netGexUsd >= 0 ? 'terminal-value text-[var(--terminal-green-strong)]' : 'terminal-value text-[var(--terminal-red-strong)]'}>
-                Net GEX {formatMillions(hoveredDatum.netGexUsd)}
-              </div>
-              <div className="terminal-value mt-1 text-[var(--terminal-green)]">Calls {formatMillions(hoveredDatum.callGexUsd)}</div>
-              <div className="terminal-value text-[var(--terminal-red)]">Puts {formatMillions(hoveredDatum.putGexUsd)}</div>
-            </>
-          )}
-        </div>
-      ) : null}
-    </>
-  )
-}
-
-function BarLevelMarker({
-  marker,
-  chartLeft,
-  spotLabelX,
-  labelY,
-  markerScale,
-  spotY,
-}: {
-  marker: PositionedBarLevelMarker
-  chartLeft: number
-  spotLabelX: number
-  labelY: number
-  markerScale: number
-  spotY: number
-}) {
-  const glyphs = getLevelMarkerComponents(marker)
-  const labelWidth = getGlyphGroupWidth(glyphs.length, markerScale)
-  const labelHeight = getGlyphGroupHeight(markerScale)
-  const glowFilter = getLevelMarkerGlowFilter(marker.color)
-  const labelRightX = spotLabelX + barSpotLabelWidth
-  const overlapsSpotLabel = Math.abs(labelY - spotY) <= barLevelLabelSpotThreshold * markerScale
-  const labelX = overlapsSpotLabel
-    ? spotLabelX - labelWidth - barLevelLabelSpotGap
-    : labelRightX - labelWidth
-
-  return (
-    <g pointerEvents="none">
-      <rect
-        x={chartLeft}
-        y={marker.y - levelHighlightBandSize / 2}
-        width={labelRightX - chartLeft}
-        height={levelHighlightBandSize}
-        fill={marker.color}
-        opacity={glyphs.length > 1 ? '0.052' : '0.067'}
-        style={{ filter: glowFilter }}
-      />
-      <g transform={`translate(${labelX} ${labelY})`}>
-        <rect
-          x="0"
-          y={-labelHeight / 2}
-          width={labelWidth}
-          height={labelHeight}
-          rx="2"
-          fill="var(--terminal-surface)"
-          stroke={marker.color}
-          strokeOpacity={glyphs.length > 1 ? '0.54' : '0.68'}
-        />
-        <LevelMarkerGlyphGroup glow scale={markerScale} glyphs={glyphs} x={labelWidth / 2} y={0} />
-      </g>
-    </g>
-  )
-}
-
-function YAxisStrikeLabel({
-  highlighted,
-  marker,
-  strike,
-  x,
-  y,
-}: {
-  highlighted: boolean
-  marker?: PositionedBarLevelMarker
-  strike: number
-  x: number
-  y: number
-}) {
-  const fill = marker?.color ?? (highlighted ? 'var(--terminal-heading)' : 'var(--terminal-muted)')
-  const fontWeight = marker || highlighted ? 700 : 400
-
-  return (
-    <g pointerEvents="none">
-      <text
-        x={x}
-        y={y + 4}
-        textAnchor="middle"
-        fill={fill}
-        fontSize={11.5}
-        fontWeight={fontWeight}
-        fontFamily="var(--font-mono)"
-      >
-        {formatStrike(strike)}
-      </text>
-    </g>
-  )
-}
-
-function getBarLevelAxisLabels(markers: PositionedBarLevelMarker[], axisTicks: StrikeAxisTick[]) {
-  const tickClearance = 13
-  const labelClearance = 14
-  const sortedMarkers = [...markers]
-    .filter((marker) => !axisTicks.some((tick) => tick.strike === marker.strike))
-    .sort((a, b) => a.y - b.y)
-  const labels: PositionedBarLevelMarker[] = []
-
-  for (const marker of sortedMarkers) {
-    const overlapsAxisTick = axisTicks.some((tick) => Math.abs(tick.y - marker.y) < tickClearance)
-    const overlapsLevelLabel = labels.some((label) => Math.abs(label.y - marker.y) < labelClearance)
-
-    if (!overlapsAxisTick && !overlapsLevelLabel) {
-      labels.push(marker)
-    }
-  }
-
-  return labels
-}
-
-function AreaLevelMarker({
-  marker,
-  chartBottom,
-  chartTop,
-  dimensions,
-  labelY,
-}: {
-  marker: PositionedAreaLevelMarker
-  chartBottom: number
-  chartTop: number
-  dimensions: ChartDimensions
-  labelY: number
-}) {
-  const chartRight = dimensions.width - dimensions.margin.right
-  const glyphs = getLevelMarkerComponents(marker)
-  const labelWidth = getGlyphGroupWidth(glyphs.length)
-  const labelHeight = 22
-  const glowFilter = getLevelMarkerGlowFilter(marker.color)
-  const labelX = getClampedLabelX(marker.x, dimensions.margin.left + labelWidth / 2, chartRight - labelWidth / 2)
-
-  return (
-    <g pointerEvents="none">
-      <rect
-        x={marker.x - levelHighlightBandSize / 2}
-        y={chartTop}
-        width={levelHighlightBandSize}
-        height={chartBottom - chartTop}
-        fill={marker.color}
-        opacity={glyphs.length > 1 ? '0.052' : '0.067'}
-        style={{ filter: glowFilter }}
-      />
-      <g transform={`translate(${labelX} ${labelY})`}>
-        <rect
-          x={-labelWidth / 2}
-          y="-11"
-          width={labelWidth}
-          height={labelHeight}
-          rx="2"
-          fill="var(--terminal-surface)"
-          stroke={marker.color}
-          strokeOpacity={glyphs.length > 1 ? '0.54' : '0.68'}
-        />
-        <LevelMarkerGlyphGroup glow glyphs={glyphs} x={0} y={0} />
-      </g>
-    </g>
-  )
-}
-
-function getLevelMarkerComponents(marker: GexLevelMarker) {
-  return marker.components ?? [marker]
-}
-
-function getGlyphGroupWidth(glyphCount: number, scale = 1) {
-  return (20 + Math.max(0, glyphCount - 1) * 15) * scale
-}
-
-function getGlyphGroupHeight(scale = 1) {
-  return 22 * scale
-}
-
-function LevelMarkerGlyphGroup({
-  glow = false,
-  glyphs,
-  scale = 1,
-  x,
-  y,
-}: {
-  glow?: boolean
-  glyphs: GexLevelMarker[]
-  scale?: number
-  x: number
-  y: number
-}) {
-  const gap = 15 * scale
-  const startX = x - ((glyphs.length - 1) * gap) / 2
-
-  return (
-    <>
-      {glyphs.map((glyph, index) => {
-        const glyphX = startX + index * gap
-
-        return (
-          <g key={glyph.id}>
-            <g
-              transform={`translate(${glyphX} ${y}) scale(${scale})`}
-              style={glow ? { filter: getLevelMarkerGlowFilter(glyph.color) } : undefined}
-            >
-              <LevelMarkerGlyph x={0} y={0} color={glyph.color} variant={glyph.glyph} />
-            </g>
-          </g>
-        )
-      })}
-    </>
-  )
-}
-
-function getLevelMarkerGlowFilter(color: string) {
-  return `drop-shadow(0 0 3px color-mix(in srgb, ${color} 50%, transparent)) drop-shadow(0 0 8px color-mix(in srgb, ${color} 18%, transparent))`
-}
-
-function LevelMarkerGlyph({
-  x,
-  y,
-  color,
-  variant = 'diamond',
-}: {
-  x: number
-  y: number
-  color: string
-  variant?: LevelMarkerGlyphVariant
-}) {
-  if (variant === 'chevronUp' || variant === 'chevronDown') {
-    const direction = variant === 'chevronUp' ? 1 : -1
-
-    return (
-      <path
-        d={`M ${x - 4} ${y + direction * 2.5} L ${x} ${y - direction * 2.5} L ${x + 4} ${y + direction * 2.5}`}
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.7}
-      />
-    )
-  }
-
-  if (variant === 'crosshair') {
-    return (
-      <g>
-        <line x1={x} x2={x} y1={y - 6} y2={y + 6} stroke={color} strokeOpacity={0.8} strokeWidth={1} />
-        <line x1={x - 6} x2={x + 6} y1={y} y2={y} stroke={color} strokeOpacity={0.8} strokeWidth={1} />
-        <rect
-          x={x - 3}
-          y={y - 3}
-          width={6}
-          height={6}
-          rx={1.5}
-          fill="var(--terminal-surface)"
-          stroke={color}
-          strokeWidth={1}
-        />
-      </g>
-    )
-  }
-
-  if (variant === 'slash') {
-    return (
-      <line
-        x1={x - 4.8}
-        x2={x + 4.8}
-        y1={y + 4.4}
-        y2={y - 4.4}
-        stroke={color}
-        strokeLinecap="round"
-        strokeWidth={1.7}
-      />
-    )
-  }
-
-  if (variant === 'bracket') {
-    return (
-      <g>
-        <rect x={x - 4.8} y={y - 5} width={2.4} height={10} rx={0.5} fill={color} />
-        <rect x={x + 2.4} y={y - 5} width={2.4} height={10} rx={0.5} fill={color} fillOpacity={0.62} />
-        <line x1={x - 2.4} x2={x + 2.4} y1={y - 3.6} y2={y - 3.6} stroke={color} strokeOpacity={0.68} strokeWidth={1} />
-      </g>
-    )
-  }
-
-  if (variant === 'flipZone') {
-    return (
-      <g>
-        <path
-          d={`M ${x - 5.2} ${y} L ${x - 1.3} ${y - 3.9} M ${x - 5.2} ${y} L ${x - 1.3} ${y + 3.9}`}
-          fill="none"
-          stroke={color}
-          strokeLinecap="round"
-          strokeWidth={1.5}
-        />
-        <path
-          d={`M ${x + 5.2} ${y} L ${x + 1.3} ${y - 3.9} M ${x + 5.2} ${y} L ${x + 1.3} ${y + 3.9}`}
-          fill="none"
-          stroke={color}
-          strokeLinecap="round"
-          strokeOpacity={0.78}
-          strokeWidth={1.5}
-        />
-      </g>
-    )
-  }
-
-  return (
-    <rect
-      x={x - 3.6}
-      y={y - 3.6}
-      width={7.2}
-      height={7.2}
-      fill={color}
-      fillOpacity={0.16}
-      stroke={color}
-      strokeWidth={1}
-      transform={`rotate(45 ${x} ${y})`}
-    />
-  )
-}
-
-function getLevelMarkerScale(positions: number[], dataWindowPct: number | 'full') {
-  const viewScale = getLevelMarkerViewScale(dataWindowPct)
-  if (positions.length < 2) {
-    return viewScale
-  }
-
-  const sortedPositions = [...positions].sort((a, b) => a - b)
-  const closestGap = sortedPositions.reduce((closest, position, index) => {
-    if (index === 0) {
-      return closest
-    }
-
-    return Math.min(closest, position - sortedPositions[index - 1])
-  }, Number.POSITIVE_INFINITY)
-  const collisionScale = closestGap < 24 ? clamp(closestGap / 24, 0.72, 1) : 1
-
-  return Math.min(viewScale, collisionScale)
-}
-
-function getLevelMarkerViewScale(dataWindowPct: number | 'full') {
-  if (dataWindowPct === 'full') return 0.78
-  if (dataWindowPct >= 80) return 0.78
-  if (dataWindowPct >= 55) return 0.84
-  if (dataWindowPct >= 35) return 0.9
-  if (dataWindowPct >= 22) return 0.96
-
-  return 1
-}
-
-function getBarLevelLabelYById(
-  markers: PositionedBarLevelMarker[],
-  chartTop: number,
-  chartBottom: number,
-  markerScale: number,
-) {
-  const labelGap = 24 * markerScale
-  const labelPadding = 12 * markerScale
-  const sortedMarkers = [...markers].sort((a, b) => a.y - b.y)
-  const labelRows = sortedMarkers.map((marker) => ({
-    id: marker.id,
-    y: clamp(marker.y, chartTop + labelPadding, chartBottom - labelPadding),
-  }))
-
-  for (let index = 1; index < labelRows.length; index += 1) {
-    labelRows[index].y = Math.max(labelRows[index].y, labelRows[index - 1].y + labelGap)
-  }
-
-  const overflow = labelRows.at(-1) ? labelRows[labelRows.length - 1].y - (chartBottom - labelPadding) : 0
-  if (overflow > 0) {
-    for (const row of labelRows) {
-      row.y -= overflow
-    }
-  }
-
-  for (let index = labelRows.length - 2; index >= 0; index -= 1) {
-    labelRows[index].y = Math.min(labelRows[index].y, labelRows[index + 1].y - labelGap)
-  }
-
-  const underflow = labelRows[0] ? (chartTop + labelPadding) - labelRows[0].y : 0
-  if (underflow > 0) {
-    for (const row of labelRows) {
-      row.y += underflow
-    }
-  }
-
-  return new Map(labelRows.map((row) => [row.id, row.y]))
-}
-
-function getAreaGlyphLabelYById(markers: PositionedAreaLevelMarker[], dimensions: ChartDimensions, spotLabelX: number) {
-  const gap = 8
-  const defaultY = dimensions.margin.top + 13
-  const collisionY = dimensions.margin.top + 39
-  const chartRight = dimensions.width - dimensions.margin.right
-  const spotLeft = spotLabelX - areaSpotLabelWidth / 2 - gap
-  const spotRight = spotLabelX + areaSpotLabelWidth / 2 + gap
-
-  return new Map(markers.map((marker) => {
-    const labelWidth = getGlyphGroupWidth(getLevelMarkerComponents(marker).length)
-    const labelX = getClampedLabelX(marker.x, dimensions.margin.left + labelWidth / 2, chartRight - labelWidth / 2)
-    const labelLeft = labelX - labelWidth / 2
-    const labelRight = labelX + labelWidth / 2
-    const overlapsSpot = labelLeft <= spotRight && labelRight >= spotLeft
-
-    return [marker.id, overlapsSpot ? collisionY : defaultY]
-  }))
-}
-
-function useContainerSize(
-  ref: React.RefObject<HTMLDivElement | null>,
-  fallbackWidth: number,
-  fallbackHeight: number,
-  minHeight: number,
-) {
-  const [size, setSize] = useState({ width: fallbackWidth, height: fallbackHeight })
+  const [error, setError] = useState<string | null>(null)
+  const [hovered, setHovered] = useState<HoverState | null>(null)
+  const [spotOverlay, setSpotOverlay] = useState<SpotOverlay>({
+    pos: 0,
+    visible: false,
+  })
+  const [wallCallouts, setWallCallouts] = useState<WallCallout[]>([])
 
   useEffect(() => {
-    const element = ref.current
-    if (!element) {
-      return
+    dataRef.current = data
+    spotRef.current = spot
+    dataWindowPctRef.current = dataWindowPct
+  }, [data, spot, dataWindowPct])
+
+  useDataWindowWheelZoom(wrapRef, dataWindowPct, onDataWindowPctChange)
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+
+    let disposed = false
+    let raf = 0
+    let spotRaf = 0
+    let ro: ResizeObserver | null = null
+    let handle: ProfileHandle | null = null
+    let themeObserver: MutationObserver | null = null
+
+    const colors = readGexSeriesColors(host)
+    colorsRef.current = colors
+
+    const refreshOverlays = () => {
+      if (disposed || !handle) return
+      const strikes = handle.seriesStrikes.length > 0
+        ? handle.seriesStrikes
+        : dataRef.current.map((d) => d.strike)
+      const x = spotToCoordinate(handle.chart, strikes, spotRef.current)
+      if (x == null || !Number.isFinite(x)) {
+        setSpotOverlay((prev) => (prev.visible ? { pos: 0, visible: false } : prev))
+      } else {
+        setSpotOverlay((prev) => (
+          prev.visible && Math.abs(prev.pos - x) < 0.5
+            ? prev
+            : { pos: x, visible: true }
+        ))
+      }
+      if (SHOW_WALL_CALLOUTS) {
+        setWallCallouts(computeWallCallouts(handle.chart, handle.series, dataRef.current))
+      }
     }
 
-    const updateSize = () => {
-      const elementBounds = element.getBoundingClientRect()
-      const elementWidth = elementBounds.width
-      const elementHeight = elementBounds.height
-      const parentWidth = element.parentElement?.getBoundingClientRect().width ?? 0
-      const parentHeight = element.parentElement?.getBoundingClientRect().height ?? 0
+    const scheduleOverlays = () => {
+      if (spotRaf) cancelAnimationFrame(spotRaf)
+      spotRaf = requestAnimationFrame(refreshOverlays)
+    }
 
-      setSize({
-        width: Math.max(minChartWidth, Math.floor(Math.max(elementWidth, parentWidth))),
-        height: Math.max(minHeight, Math.floor(Math.max(elementHeight, parentHeight))),
+    const onCrosshair = (param: MouseEventParams<number>) => {
+      if (disposed || !handle || !wrapRef.current) return
+      if (!param.point || param.time === undefined || param.point.x < 0 || param.point.y < 0) {
+        setHovered(null)
+        return
+      }
+      const strike = typeof param.time === 'number' ? param.time : Number(param.time)
+      if (!Number.isFinite(strike)) {
+        setHovered(null)
+        return
+      }
+      const datum = findNearestDatum(dataRef.current, strike)
+      if (!datum) {
+        setHovered(null)
+        return
+      }
+      const rect = wrapRef.current.getBoundingClientRect()
+      const w = Math.max(rect.width, 1)
+      const h = Math.max(rect.height, 1)
+      const xPct = (param.point.x / w) * 100
+      const yPct = (param.point.y / h) * 100
+      setHovered({
+        datum,
+        xPct,
+        yPct,
+        side: xPct > 62 ? 'left' : 'right',
       })
     }
-    updateSize()
 
-    const observer = new ResizeObserver(updateSize)
-    observer.observe(element)
-    if (element.parentElement) {
-      observer.observe(element.parentElement)
+    try {
+      host.replaceChildren()
+      const { w, h } = measure(host)
+
+      const chart = createGexOptionsChart(host, buildGexChartOptions(w, h, colors))
+
+      // Mutable bag read by autoscaleInfoProvider (set before each setData).
+      const displayValuesRef = { current: [] as number[] }
+      // Expand-only Y lock (same as strike chart — kills vertical refresh jitter).
+      let yRangeLock: { min: number; max: number } | null = null
+
+      const series = chart.addSeries(BaselineSeries, {
+        baseValue: { type: 'price', price: 0 },
+        topLineColor: colors.positiveEdge,
+        bottomLineColor: colors.negativeEdge,
+        topFillColor1: colors.positiveSoft,
+        topFillColor2: colors.positiveSofter,
+        bottomFillColor1: colors.negativeSofter,
+        bottomFillColor2: colors.negativeSoft,
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 3,
+        crosshairMarkerBorderWidth: 0,
+        // Real Y buffer relative to the *visible* series range.
+        // scaleMargins only inset the pane; this expands the price domain so a
+        // trough at -1.8M / peak at +1.4M lands near -2.5M / +2.1M axis ends.
+        autoscaleInfoProvider: (
+          original: () => { priceRange: { minValue: number; maxValue: number } | null } | null,
+        ) => {
+          const base = original()
+          let min = 0
+          let max = 0
+          if (base?.priceRange) {
+            min = Math.min(base.priceRange.minValue, 0)
+            max = Math.max(base.priceRange.maxValue, 0)
+          } else {
+            const vals = displayValuesRef.current
+            if (vals.length === 0) return base
+            for (const v of vals) {
+              if (!Number.isFinite(v)) continue
+              if (v < min) min = v
+              if (v > max) max = v
+            }
+          }
+          const span = Math.max(max - min, Math.abs(min), Math.abs(max), 1)
+          const pad = span * 0.28
+          let minV = min - pad
+          let maxV = max + pad
+          if (yRangeLock) {
+            minV = Math.min(yRangeLock.min, minV)
+            maxV = Math.max(yRangeLock.max, maxV)
+          }
+          yRangeLock = { min: minV, max: maxV }
+          return {
+            priceRange: {
+              minValue: minV,
+              maxValue: maxV,
+            },
+          }
+        },
+        priceFormat: {
+          type: 'custom',
+          minMove: 1,
+          formatter: (price: number) => formatAxisMillions(price),
+        },
+      })
+
+      const zeroLine = series.createPriceLine({
+        price: 0,
+        color: colors.zero,
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: false,
+        title: '',
+      })
+
+      const nextHandle: ProfileHandle = {
+        chart,
+        series,
+        zeroLine,
+        strikeKey: '',
+        windowKey: '',
+        dataSig: '',
+        displayValues: [],
+        seriesStrikes: [],
+        trimLoStrike: null,
+        trimHiStrike: null,
+        hasInitialFit: false,
+        userAdjustedRange: false,
+        programmaticRange: false,
+      }
+      // Bridge handle.displayValues → provider ref
+      const syncDisplayValues = (vals: number[]) => {
+        nextHandle.displayValues = vals
+        displayValuesRef.current = vals
+      }
+      handle = nextHandle
+      handleRef.current = nextHandle
+
+      applyProfileData(nextHandle, dataRef.current, {
+        fit: true,
+        spot: spotRef.current,
+        dataWindowPct: dataWindowPctRef.current,
+        syncDisplayValues,
+      })
+      // Ensure price scale re-reads padded range after first data.
+      try {
+        chart.priceScale('right').applyOptions({ autoScale: true, scaleMargins: { top: 0.06, bottom: 0.06 } })
+      } catch {
+        // ignore
+      }
+      scheduleOverlays()
+
+      chart.subscribeCrosshairMove(onCrosshair)
+      chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        if (handle && !handle.programmaticRange) {
+          handle.userAdjustedRange = true
+        }
+        scheduleOverlays()
+      })
+
+      const onDblClick = (ev: MouseEvent) => {
+        const h = handle
+        if (disposed || !h) return
+        ev.preventDefault()
+        h.userAdjustedRange = false
+        yRangeLock = null
+        applyProgrammaticRange(h, () => {
+          fitStrikeContent(
+            h.chart,
+            h.seriesStrikes,
+            spotRef.current,
+            dataWindowPctRef.current,
+          )
+        })
+        try {
+          chart.priceScale('right').applyOptions({ autoScale: true })
+        } catch {
+          // ignore
+        }
+        scheduleOverlays()
+      }
+      host.addEventListener('dblclick', onDblClick)
+
+      const onWheelZoom = makeSpotAnchoredWheelHandler({
+        getHandle: () => handle,
+        getStrikes: () => handle?.seriesStrikes ?? [],
+        getSpot: () => spotRef.current,
+        onAfter: () => {
+          if (handle) handle.userAdjustedRange = true
+          scheduleOverlays()
+        },
+        disposed: () => disposed,
+      })
+      host.addEventListener('wheel', onWheelZoom, { passive: false })
+
+      const syncSize = () => {
+        if (disposed || !handle) return
+        const next = measure(host)
+        handle.chart.resize(next.w, next.h, true)
+        scheduleOverlays()
+      }
+
+      ro = new ResizeObserver(() => {
+        if (raf) cancelAnimationFrame(raf)
+        raf = requestAnimationFrame(syncSize)
+      })
+      ro.observe(host)
+
+      themeObserver = new MutationObserver(() => {
+        if (disposed || !handle) return
+        const nextColors = readGexSeriesColors(host)
+        colorsRef.current = nextColors
+        try {
+          handle.zeroLine?.applyOptions({ color: nextColors.zero })
+          handle.series.applyOptions({
+            topLineColor: nextColors.positiveEdge,
+            bottomLineColor: nextColors.negativeEdge,
+            topFillColor1: nextColors.positiveSoft,
+            topFillColor2: nextColors.positiveSofter,
+            bottomFillColor1: nextColors.negativeSofter,
+            bottomFillColor2: nextColors.negativeSoft,
+          })
+          scheduleOverlays()
+        } catch {
+          // ignore
+        }
+      })
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme', 'class'],
+      })
+
+      raf = requestAnimationFrame(() => {
+        syncSize()
+        // Do not re-fit — applyProfileData(fit:true) already set the camera.
+        scheduleOverlays()
+      })
+
+      queueMicrotask(() => {
+        if (!disposed) setError(null)
+      })
+
+      return () => {
+        disposed = true
+        if (raf) cancelAnimationFrame(raf)
+        if (spotRaf) cancelAnimationFrame(spotRaf)
+        ro?.disconnect()
+        themeObserver?.disconnect()
+        host.removeEventListener('dblclick', onDblClick)
+        host.removeEventListener('wheel', onWheelZoom)
+        try {
+          handle?.chart.unsubscribeCrosshairMove(onCrosshair)
+          handle?.chart.timeScale().unsubscribeVisibleLogicalRangeChange(scheduleOverlays)
+        } catch {
+          // ignore
+        }
+        handleRef.current = null
+        try {
+          handle?.chart.remove()
+        } catch {
+          // ignore
+        }
+        host.replaceChildren()
+        queueMicrotask(() => {
+          setSpotOverlay({ pos: 0, visible: false })
+          setWallCallouts([])
+          setHovered(null)
+        })
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      queueMicrotask(() => setError(msg))
+      console.error('[GexProfileChart] profile create failed', err)
+      return () => {
+        disposed = true
+      }
     }
+  }, [])
 
-    return () => observer.disconnect()
-  }, [minHeight, ref])
+  useEffect(() => {
+    const handle = handleRef.current
+    if (!handle) return
+    try {
+      applyProfileData(handle, data, {
+        spot,
+        dataWindowPct,
+        syncDisplayValues: (vals) => {
+          handle.displayValues = vals
+        },
+      })
+      // Nudge autoscale after data so padded range sticks (live ticks).
+      try {
+        handle.chart.priceScale('right').applyOptions({ autoScale: true })
+      } catch {
+        // ignore
+      }
+      const x = spotToCoordinate(handle.chart, handle.seriesStrikes, spot)
+      queueMicrotask(() => {
+        if (x == null || !Number.isFinite(x)) {
+          setSpotOverlay({ pos: 0, visible: false })
+        } else {
+          setSpotOverlay({ pos: x, visible: true })
+        }
+        if (SHOW_WALL_CALLOUTS) {
+          setWallCallouts(computeWallCallouts(handle.chart, handle.series, data))
+        }
+        setHovered(null)
+        setError(null)
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      queueMicrotask(() => setError(msg))
+    }
+  }, [data, spot, dataWindowPct])
 
-  return size
+  return (
+    <div
+      ref={wrapRef}
+      className={cn(
+        'relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden',
+        useOtcPalette && 'gex-palette-otc',
+      )}
+      style={{ minHeight: Math.min(minHeight, 120) }}
+    >
+      {header ?? (
+        <ChartTitleOverlay
+          title={title}
+          subtitle="NET GEX PROFILE"
+          titleAccessory={titleAccessory}
+        />
+      )}
+
+      <div className={cn('gex-lwc-wrap', !header && 'gex-lwc-wrap--overlay')}>
+        <div
+          ref={hostRef}
+          className="gex-lwc-canvas"
+          role="img"
+          aria-label="BTC net GEX profile by strike — strike on X axis"
+        />
+
+        {spotOverlay.visible ? (
+          <div
+            className="gex-lwc-spot gex-lwc-spot--vertical pointer-events-none absolute z-[4]"
+            style={{ left: spotOverlay.pos, top: 0, bottom: 0 }}
+            aria-hidden
+          >
+            <div className="gex-lwc-spot__glow" />
+            <div className="gex-lwc-spot__line" />
+            <div className="gex-lwc-spot__label gex-lwc-spot__label--axis">
+              <span className="gex-lwc-spot__label-tick" />
+              <span className="gex-lwc-spot__label-text">{formatStrike(spot)}</span>
+            </div>
+          </div>
+        ) : null}
+
+        {SHOW_WALL_CALLOUTS
+          ? wallCallouts.map((wall) => (
+          <div
+            key={`wall-${wall.strike}`}
+            className={cn(
+              'gex-wall-callout pointer-events-none absolute z-[3]',
+              wall.side === 'above' ? 'gex-wall-callout--above' : 'gex-wall-callout--below',
+            )}
+            style={{ left: wall.x, top: wall.y }}
+            aria-hidden
+          >
+            <span className="gex-wall-callout__strike">{formatStrike(wall.strike)}</span>
+            <span
+              className={cn(
+                'gex-wall-callout__val',
+                wall.netGexUsd >= 0 ? 'gex-wall-callout__val--pos' : 'gex-wall-callout__val--neg',
+              )}
+            >
+              {formatMillions(wall.netGexUsd)}
+            </span>
+          </div>
+            ))
+          : null}
+
+        {error ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 px-3 text-center text-[10px] text-[var(--terminal-red-strong)]">
+            Chart error: {error}
+          </div>
+        ) : null}
+
+        {data.length === 0 && !error ? (
+          <div className="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center text-[10px] uppercase tracking-[0.12em] text-[var(--terminal-muted)]">
+            No GEX data in window
+          </div>
+        ) : null}
+
+        {hovered ? (
+          <GexHoverCard
+            side={hovered.side}
+            xPct={hovered.xPct}
+            yPct={hovered.yPct}
+            model={{
+              strike: hovered.datum.strike,
+              netGexUsd: hovered.datum.netGexUsd,
+              callGexUsd: hovered.datum.callGexUsd,
+              putGexUsd: hovered.datum.putGexUsd,
+            }}
+          />
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
-function prepareChartData(snapshot: GexSnapshot, mode: GexMode, dataWindowPct: number | 'full'): ChartDatum[] {
-  const rowsInWindow = snapshot.gammaBars.filter((row) => isStrikeInDataWindow(row.strike, snapshot.spot, dataWindowPct))
-  const sourceRows = rowsInWindow.length > 0 ? rowsInWindow : snapshot.gammaBars
-  const visibleRows = mode === 'abs' || mode === 'profile' ? sourceRows : getReadableStrikeRows(sourceRows)
-  const rows = visibleRows
-    .map((row) => toChartDatum(row, mode))
-    .sort((a, b) => b.strike - a.strike)
-
-  return rows
-}
-
-function getReadableStrikeRows(rows: GexSourceRow[]) {
-  if (rows.length <= 34) {
-    return rows
+function applyProfileData(
+  handle: ProfileHandle,
+  data: ChartDatum[],
+  options?: {
+    fit?: boolean
+    spot?: number
+    dataWindowPct?: number | 'full'
+    syncDisplayValues?: (vals: number[]) => void
+  },
+) {
+  const sorted = [...data].sort((a, b) => a.strike - b.strike)
+  const deduped = trimGexLadder(dedupeByStrike(sorted), {
+    loStrike: handle.trimLoStrike,
+    hiStrike: handle.trimHiStrike,
+  })
+  if (deduped.length > 0) {
+    handle.trimLoStrike = deduped[0]!.strike
+    handle.trimHiStrike = deduped[deduped.length - 1]!.strike
   }
 
-  const halfStrikeRows = rows.filter((row) => row.strike % 500 === 0)
+  const nextStrikeKey = deduped.map((d) => d.strike).join(',')
+  const nextWindowKey = String(options?.dataWindowPct ?? 'full')
+  const windowChanged = nextWindowKey !== handle.windowKey
+  const ladderChanged = nextStrikeKey !== handle.strikeKey
+  handle.strikeKey = nextStrikeKey
+  handle.windowKey = nextWindowKey
 
-  return halfStrikeRows.length > 0 ? halfStrikeRows : rows
-}
+  /*
+   * Profile path hygiene (kills end-of-range “spaghetti”):
+   *  1. Flatten micro-noise near zero so dense ladders don’t chatter.
+   *  2. Very light 3-pt MA (radius 1) — enough to calm without inventing lobes.
+   *  3. Strictly increasing strikes only (already deduped).
+   * Tooltips still sample raw dataRef — display-only transform.
+   */
+  const raw = deduped.map((d) => d.netGexUsd)
+  const maxAbs = Math.max(1, ...raw.map((v) => Math.abs(v)))
+  // Kill wing chatter that BaselineSeries turns into end-of-range spaghetti.
+  const noiseFloor = maxAbs * 0.02
+  const cleaned = raw.map((v) => (Math.abs(v) < noiseFloor ? 0 : v))
+  const smoothed = smoothDisplaySeries(cleaned, 1)
 
-function getVisibleLevelMarkers(levelMarkers: GexLevelMarker[], data: ChartDatum[]) {
-  if (data.length === 0) {
-    return []
+  // Collapse consecutive zeros to a single point — long zero runs make Baseline
+  // fill paths self-intersect at the clip edge (the “squiggle” artifact).
+  const realPoints: SingleValueData<number>[] = []
+  const displayValues: number[] = []
+  for (let i = 0; i < deduped.length; i += 1) {
+    const v = smoothed[i] ?? cleaned[i] ?? 0
+    if (!Number.isFinite(v)) continue
+    const strike = deduped[i]!.strike
+    if (!Number.isFinite(strike)) continue
+    const prev = realPoints[realPoints.length - 1]
+    if (prev && prev.time === strike) {
+      prev.value = v
+      displayValues[displayValues.length - 1] = v
+      continue
+    }
+    // Skip redundant zeros in the middle of a zero run (keep first & last of run).
+    if (v === 0 && prev && prev.value === 0) {
+      const nextRaw = smoothed[i + 1] ?? cleaned[i + 1]
+      if (nextRaw === 0 || (nextRaw != null && Math.abs(nextRaw) < noiseFloor)) {
+        continue
+      }
+      prev.time = strike
+      prev.value = 0
+      displayValues[displayValues.length - 1] = 0
+      continue
+    }
+    realPoints.push({ time: strike, value: v })
+    displayValues.push(v)
   }
 
-  const strikes = data.map((datum) => datum.strike)
-  const minStrike = Math.min(...strikes)
-  const maxStrike = Math.max(...strikes)
+  // Axis anchors only outside the real segment — labels empty flanks without
+  // breaking the continuous profile path with mid-ladder whitespace.
+  const realStrikes = realPoints.map((p) => p.time as number)
+  let seriesStrikes = handle.seriesStrikes
+  if (ladderChanged || seriesStrikes.length === 0) {
+    seriesStrikes = extendStrikesWithAxisAnchors(realStrikes, options?.spot)
+    handle.seriesStrikes = seriesStrikes
+  }
+  const realByStrike = new Map(realPoints.map((p) => [p.time as number, p]))
+  const points: Array<SingleValueData<number> | { time: number }> = seriesStrikes.map((strike) => {
+    const real = realByStrike.get(strike)
+    if (real) return real
+    return { time: strike } // whitespace — tick only
+  })
 
-  return levelMarkers.filter((marker) => marker.strike >= minStrike && marker.strike <= maxStrike)
+  const dataSig = points
+    .map((p) => {
+      if (!('value' in p) || p.value == null) return `${p.time}:_`
+      return `${p.time}:${Math.round((p.value as number) / 1_000)}`
+    })
+    .join('|')
+
+  if (
+    dataSig === handle.dataSig
+    && !windowChanged
+    && !ladderChanged
+    && options?.fit !== true
+  ) {
+    return
+  }
+  handle.dataSig = dataSig
+
+  handle.displayValues = displayValues
+  options?.syncDisplayValues?.(displayValues)
+
+  const ts = handle.chart.timeScale()
+  const prevLogical = ts.getVisibleLogicalRange()
+  const prevTimeRange = ts.getVisibleRange()
+
+  handle.series.setData(points as SingleValueData<number>[])
+
+  // Y autoscale only — do not touch the X camera here.
+  try {
+    handle.series.priceScale().applyOptions({ autoScale: true })
+  } catch {
+    // ignore
+  }
+
+  if (windowChanged) {
+    handle.userAdjustedRange = false
+    applyProgrammaticRange(handle, () => {
+      fitStrikeContent(handle.chart, seriesStrikes, options?.spot, options?.dataWindowPct)
+    })
+    handle.hasInitialFit = true
+  } else if ((options?.fit === true || !handle.hasInitialFit) && !handle.userAdjustedRange) {
+    applyProgrammaticRange(handle, () => {
+      fitStrikeContent(handle.chart, seriesStrikes, options?.spot, options?.dataWindowPct)
+    })
+    handle.hasInitialFit = true
+  } else {
+    restoreVisibleStrikeRange(handle, prevTimeRange, prevLogical)
+  }
 }
 
-function groupLevelMarkers(levelMarkers: GexLevelMarker[]) {
-  const groups = new Map<number, GexLevelMarker[]>()
+/**
+ * Crop leading/trailing near-zero GEX so the series (and axis) end where
+ * inventory actually lives — e.g. stop around ~130k instead of empty 250k.
+ *
+ * When `lock` is set (prior live trim), expand-only: never shrink the ladder
+ * on a refresh so edges don't flicker in and out.
+ */
+function trimGexLadder(
+  data: ChartDatum[],
+  lock?: { loStrike: number | null; hiStrike: number | null } | null,
+): ChartDatum[] {
+  if (data.length <= 2) return data
+  const abs = data.map((d) => Math.abs(d.displayGexUsd || d.netGexUsd || 0))
+  const peak = Math.max(1, ...abs)
+  const floor = peak * 0.008 // 0.8% of peak — dead wings
+  let lo = 0
+  let hi = data.length - 1
+  while (lo < hi && abs[lo]! < floor) lo += 1
+  while (hi > lo && abs[hi]! < floor) hi -= 1
+  // Keep a couple of buffer strikes so walls aren't flush to the frame edge.
+  lo = Math.max(0, lo - 2)
+  hi = Math.min(data.length - 1, hi + 2)
 
-  for (const marker of levelMarkers) {
-    const group = groups.get(marker.strike)
-
-    if (group) {
-      group.push(marker)
-    } else {
-      groups.set(marker.strike, [marker])
+  const lockLo = lock?.loStrike
+  const lockHi = lock?.hiStrike
+  if (lockLo != null && lockHi != null && lockHi >= lockLo) {
+    // Expand to cover the previous live window.
+    while (lo > 0 && data[lo - 1]!.strike >= lockLo) lo -= 1
+    while (hi < data.length - 1 && data[hi + 1]!.strike <= lockHi) hi += 1
+    // If lock is outside current array (stale), clamp by finding nearest.
+    for (let i = 0; i < data.length; i += 1) {
+      if (data[i]!.strike <= lockLo) lo = Math.min(lo, i)
+      if (data[i]!.strike >= lockHi) {
+        hi = Math.max(hi, i)
+        break
+      }
+    }
+    // Also include any strike still within the locked span.
+    for (let i = 0; i < data.length; i += 1) {
+      const s = data[i]!.strike
+      if (s >= lockLo && s <= lockHi) {
+        lo = Math.min(lo, i)
+        hi = Math.max(hi, i)
+      }
     }
   }
 
-  return Array.from(groups.values()).map((group) => {
-    const [primary] = group
-    const styleMarker =
-      group.find((marker) => marker.id === 'advanced-zero-gamma')
-      ?? group.find((marker) => marker.id === 'advanced-gamma-flip')
-      ?? primary
+  return data.slice(lo, hi + 1)
+}
 
-    return {
-      ...styleMarker,
-      strike: primary.strike,
-      axisOnly: group.every((marker) => marker.axisOnly),
-      id: group.map((marker) => marker.id).join('__'),
-      label: group.map((marker) => marker.label).join(' / '),
-      components: group,
+/**
+ * Low-side axis anchors only (labels for empty flanks below first real strike).
+ * Never extend past dataMax — that was producing phantom 150k–250k ticks.
+ * High-side empty flanks for spot-centering are pure camera whitespace.
+ */
+function extendStrikesWithAxisAnchors(dataStrikes: number[], spot?: number): number[] {
+  const sorted = dataStrikes
+    .filter((s) => Number.isFinite(s) && s > 0)
+    .slice()
+    .sort((a, b) => a - b)
+  if (sorted.length === 0) return []
+
+  const dataMin = sorted[0]!
+  const dataMax = sorted[sorted.length - 1]!
+
+  // How far left of dataMin do we need labels for spot-centered full zoom-out?
+  let lo = dataMin
+  if (spot != null && spot > 0) {
+    const half = Math.max(spot - dataMin, dataMax - spot, 1)
+    lo = Math.min(lo, spot - half * 1.12)
+  }
+  lo = Math.max(5_000, lo)
+
+  const span = Math.max(dataMax - lo, 1)
+  let step = 5_000
+  if (span > 200_000) step = 25_000
+  else if (span > 100_000) step = 10_000
+  else if (span > 50_000) step = 5_000
+  else step = 2_500
+
+  const set = new Set(sorted)
+  const start = Math.floor(lo / step) * step
+  for (let s = start; s < dataMin; s += step) {
+    if (s >= 5_000) set.add(s)
+  }
+  if (dataMin >= 45_000) {
+    for (const s of [20_000, 25_000, 30_000, 35_000, 40_000, 45_000, 50_000]) {
+      if (s < dataMin && s >= lo - step) set.add(s)
     }
+  }
+
+  return [...set].sort((a, b) => a - b)
+}
+
+function applyProgrammaticRange(
+  handle: { programmaticRange: boolean },
+  fn: () => void,
+) {
+  handle.programmaticRange = true
+  try {
+    fn()
+  } finally {
+    // Defer clear so LWC range-change callbacks from this call are ignored.
+    queueMicrotask(() => {
+      handle.programmaticRange = false
+    })
+  }
+}
+
+function restoreVisibleStrikeRange(
+  handle: { chart: IChartApiBase<number>; programmaticRange: boolean },
+  prevTime: { from: number; to: number } | null,
+  prevLogical?: { from: number | Logical; to: number | Logical } | null,
+) {
+  const ts = handle.chart.timeScale()
+
+  const apply = () => {
+    // Prefer logical range when the ladder is stable — avoids price-range
+    // re-snaps that look like horizontal jitter after setData.
+    if (prevLogical) {
+      const from = Number(prevLogical.from)
+      const to = Number(prevLogical.to)
+      if (Number.isFinite(from) && Number.isFinite(to) && to > from) {
+        try {
+          ts.setVisibleLogicalRange({ from: from as Logical, to: to as Logical })
+          return true
+        } catch {
+          // fall through to time range
+        }
+      }
+    }
+    if (prevTime) {
+      const from = Number(prevTime.from)
+      const to = Number(prevTime.to)
+      if (Number.isFinite(from) && Number.isFinite(to) && to > from) {
+        try {
+          ts.setVisibleRange({ from, to })
+          return true
+        } catch {
+          return false
+        }
+      }
+    }
+    return false
+  }
+
+  applyProgrammaticRange(handle, () => {
+    apply()
+  })
+
+  // setData can reset the camera one frame later — re-apply only if it drifted.
+  requestAnimationFrame(() => {
+    const targetLogical = prevLogical
+      ? { from: Number(prevLogical.from), to: Number(prevLogical.to) }
+      : null
+    if (!targetLogical || !(targetLogical.to > targetLogical.from)) return
+    const now = ts.getVisibleLogicalRange()
+    if (
+      now
+      && Math.abs(Number(now.from) - targetLogical.from) < 0.02
+      && Math.abs(Number(now.to) - targetLogical.to) < 0.02
+    ) {
+      return
+    }
+    applyProgrammaticRange(handle, () => {
+      apply()
+    })
   })
 }
 
-function isStrikeInDataWindow(strike: number, spot: number, dataWindowPct: number | 'full') {
-  if (dataWindowPct === 'full') {
-    return true
+/**
+ * Mild triangular moving average for profile display.
+ * Radius 1 ≈ 3-point window — calms chatter without overshooting walls.
+ */
+function smoothDisplaySeries(values: number[], radius = 1): number[] {
+  if (values.length <= 2 || radius <= 0) return values.slice()
+  const out = new Array<number>(values.length)
+  for (let i = 0; i < values.length; i += 1) {
+    let wSum = 0
+    let vSum = 0
+    for (let k = -radius; k <= radius; k += 1) {
+      const j = i + k
+      if (j < 0 || j >= values.length) continue
+      const w = radius + 1 - Math.abs(k)
+      wSum += w
+      vSum += values[j]! * w
+    }
+    out[i] = wSum > 0 ? vSum / wSum : values[i]!
   }
-
-  const windowPct = normalizeWindowPct(dataWindowPct)
-
-  return isStrikeInPercentWindow(strike, spot, windowPct)
+  return out
 }
 
-function isStrikeInPercentWindow(strike: number, spot: number, windowPct: number) {
-  const lowerStrike = spot * (1 - windowPct / 100)
-  const upperStrike = spot * (1 + windowPct / 100)
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Shared geometry / interaction
+ * ═══════════════════════════════════════════════════════════════════════════ */
 
-  return strike >= lowerStrike && strike <= upperStrike
+/**
+ * Fit / window the visible strike range with **spot centered** in the viewport.
+ *
+ * Empty flanks past first/last real strike are intentional so the live index
+ * stays mid-pane even when the book is asymmetric around spot. Does not invent
+ * GEX bars — only logical camera range.
+ */
+function fitStrikeContent(
+  chart: IChartApiBase<number>,
+  strikes?: number[],
+  spot?: number,
+  dataWindowPct?: number | 'full',
+) {
+  const rows = strikes ?? []
+  if (rows.length === 0) {
+    chart.timeScale().fitContent()
+    return
+  }
+
+  const last = rows.length - 1
+  const spotLogical =
+    spot != null && spot > 0 ? strikeToLogical(rows, spot) : null
+
+  if (spotLogical != null) {
+    let halfSpan: number
+
+    if (dataWindowPct != null && dataWindowPct !== 'full') {
+      const windowPct = normalizeWindowPct(dataWindowPct)
+      const lo = spot! * (1 - windowPct / 100)
+      const hi = spot! * (1 + windowPct / 100)
+      const loLog = strikeToLogical(rows, lo) ?? 0
+      const hiLog = strikeToLogical(rows, hi) ?? last
+      // Symmetric around spot so the index line sits dead-center.
+      halfSpan = Math.max(
+        Math.abs(spotLogical - loLog),
+        Math.abs(hiLog - spotLogical),
+        1,
+      )
+      halfSpan *= 1.03
+    } else {
+      // Full ladder + breathing room, still spot-centered.
+      halfSpan = Math.max(spotLogical - 0, last - spotLogical, 1) * 1.12
+    }
+
+    halfSpan = Math.max(halfSpan, 1)
+    chart.timeScale().setVisibleLogicalRange({
+      from: (spotLogical - halfSpan) as Logical,
+      to: (spotLogical + halfSpan) as Logical,
+    })
+    return
+  }
+
+  // No usable spot: fit the book with a light edge pad.
+  chart.timeScale().fitContent()
+  const range = chart.timeScale().getVisibleLogicalRange()
+  if (!range || !Number.isFinite(Number(range.from)) || !Number.isFinite(Number(range.to))) return
+  const span = Math.max(Number(range.to) - Number(range.from), 1)
+  const pad = Math.max(0.4, Math.min(1.5, span * 0.02))
+  chart.timeScale().setVisibleLogicalRange({
+    from: (Number(range.from) - pad) as Logical,
+    to: (Number(range.to) + pad) as Logical,
+  })
+}
+
+/**
+ * Soft clamp for pan/zoom.
+ * Allows empty flanks so spot can stay centered; only limits span and keeps
+ * some of the series in view when the user pans completely off-book.
+ */
+function clampLogicalRange(
+  range: LogicalRange,
+  n: number,
+  spotLogical?: number | null,
+): LogicalRange {
+  if (n <= 0) return range
+  let from = Number(range.from)
+  let to = Number(range.to)
+  let span = Math.max(to - from, 0.5)
+
+  const last = n - 1
+  const minSpan = 2
+  const halfData =
+    spotLogical != null
+      ? Math.max(spotLogical - 0, last - spotLogical, 1)
+      : Math.max(last / 2, 1)
+  // Zoom-out ceiling: entire book + margin with room for a centered spot.
+  const maxSpan = halfData * 2 * 1.25
+
+  if (span > maxSpan) {
+    const mid = spotLogical != null ? spotLogical : (from + to) / 2
+    span = maxSpan
+    from = mid - span / 2
+    to = mid + span / 2
+  } else if (span < minSpan) {
+    const mid = spotLogical != null ? spotLogical : (from + to) / 2
+    span = minSpan
+    from = mid - span / 2
+    to = mid + span / 2
+  }
+
+  // Keep at least a sliver of the series in view (do not hard-clamp edges to
+  // [0, last] — that breaks spot-centered zoom on asymmetric books).
+  if (to < 0) {
+    to = Math.min(span * 0.12, last)
+    from = to - span
+  }
+  if (from > last) {
+    from = Math.max(last - span * 0.12, 0)
+    to = from + span
+  }
+
+  return { from: from as Logical, to: to as Logical }
+}
+
+function spotToCoordinate(
+  chart: IChartApiBase<number>,
+  strikes: number[],
+  spot: number,
+): number | null {
+  if (!(spot > 0) || !Number.isFinite(spot) || strikes.length === 0) return null
+
+  const direct = chart.timeScale().timeToCoordinate(spot)
+  if (direct != null && Number.isFinite(direct as number)) {
+    return direct as number
+  }
+
+  let lo = 0
+  let hi = strikes.length - 1
+  if (spot <= strikes[0]!) {
+    return toFiniteCoord(chart.timeScale().logicalToCoordinate(0 as Logical))
+  }
+  if (spot >= strikes[hi]!) {
+    return toFiniteCoord(chart.timeScale().logicalToCoordinate(hi as Logical))
+  }
+
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1
+    if (strikes[mid]! <= spot) lo = mid
+    else hi = mid
+  }
+
+  const s0 = strikes[lo]!
+  const s1 = strikes[hi]!
+  const x0 = chart.timeScale().logicalToCoordinate(lo as Logical)
+  const x1 = chart.timeScale().logicalToCoordinate(hi as Logical)
+  if (x0 == null || x1 == null || !Number.isFinite(x0 as number) || !Number.isFinite(x1 as number)) {
+    return null
+  }
+  if (s1 === s0) return x0 as number
+  const t = (spot - s0) / (s1 - s0)
+  return (x0 as number) + t * ((x1 as number) - (x0 as number))
+}
+
+function toFiniteCoord(value: number | null): number | null {
+  if (value == null || !Number.isFinite(value as number)) return null
+  return value as number
+}
+
+/**
+ * Wheel zoom that keeps the spot line dead-center in the viewport.
+ * Shift+wheel is reserved for data-window % (handled separately).
+ */
+function makeSpotAnchoredWheelHandler(opts: {
+  getHandle: () => { chart: IChartApiBase<number>; seriesStrikes?: number[] } | null
+  getStrikes: () => number[]
+  getSpot: () => number
+  onAfter: () => void
+  disposed: () => boolean
+}) {
+  return (event: WheelEvent) => {
+    if (opts.disposed()) return
+    if (event.shiftKey) return // data-window zoom owns shift+wheel
+    const target = event.target as HTMLElement | null
+    if (target?.closest('button, input, select, [role="dialog"]')) return
+
+    const handle = opts.getHandle()
+    const strikes = opts.getStrikes()
+    if (!handle || strikes.length < 2) return
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    const ts = handle.chart.timeScale()
+    const range = ts.getVisibleLogicalRange()
+    if (!range || !Number.isFinite(Number(range.from)) || !Number.isFinite(Number(range.to))) return
+
+    const from0 = Number(range.from)
+    const to0 = Number(range.to)
+    const span = to0 - from0
+    if (!(span > 0)) return
+
+    const spot = opts.getSpot()
+    const spotLogical = strikeToLogical(strikes, spot)
+    const n = strikes.length
+    const last = n - 1
+    const anchor = spotLogical ?? (from0 + to0) / 2
+    // Cap zoom-out: entire book on both sides of spot + margin (empty flanks OK).
+    const halfData = Math.max(anchor - 0, last - anchor, 1)
+    const maxSpan = halfData * 2 * 1.25
+
+    // Zoom factor — wheel down = zoom out
+    const zoom = Math.exp(event.deltaY * 0.00135)
+    const nextSpan = Math.max(2, Math.min(maxSpan, span * zoom))
+
+    // Always re-center on spot (fallback: current viewport mid).
+    const from = anchor - nextSpan * 0.5
+    const to = from + nextSpan
+    const clamped = clampLogicalRange(
+      { from: from as Logical, to: to as Logical },
+      n,
+      spotLogical,
+    )
+    ts.setVisibleLogicalRange(clamped)
+    opts.onAfter()
+  }
+}
+
+/**
+ * Map a strike price onto the series logical index.
+ * Extrapolates past the first/last ladder points so empty flanks (and windows
+ * that extend past the book) stay linear with bar spacing.
+ */
+function strikeToLogical(strikes: number[], strike: number): number | null {
+  if (strikes.length === 0 || !Number.isFinite(strike)) return null
+  const last = strikes.length - 1
+  if (strikes.length === 1) {
+    const only = strikes[0]!
+    if (strike === only) return 0
+    const step = Math.max(only * 0.01, 500)
+    return (strike - only) / step
+  }
+
+  if (strike < strikes[0]!) {
+    const step = Math.max(strikes[1]! - strikes[0]!, 1)
+    return (strike - strikes[0]!) / step
+  }
+  if (strike > strikes[last]!) {
+    const step = Math.max(strikes[last]! - strikes[last - 1]!, 1)
+    return last + (strike - strikes[last]!) / step
+  }
+
+  let lo = 0
+  let hi = last
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1
+    if (strikes[mid]! <= strike) lo = mid
+    else hi = mid
+  }
+  const s0 = strikes[lo]!
+  const s1 = strikes[hi]!
+  if (s1 === s0) return lo
+  return lo + (strike - s0) / (s1 - s0)
+}
+
+/** Label top-N walls by |net GEX| when they clear a quiet threshold. */
+function computeWallCallouts(
+  chart: IChartApiBase<number>,
+  series: { priceToCoordinate: (price: number) => number | null },
+  data: ChartDatum[],
+): WallCallout[] {
+  if (data.length < 3) return []
+  const ranked = [...data]
+    .filter((d) => Number.isFinite(d.netGexUsd) && d.netGexUsd !== 0)
+    .sort((a, b) => Math.abs(b.netGexUsd) - Math.abs(a.netGexUsd))
+  if (ranked.length === 0) return []
+
+  const maxAbs = Math.abs(ranked[0]!.netGexUsd)
+  const floor = maxAbs * 0.42 // only meaningful walls
+  const tops = ranked.filter((d) => Math.abs(d.netGexUsd) >= floor).slice(0, WALL_CALLOUT_MAX)
+
+  const out: WallCallout[] = []
+  for (const d of tops) {
+    const x = chart.timeScale().timeToCoordinate(d.strike)
+    const y = series.priceToCoordinate(d.netGexUsd)
+    if (x == null || y == null || !Number.isFinite(x) || !Number.isFinite(y)) continue
+    out.push({
+      strike: d.strike,
+      netGexUsd: d.netGexUsd,
+      x: x as number,
+      y: y as number,
+      side: d.netGexUsd >= 0 ? 'above' : 'below',
+    })
+  }
+  return out
+}
+
+function dedupeByStrike(data: ChartDatum[]): ChartDatum[] {
+  if (data.length <= 1) return data
+  const out: ChartDatum[] = []
+  for (const row of data) {
+    const prev = out[out.length - 1]
+    if (prev && prev.strike === row.strike) {
+      out[out.length - 1] = row
+    } else {
+      out.push(row)
+    }
+  }
+  return out
+}
+
+function normalizeRenderMode(mode: GexMode): 'net' | 'profile' {
+  if (mode === 'profile') return 'profile'
+  return 'net'
+}
+
+function formatStrikeTick(strike: number): string {
+  if (!Number.isFinite(strike)) return ''
+  const rounded = Math.round(strike)
+  if (Math.abs(rounded) >= 1000) {
+    const k = rounded / 1000
+    // Whole thousands: "65k"
+    if (Math.abs(k - Math.round(k)) < 1e-6) return `${Math.round(k)}k`
+    // Exact half-thousands: "62.5k"
+    const half = Math.round(k * 2) / 2
+    if (Math.abs(k - half) < 1e-6) {
+      return Number.isInteger(half) ? `${half}k` : `${half.toFixed(1)}k`
+    }
+    // Do NOT snap to nearest 1k — colliding labels ("58k"×N) make LWC drop ticks
+    // and leave a nearly empty axis with one leftover mark.
+    return `${Math.round(k * 10) / 10}k`
+  }
+  return formatStrike(rounded)
+}
+
+function prepareChartData(
+  snapshot: GexSnapshot,
+  mode: 'net' | 'profile',
+): ChartDatum[] {
+  const sourceRows = snapshot.gammaBars
+  const visibleRows = mode === 'profile' ? sourceRows : getReadableStrikeRows(sourceRows)
+  return visibleRows
+    .map((row) => toChartDatum(row))
+    .sort((a, b) => a.strike - b.strike)
+}
+
+function getReadableStrikeRows(rows: GexSourceRow[]) {
+  if (rows.length <= 48) return rows
+  const halfStrikeRows = rows.filter((row) => row.strike % 500 === 0)
+  if (halfStrikeRows.length >= 16) return halfStrikeRows
+  const quarter = rows.filter((row) => row.strike % 250 === 0)
+  return quarter.length > 0 ? quarter : rows
 }
 
 function normalizeWindowPct(value: number) {
   return Number.isFinite(value) && value > 0 ? value : 18
 }
 
-function toChartDatum(row: GexSourceRow, mode: GexMode): ChartDatum {
-  const net = row.netGammaExposureUsd ?? row.gammaExposureUsd
-  const call = row.callGammaExposureUsd ?? Math.max(net, 0)
-  const put = row.putGammaExposureUsd ?? Math.min(net, 0)
-  const positive = getPositiveGammaExposure(call, put)
-  const negative = getNegativeGammaExposure(call, put)
-
+function toChartDatum(row: GexSourceRow): ChartDatum {
+  const call = row.callGammaExposureUsd ?? 0
+  const put = row.putGammaExposureUsd ?? 0
+  const net = row.netGammaExposureUsd ?? row.gammaExposureUsd ?? call + put
+  const gross = Math.abs(call) + Math.abs(put)
   return {
     strike: row.strike,
     netGexUsd: net,
     callGexUsd: call,
     putGexUsd: put,
-    positiveGexUsd: positive,
-    negativeGexUsd: negative,
-    displayGexUsd: getDisplayExposureValue(net, call, put, mode),
+    grossGexUsd: gross,
+    displayGexUsd: net,
   }
 }
 
-function getPositiveGammaExposure(call: number, put: number) {
-  return Math.max(call, 0) + Math.max(put, 0)
-}
-
-function getNegativeGammaExposure(call: number, put: number) {
-  return Math.min(call, 0) + Math.min(put, 0)
-}
-
-function getDisplayExposureValue(net: number, call: number, put: number, mode: GexMode) {
-  if (mode === 'call') return call
-  if (mode === 'put') return put
-  if (mode === 'abs') return Math.abs(net)
-  return net
-}
-
-function getChartDimensions(width: number, height: number): ChartDimensions {
-  return {
-    width,
-    height,
-    margin,
-  }
-}
-
-function getAreaChartDimensions(width: number, height: number): ChartDimensions {
-  return {
-    width,
-    height,
-    margin: areaMargin,
-  }
-}
-
-function getChartLayout(
-  data: ChartDatum[],
-  spot: number,
-  dimensions: ChartDimensions,
-  mode: GexMode,
-  dataWindowPct: number | 'full',
-  levelMarkers: GexLevelMarker[],
-  axisMarkers: GexLevelMarker[],
-) {
-  const innerWidth = dimensions.width - dimensions.margin.left - dimensions.margin.right
-  const innerHeight = dimensions.height - dimensions.margin.top - dimensions.margin.bottom
-  const maxAbsGex = Math.max(...data.flatMap((datum) => {
-    const values = [
-      Math.abs(datum.displayGexUsd),
-      Math.abs(datum.callGexUsd),
-      Math.abs(datum.putGexUsd),
-    ]
-
-    if (mode === 'split') {
-      values.push(Math.abs(datum.positiveGexUsd), Math.abs(datum.negativeGexUsd))
-    }
-
-    return values
-  }), 10_000_000)
-  const domainMax = getRoundedDomainMax(maxAbsGex * barChartDomainPadding)
-  const strikes = data.map((datum) => datum.strike)
-  const minStrike = Math.min(...strikes, spot)
-  const maxStrike = Math.max(...strikes, spot)
-  const xScale = scaleLinear<number, number>()
-    .domain([-domainMax, domainMax])
-    .range([dimensions.margin.left, dimensions.margin.left + innerWidth])
-  const yScale = scaleLinear<number, number>()
-    .domain([minStrike, maxStrike])
-    .range([dimensions.margin.top + innerHeight, dimensions.margin.top])
-  const rowHeight = getContinuousBarRowHeight(strikes, yScale, dataWindowPct)
-
-  return {
-    innerWidth,
-    innerHeight,
-    xScale,
-    yScale,
-    rowHeight,
-    spotY: yScale(spot),
-    levelMarkers: positionBarLevelMarkers(levelMarkers, yScale),
-    axisMarkers: positionBarLevelMarkers(axisMarkers, yScale),
-    xTicks: buildMillionTicks(domainMax),
-    yAxisTicks: buildStrikeAxisTicks(minStrike, maxStrike, yScale, dimensions, dataWindowPct),
-    closestSpotStrike: getClosestStrike(strikes, spot),
-  }
-}
-
-function positionBarLevelMarkers(
-  markers: GexLevelMarker[],
-  yScale: ScaleLinear<number, number>,
-) {
-  return markers.map((marker) => ({
-    ...marker,
-    y: yScale(marker.strike),
-  }))
-}
-
-function getContinuousBarRowHeight(
-  strikes: number[],
-  yScale: ScaleLinear<number, number>,
-  dataWindowPct: number | 'full',
-) {
-  const sortedStrikes = Array.from(new Set(strikes)).sort((a, b) => a - b)
-  const pixelGaps = sortedStrikes.slice(1).map((strike, index) => (
-    Math.abs(yScale(strike) - yScale(sortedStrikes[index]))
-  ))
-  const closestGap = pixelGaps.length > 0 ? Math.min(...pixelGaps) : getFallbackContinuousRowHeight(dataWindowPct)
-
-  return clamp(closestGap * 0.82, 4.5, 22)
-}
-
-function getFallbackContinuousRowHeight(dataWindowPct: number | 'full') {
-  if (dataWindowPct === 'full') return 5
-  if (dataWindowPct <= 5) return 22
-  if (dataWindowPct <= 18) return 14
-
-  return 8
-}
-
-function getAreaChartLayout(
-  data: ChartDatum[],
-  spot: number,
-  dimensions: ChartDimensions,
-  mode: GexMode,
-  levelMarkers: GexLevelMarker[],
-  axisMarkers: GexLevelMarker[],
-): AreaChartLayout {
-  const innerWidth = dimensions.width - dimensions.margin.left - dimensions.margin.right
-  const innerHeight = dimensions.height - dimensions.margin.top - dimensions.margin.bottom
-  const sortedData = [...data].sort((a, b) => a.strike - b.strike)
-  const strikes = sortedData.map((datum) => datum.strike)
-  const levelStrikes = levelMarkers.map((marker) => marker.strike)
-  const fallbackWindow = Math.max(Math.abs(spot) * 0.02, 1)
-  const minStrike = strikes.length > 0 ? Math.min(...strikes, spot, ...levelStrikes) : Math.min(spot - fallbackWindow, ...levelStrikes)
-  const maxStrike = strikes.length > 0 ? Math.max(...strikes, spot, ...levelStrikes) : Math.max(spot + fallbackWindow, ...levelStrikes)
-  const domainMin = minStrike === maxStrike ? minStrike - fallbackWindow : minStrike
-  const domainMaxStrike = minStrike === maxStrike ? maxStrike + fallbackWindow : maxStrike
-  const xScale = scaleLinear<number, number>()
-    .domain([domainMin, domainMaxStrike])
-    .range([dimensions.margin.left, dimensions.margin.left + innerWidth])
-  const yDomain = getAreaChartYDomain(sortedData, mode)
-  const yScale = scaleLinear<number, number>()
-    .domain(yDomain)
-    .range([dimensions.margin.top + innerHeight, dimensions.margin.top])
-
-  return {
-    data: sortedData,
-    profileData: addZeroCrossings(sortedData),
-    innerWidth,
-    innerHeight,
-    xScale,
-    yScale,
-    xTicks: xScale.ticks(getAreaXAxisTickCount(dimensions.width)),
-    yTicks: getAreaYAxisTicks(yScale, yDomain),
-    zeroY: yScale(0),
-    spotX: xScale(spot),
-    levelMarkers: levelMarkers.map((marker) => ({ ...marker, x: xScale(marker.strike) })),
-    axisMarkers: axisMarkers.map((marker) => ({ ...marker, x: xScale(marker.strike) })),
-  }
-}
-
-function getAreaYAxisTicks(yScale: ScaleLinear<number, number>, domain: [number, number]) {
-  const [min, max] = domain
-  const minTickPixelGap = 16
-  const candidates = [
-    { tick: min, priority: 3 },
-    { tick: max, priority: 3 },
-    { tick: 0, priority: 4 },
-    ...yScale.ticks(5).map((tick) => ({ tick, priority: 2 })),
-  ]
-    .filter(({ tick }) => tick >= min && tick <= max)
-    .map(({ tick, priority }) => ({ tick: Math.round(tick), priority }))
-    .sort((a, b) => b.priority - a.priority)
-
-  const ticks: number[] = []
-
-  for (const { tick } of candidates) {
-    const overlapsExistingTick = ticks.some((selectedTick) => (
-      Math.abs(yScale(selectedTick) - yScale(tick)) < minTickPixelGap
-    ))
-
-    if (!overlapsExistingTick) {
-      ticks.push(tick)
+function findNearestDatum(data: ChartDatum[], strike: number): ChartDatum | null {
+  if (data.length === 0) return null
+  let best = data[0]!
+  let bestDist = Math.abs(best.strike - strike)
+  for (let i = 1; i < data.length; i += 1) {
+    const dist = Math.abs(data[i]!.strike - strike)
+    if (dist < bestDist) {
+      best = data[i]!
+      bestDist = dist
     }
   }
-
-  return Array.from(new Set(ticks)).sort((a, b) => a - b)
+  return best
 }
 
-function getAreaChartYDomain(data: ChartDatum[], mode: GexMode): [number, number] {
-  if (mode === 'abs') {
-    const maxGex = Math.max(...data.flatMap((datum) => [Math.abs(datum.callGexUsd), Math.abs(datum.putGexUsd)]), 10_000_000)
-    const domainMax = getRoundedDomainMax(maxGex * areaChartDomainPadding)
-
-    return [0, domainMax]
-  }
-
-  const maxPositiveGex = Math.max(...data.map((datum) => datum.netGexUsd), 0)
-  const minNegativeGex = Math.min(...data.map((datum) => datum.netGexUsd), 0)
-  const upperDomain = getRoundedDomainMax(maxPositiveGex * areaChartDomainPadding)
-  const lowerMagnitude = minNegativeGex < 0
-    ? Math.abs(minNegativeGex) + profileNegativeDomainBuffer
-    : profileNegativeDomainBuffer
-  const lowerDomain = -getRoundedProfileDomainMagnitude(lowerMagnitude)
-
-  return [lowerDomain, upperDomain]
-}
-
-function getRoundedProfileDomainMagnitude(value: number) {
-  const safeValue = Math.max(Math.abs(value), 1_000_000)
-  const step = getProfileDomainStep(safeValue)
-
-  return Math.ceil(safeValue / step) * step
-}
-
-function getProfileDomainStep(value: number) {
-  if (value <= 25_000_000) {
-    return 1_000_000
-  }
-
-  if (value <= 60_000_000) {
-    return 5_000_000
-  }
-
-  if (value <= 120_000_000) {
-    return 10_000_000
-  }
-
-  if (value <= 250_000_000) {
-    return 25_000_000
-  }
-
-  return 50_000_000
-}
-
-function buildMillionTicks(domainMax: number) {
-  const ticks: number[] = []
-  const step = getTickStep(domainMax)
-  const maxTick = Math.max(step, Math.floor(domainMax / step) * step)
-
-  for (let tick = -maxTick; tick <= maxTick; tick += step) {
-    ticks.push(tick)
-  }
-
-  return ticks
-}
-
-function getTickStep(domainMax: number) {
-  if (domainMax <= 60_000_000) {
-    return 10_000_000
-  }
-
-  if (domainMax <= 120_000_000) {
-    return 20_000_000
-  }
-
-  if (domainMax <= 250_000_000) {
-    return 50_000_000
-  }
-
-  return 100_000_000
-}
-
-function getRoundedDomainMax(value: number) {
-  const safeValue = Math.max(Math.abs(value), 10_000_000)
-  const step = getTickStep(safeValue)
-
-  return Math.ceil(safeValue / step) * step
-}
-
-function getAreaXAxisTickCount(width: number) {
-  return width < 860 ? 5 : 7
-}
-
-function getClosestStrike(strikes: number[], spot: number) {
-  return strikes.reduce((closest, strike) => {
-    return Math.abs(strike - spot) < Math.abs(closest - spot) ? strike : closest
-  }, strikes[0] ?? spot)
-}
-
-function getLevelMarkerAtStrike<T extends { strike: number }>(markers: T[], strike: number) {
-  return markers.find((marker) => marker.strike === strike)
-}
-
-function getYAxisStrikeStep(dataWindowPct: number | 'full') {
-  if (dataWindowPct === 'full') return 20_000
-  if (dataWindowPct <= 2.5) return 250
-  if (dataWindowPct <= 5) return 500
-  if (dataWindowPct <= 10) return 1_000
-  if (dataWindowPct <= 18) return 2_500
-  if (dataWindowPct <= 35) return 5_000
-  if (dataWindowPct <= 65) return 10_000
-
-  return 20_000
-}
-
-function buildStrikeAxisTicks(
-  minStrike: number,
-  maxStrike: number,
-  strikeScale: ScaleLinear<number, number>,
-  dimensions: ChartDimensions,
+/**
+ * Shift+wheel adjusts the ±% data window (parent state).
+ * Plain wheel is handled by spot-anchored zoom on the chart host.
+ */
+function useDataWindowWheelZoom(
+  containerRef: RefObject<HTMLDivElement | null>,
   dataWindowPct: number | 'full',
-): StrikeAxisTick[] {
-  const step = getYAxisStrikeStep(dataWindowPct)
-  const firstTick = Math.ceil(minStrike / step) * step
-  const lastTick = Math.floor(maxStrike / step) * step
-  const ticks: StrikeAxisTick[] = []
-  const minY = dimensions.margin.top + 8
-  const maxY = dimensions.height - dimensions.margin.bottom - 8
+  onDataWindowPctChange?: (pct: number) => void,
+) {
+  const pctRef = useRef(dataWindowPct)
+  const rafRef = useRef(0)
+  const pendingRef = useRef<number | null>(null)
 
-  for (let strike = firstTick; strike <= lastTick; strike += step) {
-    const y = strikeScale(strike)
+  useEffect(() => {
+    pctRef.current = dataWindowPct
+  }, [dataWindowPct])
 
-    if (y >= minY && y <= maxY) {
-      ticks.push({ strike, y })
-    }
-  }
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !onDataWindowPctChange) return
 
-  return ticks
-}
-
-function addZeroCrossings(data: ChartDatum[]) {
-  if (data.length < 2) {
-    return data
-  }
-
-  const rowsWithCrossings: ChartDatum[] = [data[0]]
-
-  for (let index = 1; index < data.length; index += 1) {
-    const previous = data[index - 1]
-    const current = data[index]
-    const crossesZero = (previous.netGexUsd < 0 && current.netGexUsd > 0) || (previous.netGexUsd > 0 && current.netGexUsd < 0)
-
-    if (crossesZero) {
-      const interpolation = Math.abs(previous.netGexUsd) / (Math.abs(previous.netGexUsd) + Math.abs(current.netGexUsd))
-      rowsWithCrossings.push({
-        strike: interpolate(previous.strike, current.strike, interpolation),
-        netGexUsd: 0,
-        callGexUsd: interpolate(previous.callGexUsd, current.callGexUsd, interpolation),
-        putGexUsd: interpolate(previous.putGexUsd, current.putGexUsd, interpolation),
-        positiveGexUsd: interpolate(previous.positiveGexUsd, current.positiveGexUsd, interpolation),
-        negativeGexUsd: interpolate(previous.negativeGexUsd, current.negativeGexUsd, interpolation),
-        displayGexUsd: 0,
+    const onWheel = (event: WheelEvent) => {
+      if (!event.shiftKey) return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('button, input, select, [role="dialog"]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      const current = pctRef.current === 'full' ? 100 : normalizeWindowPct(pctRef.current)
+      const next = clampProfileWindowPct(current + event.deltaY * 0.035)
+      pendingRef.current = next
+      if (rafRef.current) return
+      rafRef.current = window.requestAnimationFrame(() => {
+        rafRef.current = 0
+        if (pendingRef.current === null) return
+        const value = pendingRef.current
+        pendingRef.current = null
+        pctRef.current = value
+        onDataWindowPctChange(value)
       })
     }
 
-    rowsWithCrossings.push(current)
-  }
-
-  return rowsWithCrossings
+    el.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    return () => {
+      el.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions)
+      if (rafRef.current) window.cancelAnimationFrame(rafRef.current)
+    }
+  }, [containerRef, onDataWindowPctChange])
 }
 
-function interpolate(start: number, end: number, interpolation: number) {
-  return start + (end - start) * interpolation
+function clampProfileWindowPct(value: number) {
+  if (!Number.isFinite(value)) return 18
+  return Math.min(100, Math.max(1, Math.round(value * 10) / 10))
 }
 
-function getBarGeometry(value: number, xScale: ScaleLinear<number, number>, y: number) {
-  const zeroX = xScale(0)
-  const valueX = xScale(value)
-
-  return {
-    x1: zeroX,
-    x2: valueX,
-    x: Math.min(zeroX, valueX),
-    width: Math.abs(valueX - zeroX),
-    y,
-  }
-}
-
-type BarGeometry = ReturnType<typeof getBarGeometry>
-
-function getBarHeight(bandwidth: number) {
-  return Math.max(3.5, Math.min(6.5, bandwidth * 0.54))
-}
-
-function getTooltipX(bar: BarGeometry, dimensions: ChartDimensions, side: TooltipSide) {
-  const anchor = side === 'right' ? bar.x + bar.width : bar.x
-
-  return (Math.max(dimensions.margin.left, Math.min(anchor, dimensions.width - dimensions.margin.right)) / dimensions.width) * 100
-}
-
-function getTooltipTransform(side: TooltipSide) {
-  return side === 'left' ? 'translate(calc(-100% - 12px), -50%)' : 'translate(12px, -50%)'
-}
-
-function getAreaPath(
-  data: ChartDatum[],
-  xScale: ScaleLinear<number, number>,
-  yScale: ScaleLinear<number, number>,
-  getValue: (datum: ChartDatum) => number,
-) {
-  return area<ChartDatum>()
-    .x((datum) => xScale(datum.strike))
-    .y0(yScale(0))
-    .y1((datum) => yScale(getValue(datum)))
-    .curve(curveMonotoneX)(data)
-}
-
-function getSignedAreaPath(
-  data: ChartDatum[],
-  xScale: ScaleLinear<number, number>,
-  yScale: ScaleLinear<number, number>,
-  isDefined: (datum: ChartDatum) => boolean,
-) {
-  return area<ChartDatum>()
-    .defined(isDefined)
-    .x((datum) => xScale(datum.strike))
-    .y0(yScale(0))
-    .y1((datum) => yScale(datum.netGexUsd))
-    .curve(curveMonotoneX)(data)
-}
-
-function getLinePath(
-  data: ChartDatum[],
-  xScale: ScaleLinear<number, number>,
-  yScale: ScaleLinear<number, number>,
-  getValue: (datum: ChartDatum) => number,
-) {
-  return line<ChartDatum>()
-    .x((datum) => xScale(datum.strike))
-    .y((datum) => yScale(getValue(datum)))
-    .curve(curveMonotoneX)(data)
-}
-
-function getSignedLinePath(
-  data: ChartDatum[],
-  xScale: ScaleLinear<number, number>,
-  yScale: ScaleLinear<number, number>,
-  isDefined: (datum: ChartDatum) => boolean,
-) {
-  return line<ChartDatum>()
-    .defined(isDefined)
-    .x((datum) => xScale(datum.strike))
-    .y((datum) => yScale(datum.netGexUsd))
-    .curve(curveMonotoneX)(data)
-}
-
-function handleAreaMouseMove(
-  event: React.MouseEvent<SVGRectElement>,
-  layout: AreaChartLayout,
-  dimensions: ChartDimensions,
-  mode: 'abs' | 'profile',
-  setHovered: (hovered: HoverState | null) => void,
-) {
-  if (layout.data.length === 0) {
-    setHovered(null)
-    return
-  }
-
-  const svg = event.currentTarget.ownerSVGElement
-  if (!svg) {
-    return
-  }
-
-  const bounds = svg.getBoundingClientRect()
-  const pointerX = ((event.clientX - bounds.left) / bounds.width) * dimensions.width
-  const pointerStrike = layout.xScale.invert(pointerX)
-  const datum = getClosestDatumByStrike(layout.data, pointerStrike)
-  const datumX = layout.xScale(datum.strike)
-  const datumValue = mode === 'abs'
-    ? Math.max(Math.abs(datum.callGexUsd), Math.abs(datum.putGexUsd))
-    : datum.netGexUsd
-  const datumY = layout.yScale(datumValue)
-
-  setHovered({
-    datum,
-    xPct: clamp((datumX / dimensions.width) * 100, 6, 82),
-    yPct: clamp((datumY / dimensions.height) * 100, 14, 86),
-    side: datumValue < 0 ? 'left' : 'right',
-  })
-}
-
-function getClosestDatumByStrike(data: ChartDatum[], strike: number) {
-  return data.reduce((closest, datum) => {
-    return Math.abs(datum.strike - strike) < Math.abs(closest.strike - strike) ? datum : closest
-  }, data[0])
-}
-
-function getClampedLabelX(value: number, min: number, max: number) {
-  return clamp(value, min, Math.max(min, max))
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
-}
-
-function SingleBar({
-  bar,
-  fillId,
-  positive,
-  stroke,
-  height,
+function ChartTitleOverlay({
+  subtitle,
+  title,
+  titleAccessory,
 }: {
-  bar: BarGeometry
-  fillId: string
-  positive: boolean
-  stroke: string
-  height: number
+  subtitle?: string
+  title: string
+  titleAccessory?: ReactNode
 }) {
-  if (bar.width < 0.5) {
-    return null
-  }
-
+  if (!title && !titleAccessory) return null
   return (
-    <>
-      <rect
-        x={bar.x}
-        y={bar.y - height / 2}
-        width={bar.width}
-        height={height}
-        rx={0.5}
-        fill={`url(#${fillId})`}
-        fillOpacity={0.82}
-        stroke={stroke}
-        strokeOpacity={0.48}
-        strokeWidth={0.75}
-      />
-      <line
-        x1={bar.x}
-        x2={bar.x + bar.width}
-        y1={bar.y - height / 2 + 1}
-        y2={bar.y - height / 2 + 1}
-        stroke={positive ? 'var(--chart-positive-edge)' : 'var(--chart-negative-edge)'}
-        strokeWidth={1}
-        strokeOpacity={0.22}
-      />
-    </>
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex h-9 min-w-0 items-center gap-2 px-2.5">
+      {title ? (
+        <div className="min-w-0 flex-1 overflow-hidden pr-1">
+          <div className="terminal-title truncate tracking-[0.12em]">{title}</div>
+          {subtitle ? (
+            <div className="terminal-meta mt-0.5 truncate tracking-[0.1em] opacity-80">
+              {subtitle}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="min-w-0 flex-1" />
+      )}
+      {titleAccessory ? (
+        <div className="pointer-events-auto flex shrink-0 items-center self-center">
+          {titleAccessory}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
-function SplitBars({
-  datum,
-  negativeFillId,
-  positiveFillId,
-  xScale,
-  y,
-  rowHeight,
-}: {
-  datum: ChartDatum
-  negativeFillId: string
-  positiveFillId: string
-  xScale: ScaleLinear<number, number>
-  y: number
-  rowHeight: number
-}) {
-  const positiveBar = getBarGeometry(datum.positiveGexUsd, xScale, y)
-  const negativeBar = getBarGeometry(datum.negativeGexUsd, xScale, y)
-
-  return (
-    <>
-      <SingleBar bar={negativeBar} fillId={negativeFillId} positive={false} stroke="var(--chart-negative-edge)" height={rowHeight} />
-      <SingleBar bar={positiveBar} fillId={positiveFillId} positive stroke="var(--chart-positive-edge)" height={rowHeight} />
-    </>
-  )
-}
-
-function BarHoverTarget({
-  bar,
-  datum,
-  dimensions,
-  height,
-  setHovered,
-  side,
-}: {
-  bar: BarGeometry
-  datum: ChartDatum
-  dimensions: ChartDimensions
-  height: number
-  setHovered: (hovered: HoverState | null) => void
-  side: TooltipSide
-}) {
-  if (bar.width < 0.5) {
-    return null
-  }
-
-  const targetHeight = Math.max(height, 7)
-  const showTooltip = () => {
-    setHovered({
-      datum,
-      xPct: getTooltipX(bar, dimensions, side),
-      yPct: (bar.y / dimensions.height) * 100,
-      side,
-    })
-  }
-
-  return (
-    <rect
-      x={bar.x}
-      y={bar.y - targetHeight / 2}
-      width={bar.width}
-      height={targetHeight}
-      fill="transparent"
-      pointerEvents="all"
-      onMouseEnter={showTooltip}
-      onMouseMove={showTooltip}
-      onMouseLeave={() => setHovered(null)}
-    />
-  )
+function measure(el: HTMLElement) {
+  const w = Math.max(el.clientWidth || 0, minChartWidth)
+  const h = Math.max(el.clientHeight || 0, 80)
+  return { w, h }
 }

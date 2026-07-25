@@ -1,73 +1,49 @@
-# React + TypeScript + Vite
+# Lotus Terminal Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Vite + React + TypeScript UI for the Deribit BTC options **Gamma Exposure** terminal (Phase 5 presentation layer).
 
-Currently, two official plugins are available:
+## Scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev      # local UI (default: mock data)
+npm run build
+npm run preview
+npm run lint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Data modes
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+| Env | Value | Behavior |
+|-----|--------|----------|
+| `VITE_LOTUS_DATA_MODE` | `mock` (default in `.env`) | In-browser mock GEX snapshot; no API required |
+| `VITE_LOTUS_DATA_MODE` | anything else / omit | Live — fetches `/api/v1/terminal-snapshot` |
+| `VITE_LOTUS_API_BASE_URL` | e.g. `http://127.0.0.1:8000` | API origin (defaults to `http://127.0.0.1:8000` in dev) |
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Example live local stack:
+
+```powershell
+# Terminal A — API
+python -m uvicorn project.api.main:app --host 127.0.0.1 --port 8000
+
+# Terminal B — Vite
+cd frontend
+# .env: VITE_LOTUS_DATA_MODE=live
+npm run dev
 ```
+
+## Performance tooling
+
+Enable the FPS HUD and paint marks:
+
+- URL: `?perf=1`
+- Or: `localStorage.setItem('lotusPerf', '1')` then reload
+
+DevTools console will log heat rebuild timings as `[lotus-perf] …`.
+
+## Architecture notes
+
+- Charts: custom Canvas (heatmap) + SVG (GEX profile) with d3-scale/shape
+- State: Zustand (UI controls) + TanStack Query (snapshots)
+- Expiry switches keep previous snapshot on screen (`keepPreviousData`) to avoid full-shell remounts
+- Heatmap uses dual canvases: heat surface + interactive overlay (hover does not rebuild the field)

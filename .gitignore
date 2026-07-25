@@ -220,5 +220,14 @@ __marimo__/
 # Lotus generated artifacts
 project/runtime/
 project/greeks/data/
-project/data/phase1.sqlite3
-project/data/live_refresh.sqlite3
+project/data/*.sqlite3
+project/data/*.sqlite3-journal
+
+# Local bulk archives / scratch (never commit)
+*.zip
+frontend/tmp/
+frontend/node_modules/
+
+# Local env overrides (keep .env.example tracked)
+.env.local
+.env.*.local

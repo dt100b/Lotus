@@ -96,10 +96,14 @@ Insert behavior is `INSERT OR IGNORE` on PK to enforce idempotency across retrie
 
 ## Locked Runtime Semantics
 
-- Backfill uses Deribit continuation paging (`public/get_last_trades_by_currency_and_time`) with `sorting=asc`.
+- Backfill uses Deribit trade paging (`public/get_last_trades_by_currency_and_time`) with `sorting=asc` and `include_old=true`.
+- Deep historical backfill targets **`history.deribit.com`** by default; live/rolling appends and instrument sync use the main Deribit host.
 - Resume unit is **(job_name, chunk_start_ms, chunk_end_ms, trade_kind)**.
-- Each fetched page is committed before moving to the next continuation token.
-- Validation compares local key set vs remote key set in sampled windows.
+- Page resume tokens may be either:
+  - Native Deribit `continuation` strings (main host), or
+  - Synthetic `ts:<next_start_ms>` tokens when the host returns `has_more` without `continuation` (history host timestamp advance).
+- Each fetched page is committed before moving to the next resume token.
+- Validation compares local key set vs remote key set in sampled windows (same trade host as backfill).
 
 ## Audit Invariants (Must Hold)
 

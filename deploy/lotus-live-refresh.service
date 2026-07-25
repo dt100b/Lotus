@@ -1,0 +1,31 @@
+[Unit]
+Description=Lotus Phase 6 live GEX refresher
+Documentation=file:project/docs/phase6_live_ops.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust User/WorkingDirectory/EnvironmentFile for the host install.
+WorkingDirectory=/opt/lotus
+Environment=PYTHONUNBUFFERED=1
+# Optional: EnvironmentFile=/opt/lotus/.env
+ExecStart=/opt/lotus/.venv/bin/python project/scripts/refresh_dashboard_live.py \
+  --db-path project/data/phase1_history.sqlite3 \
+  --artifacts-dir project/runtime/dashboard_build \
+  --snapshot-path project/greeks/data/latest_gex_snapshot.json \
+  --job-name btc_options_live_phase6 \
+  --lookback-minutes 180 \
+  --interval-seconds 120 \
+  --materialize-mode auto
+Restart=always
+RestartSec=15
+# Soft upper bound so a wedged cycle is recycled; normal cycles finish well under this.
+TimeoutStartSec=0
+TimeoutStopSec=60
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
