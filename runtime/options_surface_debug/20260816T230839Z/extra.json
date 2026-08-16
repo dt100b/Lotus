@@ -1,0 +1,2433 @@
+{
+  "quote_rows": [
+    {
+      "instrument_name": "BTC-21AUG26-55000-P",
+      "strike": 55000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0001,
+      "ask_price_btc": 0.0003,
+      "mark_price_btc": 0.0002,
+      "bid_iv": 0.48950000000000005,
+      "ask_iv": 0.5624,
+      "mark_iv": 0.5212,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 33.0,
+      "ask_size": 70.7,
+      "open_interest": 90.8,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.40117930368735827
+    },
+    {
+      "instrument_name": "BTC-21AUG26-56000-P",
+      "strike": 56000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0002,
+      "ask_price_btc": 0.0003,
+      "mark_price_btc": 0.0002,
+      "bid_iv": 0.46909999999999996,
+      "ask_iv": 0.4961,
+      "mark_iv": 0.4828,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 40.0,
+      "ask_size": 60.0,
+      "open_interest": 103.0,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6584731421780468
+    },
+    {
+      "instrument_name": "BTC-21AUG26-58000-P",
+      "strike": 58000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0004,
+      "ask_price_btc": 0.0006,
+      "mark_price_btc": 0.0005,
+      "bid_iv": 0.3812,
+      "ask_iv": 0.40869999999999995,
+      "mark_iv": 0.3896,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 35.9,
+      "ask_size": 75.2,
+      "open_interest": 508.7,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6140321874931981
+    },
+    {
+      "instrument_name": "BTC-21AUG26-59000-P",
+      "strike": 59000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0007,
+      "ask_price_btc": 0.0009,
+      "mark_price_btc": 0.0007,
+      "bid_iv": 0.3464,
+      "ask_iv": 0.36460000000000004,
+      "mark_iv": 0.3505,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 45.0,
+      "ask_size": 2.0,
+      "open_interest": 479.5,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6697414364556098
+    },
+    {
+      "instrument_name": "BTC-21AUG26-60000-P",
+      "strike": 60000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0013,
+      "ask_price_btc": 0.0017,
+      "mark_price_btc": 0.0015,
+      "bid_iv": 0.3128,
+      "ask_iv": 0.3354,
+      "mark_iv": 0.3221,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 99.2,
+      "ask_size": 108.4,
+      "open_interest": 1405.6,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6153579472259008
+    },
+    {
+      "instrument_name": "BTC-21AUG26-61000-P",
+      "strike": 61000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0026,
+      "ask_price_btc": 0.0031,
+      "mark_price_btc": 0.0028,
+      "bid_iv": 0.2822,
+      "ask_iv": 0.3006,
+      "mark_iv": 0.2892,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 100.9,
+      "ask_size": 82.2,
+      "open_interest": 1011.8,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6356414231697901
+    },
+    {
+      "instrument_name": "BTC-21AUG26-62000-C",
+      "strike": 62000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.019,
+      "ask_price_btc": 0.0205,
+      "mark_price_btc": 0.0199,
+      "bid_iv": 0.24109999999999998,
+      "ask_iv": 0.2803,
+      "mark_iv": 0.2641,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 31.6,
+      "ask_size": 23.0,
+      "open_interest": 60.2,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.3619074366166548
+    },
+    {
+      "instrument_name": "BTC-21AUG26-62000-P",
+      "strike": 62000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0055,
+      "ask_price_btc": 0.006,
+      "mark_price_btc": 0.0057,
+      "bid_iv": 0.2576,
+      "ask_iv": 0.2706,
+      "mark_iv": 0.2641,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 46.3,
+      "ask_size": 12.9,
+      "open_interest": 956.2,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6770859554045909
+    },
+    {
+      "instrument_name": "BTC-21AUG26-63000-C",
+      "strike": 63000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0095,
+      "ask_price_btc": 0.0105,
+      "mark_price_btc": 0.0102,
+      "bid_iv": 0.2371,
+      "ask_iv": 0.26,
+      "mark_iv": 0.2522,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 37.5,
+      "ask_size": 21.8,
+      "open_interest": 231.7,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.5074486934639478
+    },
+    {
+      "instrument_name": "BTC-21AUG26-63000-P",
+      "strike": 63000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0115,
+      "ask_price_btc": 0.0125,
+      "mark_price_btc": 0.0119,
+      "bid_iv": 0.2422,
+      "ask_iv": 0.2652,
+      "mark_iv": 0.2522,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 5.0,
+      "ask_size": 21.4,
+      "open_interest": 350.9,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.5182107502263882
+    },
+    {
+      "instrument_name": "BTC-21AUG26-64000-C",
+      "strike": 64000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0039,
+      "ask_price_btc": 0.0044,
+      "mark_price_btc": 0.0043,
+      "bid_iv": 0.237,
+      "ask_iv": 0.251,
+      "mark_iv": 0.24719999999999998,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 90.7,
+      "ask_size": 0.4,
+      "open_interest": 350.5,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6564246421729241
+    },
+    {
+      "instrument_name": "BTC-21AUG26-64000-P",
+      "strike": 64000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.02,
+      "ask_price_btc": 0.0245,
+      "mark_price_btc": 0.0219,
+      "bid_iv": 0.1895,
+      "ask_iv": 0.31579999999999997,
+      "mark_iv": 0.24719999999999998,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 1.0,
+      "ask_size": 11.8,
+      "open_interest": 162.2,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.044617019473265004
+    },
+    {
+      "instrument_name": "BTC-21AUG26-65000-C",
+      "strike": 65000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0014,
+      "ask_price_btc": 0.0018,
+      "mark_price_btc": 0.0016,
+      "bid_iv": 0.2434,
+      "ask_iv": 0.2618,
+      "mark_iv": 0.255,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 45.7,
+      "ask_size": 57.9,
+      "open_interest": 1149.3,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6090603747455422
+    },
+    {
+      "instrument_name": "BTC-21AUG26-66000-C",
+      "strike": 66000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0006,
+      "ask_price_btc": 0.0008,
+      "mark_price_btc": 0.0007,
+      "bid_iv": 0.2657,
+      "ask_iv": 0.282,
+      "mark_iv": 0.2779,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 40.0,
+      "ask_size": 42.9,
+      "open_interest": 1498.1,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6505318259658495
+    },
+    {
+      "instrument_name": "BTC-21AUG26-67000-C",
+      "strike": 67000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0003,
+      "ask_price_btc": 0.0004,
+      "mark_price_btc": 0.0004,
+      "bid_iv": 0.2928,
+      "ask_iv": 0.307,
+      "mark_iv": 0.30469999999999997,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 45.8,
+      "ask_size": 74.0,
+      "open_interest": 1888.4,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.6839776230505803
+    },
+    {
+      "instrument_name": "BTC-21AUG26-68000-C",
+      "strike": 68000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0001,
+      "ask_price_btc": 0.0002,
+      "mark_price_btc": 0.0002,
+      "bid_iv": 0.3004,
+      "ask_iv": 0.32909999999999995,
+      "mark_iv": 0.321,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 33.1,
+      "ask_size": 30.0,
+      "open_interest": 2315.8,
+      "volume": null,
+      "accepted": true,
+      "rejection_reason": null,
+      "fit_weight": 0.5533910307158008
+    },
+    {
+      "instrument_name": "BTC-21AUG26-53000-C",
+      "strike": 53000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.154,
+      "ask_price_btc": 0.1595,
+      "mark_price_btc": 0.1574,
+      "bid_iv": null,
+      "ask_iv": 0.9743999999999999,
+      "mark_iv": 0.6207,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 10.6,
+      "ask_size": 1.0,
+      "open_interest": 0.0,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-53000-P",
+      "strike": 53000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0,
+      "ask_price_btc": 0.0002,
+      "mark_price_btc": 0.0001,
+      "bid_iv": null,
+      "ask_iv": 0.6605,
+      "mark_iv": 0.6207,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": null,
+      "ask_size": 69.4,
+      "open_interest": 121.7,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "zero_bid",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-55000-C",
+      "strike": 55000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.122,
+      "ask_price_btc": 0.128,
+      "mark_price_btc": 0.1256,
+      "bid_iv": null,
+      "ask_iv": 0.8243,
+      "mark_iv": 0.5212,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 10.2,
+      "ask_size": 1.0,
+      "open_interest": 0.0,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-56000-C",
+      "strike": 56000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.1065,
+      "ask_price_btc": 0.112,
+      "mark_price_btc": 0.1098,
+      "bid_iv": null,
+      "ask_iv": 0.7302,
+      "mark_iv": 0.4828,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 1.0,
+      "ask_size": 1.0,
+      "open_interest": 0.0,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-58000-C",
+      "strike": 58000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0745,
+      "ask_price_btc": 0.0815,
+      "mark_price_btc": 0.0782,
+      "bid_iv": null,
+      "ask_iv": 0.6227,
+      "mark_iv": 0.3896,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 9.9,
+      "ask_size": 1.0,
+      "open_interest": 0.0,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-59000-C",
+      "strike": 59000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.059,
+      "ask_price_btc": 0.0655,
+      "mark_price_btc": 0.0626,
+      "bid_iv": null,
+      "ask_iv": 0.5219,
+      "mark_iv": 0.3505,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 9.9,
+      "ask_size": 1.0,
+      "open_interest": 0.0,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-60000-C",
+      "strike": 60000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.044,
+      "ask_price_btc": 0.05,
+      "mark_price_btc": 0.0474,
+      "bid_iv": null,
+      "ask_iv": 0.4389,
+      "mark_iv": 0.3221,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 1.0,
+      "ask_size": 1.0,
+      "open_interest": 1.0,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-61000-C",
+      "strike": 61000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.03,
+      "ask_price_btc": 0.035,
+      "mark_price_btc": 0.0328,
+      "bid_iv": null,
+      "ask_iv": 0.3624,
+      "mark_iv": 0.2892,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 1.0,
+      "ask_size": 1.0,
+      "open_interest": 11.6,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-65000-P",
+      "strike": 65000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.033,
+      "ask_price_btc": 0.039,
+      "mark_price_btc": 0.0352,
+      "bid_iv": null,
+      "ask_iv": 0.3887,
+      "mark_iv": 0.255,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 1.0,
+      "ask_size": 9.7,
+      "open_interest": 106.3,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-66000-P",
+      "strike": 66000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0475,
+      "ask_price_btc": 0.054,
+      "mark_price_btc": 0.0502,
+      "bid_iv": null,
+      "ask_iv": 0.4561,
+      "mark_iv": 0.2779,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 1.0,
+      "ask_size": 8.9,
+      "open_interest": 14.8,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-67000-P",
+      "strike": 67000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.063,
+      "ask_price_btc": 0.07,
+      "mark_price_btc": 0.0658,
+      "bid_iv": null,
+      "ask_iv": 0.5475,
+      "mark_iv": 0.30469999999999997,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 0.9,
+      "ask_size": 8.5,
+      "open_interest": 16.9,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-68000-P",
+      "strike": 68000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0785,
+      "ask_price_btc": 0.086,
+      "mark_price_btc": 0.0814,
+      "bid_iv": null,
+      "ask_iv": 0.6347,
+      "mark_iv": 0.321,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 0.9,
+      "ask_size": 8.4,
+      "open_interest": 1.5,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-69000-C",
+      "strike": 69000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0,
+      "ask_price_btc": 0.0001,
+      "mark_price_btc": 0.0001,
+      "bid_iv": null,
+      "ask_iv": 0.3489,
+      "mark_iv": 0.3259,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": null,
+      "ask_size": 30.0,
+      "open_interest": 751.4,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "zero_bid",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-69000-P",
+      "strike": 69000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.0945,
+      "ask_price_btc": 0.102,
+      "mark_price_btc": 0.0972,
+      "bid_iv": null,
+      "ask_iv": 0.7189,
+      "mark_iv": 0.3259,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 0.9,
+      "ask_size": 8.2,
+      "open_interest": 0.0,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-70000-C",
+      "strike": 70000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0,
+      "ask_price_btc": 0.0001,
+      "mark_price_btc": 0.0,
+      "bid_iv": null,
+      "ask_iv": 0.39590000000000003,
+      "mark_iv": 0.344,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": null,
+      "ask_size": 30.0,
+      "open_interest": 1546.7,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "zero_bid",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-70000-P",
+      "strike": 70000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.11,
+      "ask_price_btc": 0.1175,
+      "mark_price_btc": 0.1131,
+      "bid_iv": null,
+      "ask_iv": 0.7761,
+      "mark_iv": 0.344,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 0.9,
+      "ask_size": 0.9,
+      "open_interest": 0.1,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-72000-C",
+      "strike": 72000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0,
+      "ask_price_btc": 0.0001,
+      "mark_price_btc": 0.0,
+      "bid_iv": null,
+      "ask_iv": 0.48619999999999997,
+      "mark_iv": 0.3836,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": null,
+      "ask_size": 30.0,
+      "open_interest": 1399.9,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "zero_bid",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-72000-P",
+      "strike": 72000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.142,
+      "ask_price_btc": 0.149,
+      "mark_price_btc": 0.1449,
+      "bid_iv": null,
+      "ask_iv": 0.9018,
+      "mark_iv": 0.3836,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 0.8,
+      "ask_size": 0.8,
+      "open_interest": 0.0,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-75000-C",
+      "strike": 75000.0,
+      "call_put": "call",
+      "bid_price_btc": 0.0,
+      "ask_price_btc": 0.0001,
+      "mark_price_btc": 0.0,
+      "bid_iv": null,
+      "ask_iv": 0.6136,
+      "mark_iv": 0.4866,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": null,
+      "ask_size": 41.2,
+      "open_interest": 1532.3,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "zero_bid",
+      "fit_weight": 0.0
+    },
+    {
+      "instrument_name": "BTC-21AUG26-75000-P",
+      "strike": 75000.0,
+      "call_put": "put",
+      "bid_price_btc": 0.1895,
+      "ask_price_btc": 0.197,
+      "mark_price_btc": 0.1926,
+      "bid_iv": null,
+      "ask_iv": 1.1142,
+      "mark_iv": 0.4866,
+      "quote_age_seconds": 0.0,
+      "state": "open",
+      "bid_size": 0.8,
+      "ask_size": 0.8,
+      "open_interest": 0.4,
+      "volume": null,
+      "accepted": false,
+      "rejection_reason": "invalid_iv_market",
+      "fit_weight": 0.0
+    }
+  ],
+  "accepted_rows": 16,
+  "accepted_calls": 7,
+  "accepted_puts": 9,
+  "unique_k": 13,
+  "selection": {
+    "preferred": 13,
+    "fallback": 0,
+    "atm_merged": 0,
+    "synthetic_atm": true,
+    "lower": 7,
+    "upper": 6,
+    "center_log_gap": 0.01600034134644112,
+    "around_atm": {
+      "band_log_moneyness": 0.05,
+      "strikes_within_band": 7,
+      "definition": "count of accepted OTM strikes with |ln(K/F)| <= 0.05"
+    }
+  },
+  "pchip": {
+    "fitter": "tv_pchip",
+    "grade": "diagnostic",
+    "status": "degraded",
+    "optimizer_status": "interpolating_pchip",
+    "parameters": {
+      "knot_count": 14.0
+    },
+    "residual_rms": 0.0,
+    "weighted_residual_rms": 0.0,
+    "k_min": -0.133974476266648,
+    "k_max": 0.07820004367698787,
+    "notes": [
+      "Baseline interpolant in total variance. Diagnostic grade: not an arbitrage-free parametric smile.",
+      "call_not_convex_in_strike"
+    ],
+    "arbitrage": {
+      "positive_variance": true,
+      "call_monotone": true,
+      "call_convex": false,
+      "butterfly_ok": false,
+      "calendar_ok": null,
+      "min_total_variance": 0.0007324200887269366,
+      "min_call_step": -2.500383726806831,
+      "min_butterfly": -0.7251970073921257,
+      "min_calendar_dw": null,
+      "violations": [
+        "call_not_convex_in_strike"
+      ],
+      "worst_convexity_strike": 56179.427840553966,
+      "worst_monotone_strike": null
+    },
+    "inputs": [
+      {
+        "K": 55000.0,
+        "k": -0.133974476266648,
+        "IV": 0.5212,
+        "w": 0.0032555796819495873,
+        "weight": 0.4841394494969002,
+        "origin": "raw_observed",
+        "fitted_iv": 0.5212,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 56000.0,
+        "k": -0.11595597076396968,
+        "IV": 0.4828,
+        "w": 0.0027935344930251718,
+        "weight": 0.8147709158684363,
+        "origin": "raw_observed",
+        "fitted_iv": 0.4828,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 58000.0,
+        "k": -0.08086465095269948,
+        "IV": 0.3896,
+        "w": 0.0018191035094955949,
+        "weight": 0.7895010267650682,
+        "origin": "raw_observed",
+        "fitted_iv": 0.3896,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 59000.0,
+        "k": -0.06377021759339938,
+        "IV": 0.3505,
+        "w": 0.0014722974500607372,
+        "weight": 0.8730399762037729,
+        "origin": "raw_observed",
+        "fitted_iv": 0.3505,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 60000.0,
+        "k": -0.04696309927701816,
+        "IV": 0.3221,
+        "w": 0.0012433716617658971,
+        "weight": 0.8104853287617472,
+        "origin": "raw_observed",
+        "fitted_iv": 0.3221,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 61000.0,
+        "k": -0.030433797325807612,
+        "IV": 0.2892,
+        "w": 0.0010023423786573319,
+        "weight": 0.8431720521004937,
+        "origin": "raw_observed",
+        "fitted_iv": 0.2892,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 62000.0,
+        "k": -0.014173276454027316,
+        "IV": 0.2641,
+        "w": 0.0008359038350167855,
+        "weight": 0.9017743231046337,
+        "origin": "raw_observed",
+        "fitted_iv": 0.2641,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 63000.0,
+        "k": 0.001827064892413914,
+        "IV": 0.2522,
+        "w": 0.000762271495121265,
+        "weight": 0.6765857103050462,
+        "origin": "raw_observed",
+        "fitted_iv": 0.2522,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 64000.0,
+        "k": 0.01757542186055307,
+        "IV": 0.24719999999999998,
+        "w": 0.0007323462264889124,
+        "weight": 0.8737321695296264,
+        "origin": "raw_observed",
+        "fitted_iv": 0.24719999999999998,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 65000.0,
+        "k": 0.03307960839651831,
+        "IV": 0.255,
+        "w": 0.0007792913867916382,
+        "weight": 0.8071586552803864,
+        "origin": "raw_observed",
+        "fitted_iv": 0.255,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 66000.0,
+        "k": 0.048347080527306734,
+        "IV": 0.2779,
+        "w": 0.000925543017741072,
+        "weight": 0.8561850354861744,
+        "origin": "raw_observed",
+        "fitted_iv": 0.2779,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 67000.0,
+        "k": 0.06338495789184723,
+        "IV": 0.30469999999999997,
+        "w": 0.0011126649914453529,
+        "weight": 0.891840211001233,
+        "origin": "raw_observed",
+        "fitted_iv": 0.30469999999999997,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 68000.0,
+        "k": 0.07820004367698787,
+        "IV": 0.321,
+        "w": 0.0012348937145159123,
+        "weight": 0.7132081680277028,
+        "origin": "raw_observed",
+        "fitted_iv": 0.321,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      },
+      {
+        "K": 62885.0,
+        "k": 0.0,
+        "IV": 0.25355885052380844,
+        "w": 0.0007705078432131737,
+        "weight": 0.16914642757626155,
+        "origin": "synthetic_atm",
+        "fitted_iv": 0.25355885052380844,
+        "residual_iv": 0.0,
+        "query_status": "available"
+      }
+    ],
+    "max_abs_residual_iv": 0.0,
+    "grid": [
+      {
+        "k": -0.133974476266648,
+        "w": 0.0032555796819495873,
+        "iv": 0.5212,
+        "domain": "available"
+      },
+      {
+        "k": -0.13132229476735255,
+        "w": 0.003189263364797972,
+        "iv": 0.5158642531107602,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1286701132680571,
+        "w": 0.0031224651515153108,
+        "iv": 0.5104333504864556,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.12601793176876164,
+        "w": 0.0030551208691399832,
+        "iv": 0.5048989188795028,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1233657502694662,
+        "w": 0.002987166344710373,
+        "iv": 0.49925215268427287,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.12071356877017075,
+        "w": 0.0029185374052648596,
+        "iv": 0.49348377039490343,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1180613872708753,
+        "w": 0.0028491698778418256,
+        "iv": 0.48758396473564497,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.11540920577157986,
+        "w": 0.002778957519230895,
+        "iv": 0.4815387003892329,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1127570242722844,
+        "w": 0.0027066690530818762,
+        "iv": 0.4752343468185068,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.11010484277298896,
+        "w": 0.002632158234891571,
+        "iv": 0.4686474294418596,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.10745266127369352,
+        "w": 0.0025559662029822675,
+        "iv": 0.4618147457336134,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.10480047977439806,
+        "w": 0.0024786340956762538,
+        "iv": 0.45477486340466444,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1021482982751026,
+        "w": 0.0024007030512958193,
+        "iv": 0.4475684499277748,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.09949611677580716,
+        "w": 0.0023227142081632527,
+        "iv": 0.4402386120732281,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.09684393527651172,
+        "w": 0.0022452087046008424,
+        "iv": 0.4328312421464806,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.09419175377721627,
+        "w": 0.002168727678930876,
+        "iv": 0.4253953648660984,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.09153957227792082,
+        "w": 0.0020938122694756428,
+        "iv": 0.4179834752711523,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.08888739077862537,
+        "w": 0.002021003614557431,
+        "iv": 0.4106518535861404,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.08623520927932993,
+        "w": 0.0019508428524985298,
+        "iv": 0.40346083755007806,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.08358302778003449,
+        "w": 0.001883871121621227,
+        "iv": 0.39647502641841553,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.08093084628073903,
+        "w": 0.0018206295602478109,
+        "iv": 0.38976338397732024,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.07827866478144359,
+        "w": 0.0017601974471588983,
+        "iv": 0.38324009199339437,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.07562648328214813,
+        "w": 0.0017014633848162527,
+        "iv": 0.3767918896503033,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.07297430178285269,
+        "w": 0.0016449059764844587,
+        "iv": 0.3704765993965042,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.07032212028355724,
+        "w": 0.0015910047769072478,
+        "iv": 0.36435604909433617,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.06766993878426178,
+        "w": 0.0015402393408283537,
+        "iv": 0.35849602809240483,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.06501775728496634,
+        "w": 0.0014930892229915102,
+        "iv": 0.3529662027130366,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.062365575785670896,
+        "w": 0.0014500667081784808,
+        "iv": 0.34784377306758424,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.05971339428637544,
+        "w": 0.0014111548184038562,
+        "iv": 0.3431449199790614,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.05706121278708,
+        "w": 0.0013752007841740259,
+        "iv": 0.33874531544648717,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.05440903128778454,
+        "w": 0.0013409625300186126,
+        "iv": 0.33450188055697805,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.0517568497884891,
+        "w": 0.001307197980467241,
+        "iv": 0.3302637641807402,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.04910466828919366,
+        "w": 0.0012726650600495344,
+        "iv": 0.3258721927178219,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.046452486789898204,
+        "w": 0.0012361244997519648,
+        "iv": 0.32115992617957717,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.04380030529060276,
+        "w": 0.0011970245329684728,
+        "iv": 0.31603979252610764,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.041148123791307306,
+        "w": 0.0011563951523290354,
+        "iv": 0.31062998346166215,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.038495942292011864,
+        "w": 0.0011154879701553,
+        "iv": 0.30508628730323695,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.03584376079271642,
+        "w": 0.0010755545987689123,
+        "iv": 0.2995756243515935,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.03319157929342097,
+        "w": 0.0010378466504915188,
+        "iv": 0.2942773498952539,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.030539397794125525,
+        "w": 0.0010036157376447656,
+        "iv": 0.2893836391161616,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.02788721629483007,
+        "w": 0.0009717179059811927,
+        "iv": 0.28474777889060937,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.025235034795534628,
+        "w": 0.0009403871223255728,
+        "iv": 0.2801196525384119,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.022582853296239186,
+        "w": 0.0009105264810800964,
+        "iv": 0.27563637699739946,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.01993067179694373,
+        "w": 0.0008830431049385018,
+        "iv": 0.2714445923893714,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.01727849029764829,
+        "w": 0.0008588441165945275,
+        "iv": 0.2676994104850436,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.014626308798352833,
+        "w": 0.0008388366387419119,
+        "iv": 0.26456289730485083,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.011974127299057391,
+        "w": 0.0008230813936085912,
+        "iv": 0.2620665759711256,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.00932194579976195,
+        "w": 0.000809894966718503,
+        "iv": 0.2599588411672525,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.00666976430046648,
+        "w": 0.0007983448295566094,
+        "iv": 0.2580985120482275,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.004017582801171038,
+        "w": 0.000787525558325227,
+        "iv": 0.2563436542306842,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.0013654013018755684,
+        "w": 0.000776531729226673,
+        "iv": 0.2545480915095647,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.0012867801974198734,
+        "w": 0.000764297334148245,
+        "iv": 0.25253490534462014,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.003938961696715315,
+        "w": 0.000756058393524429,
+        "iv": 0.2511700846329355,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.006591143196010757,
+        "w": 0.000748770502895864,
+        "iv": 0.24995659854092772,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.009243324695306199,
+        "w": 0.0007423943796582677,
+        "iv": 0.2488900758349075,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.011895506194601668,
+        "w": 0.0007372933906827445,
+        "iv": 0.24803354060126884,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.01454768769389711,
+        "w": 0.0007338309028403989,
+        "iv": 0.24745044586796605,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.017199869193192552,
+        "w": 0.0007323702830023354,
+        "iv": 0.24720406004773982,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.019852050692487994,
+        "w": 0.0007337715225485911,
+        "iv": 0.2474404340403874,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.022504232191783435,
+        "w": 0.0007386384701040403,
+        "iv": 0.2482596872019321,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.025156413691078905,
+        "w": 0.0007463137024664704,
+        "iv": 0.2495461937294249,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.027808595190374347,
+        "w": 0.0007561228143327281,
+        "iv": 0.2511807850202037,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.03046077668966979,
+        "w": 0.0007673914003996612,
+        "iv": 0.2530455512051349,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.03311295818896523,
+        "w": 0.000779445678934702,
+        "iv": 0.2550252425151128,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.03576513968826067,
+        "w": 0.0007954626798480275,
+        "iv": 0.2576322028057578,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.03841732118755614,
+        "w": 0.0008176809183176012,
+        "iv": 0.2612054137284132,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.04106950268685158,
+        "w": 0.0008443128639808512,
+        "iv": 0.2654250729985196,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.043721684186147025,
+        "w": 0.0008735709864752073,
+        "iv": 0.26998481792349965,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.04637386568544247,
+        "w": 0.0009036677554380988,
+        "iv": 0.2745962710975938,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.04902604718473791,
+        "w": 0.0009330660286836518,
+        "iv": 0.27902712946765174,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.05167822868403338,
+        "w": 0.000965185216797142,
+        "iv": 0.28378901005736634,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.05433041018332882,
+        "w": 0.0010001145395755094,
+        "iv": 0.2888784285089516,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.05698259168262426,
+        "w": 0.0010358042429983074,
+        "iv": 0.2939876489776958,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.059634773181919704,
+        "w": 0.0010702045730450888,
+        "iv": 0.29882962068263036,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.062286954681215145,
+        "w": 0.0011012657756954076,
+        "iv": 0.3031351610792911,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.06493913618051061,
+        "w": 0.0011278665018839094,
+        "iv": 0.3067743830695588,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.06759131767980606,
+        "w": 0.0011527431789256663,
+        "iv": 0.3101391004402861,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.07024349917910153,
+        "w": 0.001176095455987307,
+        "iv": 0.313264749675169,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.07289568067839694,
+        "w": 0.0011977121157912688,
+        "iv": 0.31613054769874915,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.07554786217769241,
+        "w": 0.0012173819410599912,
+        "iv": 0.31871585589502427,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.07820004367698785,
+        "w": 0.0012348937145159123,
+        "iv": 0.321,
+        "domain": "available"
+      }
+    ]
+  },
+  "svi_raw": {
+    "fitter": "svi_raw",
+    "grade": "research",
+    "status": "research",
+    "optimizer_status": "`gtol` termination condition is satisfied.",
+    "parameters": {
+      "a": 5.901182538194894e-11,
+      "b": 0.018567630804125188,
+      "rho": -0.4454090678036051,
+      "m": -0.02005570385088329,
+      "sigma": 0.045211341911110044
+    },
+    "residual_rms": 4.868719810143197e-05,
+    "weighted_residual_rms": 5.0352353259121826e-05,
+    "k_min": -0.133974476266648,
+    "k_max": 0.07820004367698787,
+    "notes": [
+      "Research-grade raw SVI. Not production-ready.",
+      "optimizer_success=True",
+      "cost=1.33166e-08",
+      "call_not_convex_in_strike"
+    ],
+    "arbitrage": {
+      "positive_variance": true,
+      "call_monotone": true,
+      "call_convex": false,
+      "butterfly_ok": false,
+      "calendar_ok": null,
+      "min_total_variance": 0.0007519265745057663,
+      "min_call_step": -2.036523747557567,
+      "min_butterfly": -0.6251048194753821,
+      "min_calendar_dw": null,
+      "violations": [
+        "call_not_convex_in_strike"
+      ],
+      "worst_convexity_strike": 55194.83760336925,
+      "worst_monotone_strike": null
+    },
+    "inputs": [
+      {
+        "K": 55000.0,
+        "k": -0.133974476266648,
+        "IV": 0.5212,
+        "w": 0.0032555796819495873,
+        "weight": 0.4841394494969002,
+        "origin": "raw_observed",
+        "fitted_iv": 0.5181689703925983,
+        "residual_iv": -0.0030310296074016474,
+        "query_status": "available"
+      },
+      {
+        "K": 56000.0,
+        "k": -0.11595597076396968,
+        "IV": 0.4828,
+        "w": 0.0027935344930251718,
+        "weight": 0.8147709158684363,
+        "origin": "raw_observed",
+        "fitted_iv": 0.4800423858070351,
+        "residual_iv": -0.0027576141929648856,
+        "query_status": "available"
+      },
+      {
+        "K": 58000.0,
+        "k": -0.08086465095269948,
+        "IV": 0.3896,
+        "w": 0.0018191035094955949,
+        "weight": 0.7895010267650682,
+        "origin": "raw_observed",
+        "fitted_iv": 0.39920011347335627,
+        "residual_iv": 0.009600113473356264,
+        "query_status": "available"
+      },
+      {
+        "K": 59000.0,
+        "k": -0.06377021759339938,
+        "IV": 0.3505,
+        "w": 0.0014722974500607372,
+        "weight": 0.8730399762037729,
+        "origin": "raw_observed",
+        "fitted_iv": 0.3572121320833218,
+        "residual_iv": 0.006712132083321831,
+        "query_status": "available"
+      },
+      {
+        "K": 60000.0,
+        "k": -0.04696309927701816,
+        "IV": 0.3221,
+        "w": 0.0012433716617658971,
+        "weight": 0.8104853287617472,
+        "origin": "raw_observed",
+        "fitted_iv": 0.3163556665025731,
+        "residual_iv": -0.005744333497426923,
+        "query_status": "available"
+      },
+      {
+        "K": 61000.0,
+        "k": -0.030433797325807612,
+        "IV": 0.2892,
+        "w": 0.0010023423786573319,
+        "weight": 0.8431720521004937,
+        "origin": "raw_observed",
+        "fitted_iv": 0.281121964436096,
+        "residual_iv": -0.008078035563904018,
+        "query_status": "available"
+      },
+      {
+        "K": 62000.0,
+        "k": -0.014173276454027316,
+        "IV": 0.2641,
+        "w": 0.0008359038350167855,
+        "weight": 0.9017743231046337,
+        "origin": "raw_observed",
+        "fitted_iv": 0.258025692674192,
+        "residual_iv": -0.006074307325807993,
+        "query_status": "available"
+      },
+      {
+        "K": 63000.0,
+        "k": 0.001827064892413914,
+        "IV": 0.2522,
+        "w": 0.000762271495121265,
+        "weight": 0.6765857103050462,
+        "origin": "raw_observed",
+        "fitted_iv": 0.2504372739648092,
+        "residual_iv": -0.001762726035190787,
+        "query_status": "available"
+      },
+      {
+        "K": 64000.0,
+        "k": 0.01757542186055307,
+        "IV": 0.24719999999999998,
+        "w": 0.0007323462264889124,
+        "weight": 0.8737321695296264,
+        "origin": "raw_observed",
+        "fitted_iv": 0.2552778626613963,
+        "residual_iv": 0.008077862661396318,
+        "query_status": "available"
+      },
+      {
+        "K": 65000.0,
+        "k": 0.03307960839651831,
+        "IV": 0.255,
+        "w": 0.0007792913867916382,
+        "weight": 0.8071586552803864,
+        "origin": "raw_observed",
+        "fitted_iv": 0.2672507611431458,
+        "residual_iv": 0.012250761143145772,
+        "query_status": "available"
+      },
+      {
+        "K": 66000.0,
+        "k": 0.048347080527306734,
+        "IV": 0.2779,
+        "w": 0.000925543017741072,
+        "weight": 0.8561850354861744,
+        "origin": "raw_observed",
+        "fitted_iv": 0.2825431305321759,
+        "residual_iv": 0.00464313053217591,
+        "query_status": "available"
+      },
+      {
+        "K": 67000.0,
+        "k": 0.06338495789184723,
+        "IV": 0.30469999999999997,
+        "w": 0.0011126649914453529,
+        "weight": 0.891840211001233,
+        "origin": "raw_observed",
+        "fitted_iv": 0.2990853536992937,
+        "residual_iv": -0.005614646300706294,
+        "query_status": "available"
+      },
+      {
+        "K": 68000.0,
+        "k": 0.07820004367698787,
+        "IV": 0.321,
+        "w": 0.0012348937145159123,
+        "weight": 0.7132081680277028,
+        "origin": "raw_observed",
+        "fitted_iv": 0.31585868654121424,
+        "residual_iv": -0.005141313458785768,
+        "query_status": "available"
+      },
+      {
+        "K": 62885.0,
+        "k": 0.0,
+        "IV": 0.25355885052380844,
+        "w": 0.0007705078432131737,
+        "weight": 0.16914642757626155,
+        "origin": "synthetic_atm",
+        "fitted_iv": 0.25057691063665355,
+        "residual_iv": -0.002981939887154894,
+        "query_status": "available"
+      }
+    ],
+    "max_abs_residual_iv": 0.012250761143145772,
+    "grid": [
+      {
+        "k": -0.133974476266648,
+        "w": 0.0032178242501926064,
+        "iv": 0.5181689703925983,
+        "domain": "available"
+      },
+      {
+        "k": -0.13132229476735255,
+        "w": 0.003150192430854303,
+        "iv": 0.5126946483517018,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1286701132680571,
+        "w": 0.003082714777675368,
+        "iv": 0.507173921674693,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.12601793176876164,
+        "w": 0.0030154011378628037,
+        "iv": 0.5016060771916792,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1233657502694662,
+        "w": 0.002948262175237204,
+        "iv": 0.49599042510572505,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.12071356877017075,
+        "w": 0.002881309451832566,
+        "iv": 0.49032630659546744,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1180613872708753,
+        "w": 0.002814555518764073,
+        "iv": 0.4846131027784786,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.11540920577157986,
+        "w": 0.0027480140174879495,
+        "iv": 0.47885024526565967,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1127570242722844,
+        "w": 0.002681699792708683,
+        "iv": 0.4730372285756606,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.11010484277298896,
+        "w": 0.002615629018330461,
+        "iv": 0.4671736247232508,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.10745266127369352,
+        "w": 0.00254981933799984,
+        "iv": 0.46125910034750406,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.10480047977439806,
+        "w": 0.002484290021942697,
+        "iv": 0.45529343680541684,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.1021482982751026,
+        "w": 0.002419062141955347,
+        "iv": 0.4492765537248749,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.09949611677580716,
+        "w": 0.0023541587665598823,
+        "iv": 0.4432085365882982,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.09684393527651172,
+        "w": 0.002289605178465874,
+        "iv": 0.43708966900506885,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.09419175377721627,
+        "w": 0.00222542911657798,
+        "iv": 0.4309204704266785,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.09153957227792082,
+        "w": 0.002161661044828182,
+        "iv": 0.42470174016222145,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.08888739077862537,
+        "w": 0.0020983344500592497,
+        "iv": 0.41843460866083887,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.08623520927932993,
+        "w": 0.0020354861709972446,
+        "iv": 0.41212059713735455,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.08358302778003449,
+        "w": 0.00197315675996391,
+        "iv": 0.4057616867200115,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.08093084628073903,
+        "w": 0.0019113908783128374,
+        "iv": 0.3993603983830379,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.07827866478144359,
+        "w": 0.001850237725519327,
+        "iv": 0.392919884973952,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.07562648328214813,
+        "w": 0.0017897515002760604,
+        "iv": 0.3864440366302615,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.07297430178285269,
+        "w": 0.001729991889674427,
+        "iv": 0.3799376007662075,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.07032212028355724,
+        "w": 0.0016710245793793435,
+        "iv": 0.3734063175477984,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.06766993878426178,
+        "w": 0.001612921773398057,
+        "iv": 0.36685707129779016,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.06501775728496634,
+        "w": 0.0015557627063493126,
+        "iv": 0.3602980574976015,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.062365575785670896,
+        "w": 0.0014996341238222952,
+        "iv": 0.35373896387842363,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.05971339428637544,
+        "w": 0.0014446306973098949,
+        "iv": 0.3471911624031399,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.05706121278708,
+        "w": 0.001390855329305326,
+        "iv": 0.340667906616007,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.05440903128778454,
+        "w": 0.0013384192917595867,
+        "iv": 0.3341845257811271,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.0517568497884891,
+        "w": 0.0012874421279847298,
+        "iv": 0.3277586034068792,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.04910466828919366,
+        "w": 0.001238051235729074,
+        "iv": 0.32141012324561147,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.046452486789898204,
+        "w": 0.0011903810399365338,
+        "iv": 0.3151615609513964,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.04380030529060276,
+        "w": 0.0011445716610706358,
+        "iv": 0.30903789485273825,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.041148123791307306,
+        "w": 0.0011007669932248418,
+        "iv": 0.3030665057047741,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.038495942292011864,
+        "w": 0.0010591121303948061,
+        "iv": 0.2972769341743896,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.03584376079271642,
+        "w": 0.001019750123457316,
+        "iv": 0.29170046781989606,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.03319157929342097,
+        "w": 0.000982818116416205,
+        "iv": 0.28636953808240595,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.030539397794125525,
+        "w": 0.00094844299565024,
+        "iv": 0.28131692339425185,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.02788721629483007,
+        "w": 0.0009167367811301453,
+        "iv": 0.2765747767699383,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.025235034795534628,
+        "w": 0.0008877920777912037,
+        "iv": 0.27217352310511805,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.022582853296239186,
+        "w": 0.000861677967368661,
+        "iv": 0.26814069861264483,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.01993067179694373,
+        "w": 0.0008384367349112293,
+        "iv": 0.26449982642558295,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.01727849029764829,
+        "w": 0.000818081775862035,
+        "iv": 0.2612694321791483,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.014626308798352833,
+        "w": 0.000800596918805323,
+        "iv": 0.2584622969147914,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.011974127299057391,
+        "w": 0.0007859372422096365,
+        "iv": 0.25608502119203774,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.00932194579976195,
+        "w": 0.0007740312908389505,
+        "iv": 0.2541379376219149,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.00666976430046648,
+        "w": 0.0007647844439470804,
+        "iv": 0.25261536659172684,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.004017582801171038,
+        "w": 0.0007580830820227395,
+        "iv": 0.25150617056138386,
+        "domain": "interpolated"
+      },
+      {
+        "k": -0.0013654013018755684,
+        "w": 0.0007537991566573993,
+        "iv": 0.2507945334407898,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.0012867801974198734,
+        "w": 0.0007517947873271592,
+        "iv": 0.25046087727106925,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.003938961696715315,
+        "w": 0.0007519265745057665,
+        "iv": 0.2504828287972849,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.006591143196010757,
+        "w": 0.0007540494091621194,
+        "iv": 0.2508361604122547,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.009243324695306199,
+        "w": 0.0007580196535623085,
+        "iv": 0.2514956486388746,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.011895506194601668,
+        "w": 0.000763697651943069,
+        "iv": 0.2524358140619326,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.01454768769389711,
+        "w": 0.0007709495936073369,
+        "iv": 0.2536315257556655,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.017199869193192552,
+        "w": 0.000779648793144147,
+        "iv": 0.25505846861270715,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.019852050692487994,
+        "w": 0.0007896764749378454,
+        "iv": 0.2566934827848911,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.022504232191783435,
+        "w": 0.0008009221562323727,
+        "iv": 0.2585147909194665,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.025156413691078905,
+        "w": 0.0008132837195893788,
+        "iv": 0.260502131796011,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.027808595190374347,
+        "w": 0.0008266672559382041,
+        "iv": 0.2626368193115788,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.03046077668966979,
+        "w": 0.0008409867468994743,
+        "iv": 0.2649017444483566,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.03311295818896523,
+        "w": 0.0008561636419691259,
+        "iv": 0.2672813356443699,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.03576513968826067,
+        "w": 0.0008721263738751482,
+        "iv": 0.26976149042439423,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.03841732118755614,
+        "w": 0.0008888098446858991,
+        "iv": 0.27232948859683254,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.04106950268685158,
+        "w": 0.00090615490631607,
+        "iv": 0.27497389499283437,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.043721684186147025,
+        "w": 0.0009241078519211136,
+        "iv": 0.27768445771661476,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.04637386568544247,
+        "w": 0.000942619929118241,
+        "iv": 0.2804520062187814,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.04902604718473791,
+        "w": 0.0009616468817824536,
+        "iv": 0.28326835218241503,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.05167822868403338,
+        "w": 0.0009811485240885378,
+        "iv": 0.2861261951872494,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.05433041018332882,
+        "w": 0.0010010883482714232,
+        "iv": 0.2890190343444231,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.05698259168262426,
+        "w": 0.0010214331660556093,
+        "iv": 0.2919410865262375,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.059634773181919704,
+        "w": 0.0010421527826922307,
+        "iv": 0.29488721140936686,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.062286954681215145,
+        "w": 0.0010632197019059238,
+        "iv": 0.2978528432691003,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.06493913618051061,
+        "w": 0.001084608859688521,
+        "iv": 0.3008339292758677,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.06759131767980606,
+        "w": 0.0011062973847030238,
+        "iv": 0.3038268739289661,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.07024349917910153,
+        "w": 0.001128264383019543,
+        "iv": 0.30682848919681793,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.07289568067839694,
+        "w": 0.001150490744950765,
+        "iv": 0.3098359499034708,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.07554786217769241,
+        "w": 0.0011729589718561056,
+        "iv": 0.3128467538962518,
+        "domain": "interpolated"
+      },
+      {
+        "k": 0.07820004367698785,
+        "w": 0.001195653020918076,
+        "iv": 0.31585868654121424,
+        "domain": "available"
+      }
+    ]
+  },
+  "density": {
+    "built": true,
+    "status": "rejected",
+    "mass": 0.9852080658968008,
+    "raw_negative_mass": 0.000238014396075586,
+    "negative_locations": [
+      {
+        "K": 56040.0,
+        "q": -3.7946245581439015e-07
+      },
+      {
+        "K": 56072.5,
+        "q": -6.257156261952453e-07
+      },
+      {
+        "K": 56105.0,
+        "q": -7.401271526920071e-07
+      },
+      {
+        "K": 56137.5,
+        "q": -7.334454088531749e-07
+      },
+      {
+        "K": 56170.0,
+        "q": -6.976280610080592e-07
+      },
+      {
+        "K": 56202.5,
+        "q": -6.579502119893993e-07
+      },
+      {
+        "K": 56235.0,
+        "q": -6.14336712148331e-07
+      },
+      {
+        "K": 56267.5,
+        "q": -5.667088976123402e-07
+      },
+      {
+        "K": 56300.0,
+        "q": -5.149843322382116e-07
+      },
+      {
+        "K": 56332.5,
+        "q": -4.590765353056932e-07
+      },
+      {
+        "K": 56365.0,
+        "q": -3.9889470553134664e-07
+      },
+      {
+        "K": 56397.5,
+        "q": -3.34343422543527e-07
+      },
+      {
+        "K": 56430.0,
+        "q": -2.6532232811837907e-07
+      },
+      {
+        "K": 56462.5,
+        "q": -1.9172580557592585e-07
+      },
+      {
+        "K": 56495.0,
+        "q": -1.1344262835770353e-07
+      },
+      {
+        "K": 56527.5,
+        "q": -3.0355595265065796e-08
+      }
+    ],
+    "negative_count": 16,
+    "forward_moment": 62865.229075685515,
+    "forward_moment_error": 0.00031439809675575187,
+    "cdf_monotone": false,
+    "cdf_start": 0.0,
+    "cdf_end": 0.9852080658968001,
+    "worst_cdf_step": {
+      "index": 34,
+      "step": -2.3945554125109122e-05,
+      "K_left": 56105.0,
+      "K_right": 56137.5
+    },
+    "grid_points": 401,
+    "grid_converged": true,
+    "digital_atm_error": 0.009114788564310805,
+    "truncation_warning": false,
+    "failed_gates": [
+      {
+        "code": "cdf_not_monotone",
+        "criterion": "min_cdf_step",
+        "measured": -2.3945554125109122e-05,
+        "threshold": -1e-08,
+        "comparison": "lt",
+        "location": "K=56105.0000->56137.5000",
+        "severity": "reject",
+        "message": "Raw CDF decreased between adjacent strikes"
+      },
+      {
+        "code": "negative_density_mass",
+        "criterion": "raw_negative_mass",
+        "measured": 0.000238014396075586,
+        "threshold": 1e-08,
+        "comparison": "gt",
+        "location": "K=56105.0000",
+        "severity": "degrade",
+        "message": "Integrated negative Breeden\u2013Litzenberger mass"
+      }
+    ],
+    "quantiles_present": {},
+    "digital_points": {
+      "atm": {
+        "K": 62885.0,
+        "Q_S_gt_K_from_density": 0.5166732122806388,
+        "digital_atm_error": 0.009114788564310805
+      }
+    }
+  },
+  "ui_provenance": [
+    {
+      "item": "FWD",
+      "backend_path": "forward.forward_usd",
+      "origin": "accepted",
+      "allowed_in_rejected_density": true,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "MED",
+      "backend_path": "density.quantiles.p50",
+      "origin": "rejected",
+      "allowed_in_rejected_density": false,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "MODE",
+      "backend_path": "density mode / markers.peakStrike",
+      "origin": "rejected",
+      "allowed_in_rejected_density": false,
+      "eligible": false,
+      "reason": "Unavailable \u2014 distribution validation failed"
+    },
+    {
+      "item": "density curve",
+      "backend_path": "density.strikes_usd/raw_density",
+      "origin": "rejected",
+      "allowed_in_rejected_density": false,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "ATM IV",
+      "backend_path": "analytics.atm_iv",
+      "origin": "degraded",
+      "allowed_in_rejected_density": true,
+      "eligible": true,
+      "reason": null
+    },
+    {
+      "item": "RR25",
+      "backend_path": "analytics.rr_25",
+      "origin": "accepted",
+      "allowed_in_rejected_density": true,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "BF25",
+      "backend_path": "analytics.bf_25",
+      "origin": "accepted",
+      "allowed_in_rejected_density": true,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "1-sd implied move",
+      "backend_path": "analytics.implied_move_1sd_*",
+      "origin": "degraded",
+      "allowed_in_rejected_density": true,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "central 50%",
+      "backend_path": "analytics.central_range_50",
+      "origin": "rejected",
+      "allowed_in_rejected_density": false,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "central 90%",
+      "backend_path": "analytics.central_range_90",
+      "origin": "rejected",
+      "allowed_in_rejected_density": false,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "fit quality",
+      "backend_path": "display.*_status",
+      "origin": "rejected",
+      "allowed_in_rejected_density": true,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "liquid strikes / around ATM",
+      "backend_path": "quotes.accepted_strikes + lower/upper",
+      "origin": "accepted",
+      "allowed_in_rejected_density": true,
+      "eligible": null,
+      "reason": null
+    },
+    {
+      "item": "chart axes / forward marker",
+      "backend_path": "forward.forward_usd",
+      "origin": "accepted",
+      "allowed_in_rejected_density": true,
+      "eligible": null,
+      "reason": null
+    }
+  ],
+  "display": {
+    "quote_status": "degraded",
+    "smile_status": "degraded",
+    "density_status": "rejected",
+    "surface_display_status": "rejected",
+    "reason_codes": [
+      "call_not_convex_in_strike",
+      "cdf_not_monotone",
+      "negative_density_mass",
+      "density_rejected"
+    ],
+    "human_readable_reason": "Distribution unavailable: the implied density was not a valid monotone probability distribution.",
+    "diagnostic_detail": "fitter=tv_pchip/diagnostic; forward=matching_future/high; F_T=62885.0000; density_status=rejected; mass=0.985208; raw_negative_mass=0.000238014; forward_moment_error=0.000314398; digital_atm_error=0.00911479; grid_points=401; grid_converged=True; gate cdf_not_monotone: min_cdf_step=-2.39456e-05 lt -1e-08 @ K=56105.0000->56137.5000; gate negative_density_mass: raw_negative_mass=0.000238014 gt 1e-08 @ K=56105.0000; worst_convexity_strike=56179.43 min_butterfly=-0.7251970073921257; k_coverage=[-0.133974, 0.078200]; codes=call_not_convex_in_strike,cdf_not_monotone,negative_density_mass,density_rejected",
+    "failed_checks": [
+      "Call-price convexity failed",
+      "Density CDF was not monotone",
+      "Negative density mass exceeded tolerance"
+    ],
+    "metric_eligibility": [
+      {
+        "metric": "forward",
+        "available": true,
+        "reason_code": null,
+        "reason": null
+      },
+      {
+        "metric": "index",
+        "available": true,
+        "reason_code": null,
+        "reason": null
+      },
+      {
+        "metric": "quote_coverage",
+        "available": true,
+        "reason_code": null,
+        "reason": null
+      },
+      {
+        "metric": "atm_iv",
+        "available": true,
+        "reason_code": null,
+        "reason": null
+      },
+      {
+        "metric": "implied_move_1sd",
+        "available": true,
+        "reason_code": null,
+        "reason": null
+      },
+      {
+        "metric": "rr_25",
+        "available": true,
+        "reason_code": null,
+        "reason": null
+      },
+      {
+        "metric": "bf_25",
+        "available": true,
+        "reason_code": null,
+        "reason": null
+      },
+      {
+        "metric": "density_chart",
+        "available": false,
+        "reason_code": "density_rejected",
+        "reason": "Unavailable \u2014 distribution validation failed"
+      },
+      {
+        "metric": "median",
+        "available": false,
+        "reason_code": "density_rejected",
+        "reason": "Unavailable \u2014 distribution validation failed"
+      },
+      {
+        "metric": "mode",
+        "available": false,
+        "reason_code": "density_rejected",
+        "reason": "Unavailable \u2014 distribution validation failed"
+      },
+      {
+        "metric": "central_range_50",
+        "available": false,
+        "reason_code": "density_rejected",
+        "reason": "Unavailable \u2014 distribution validation failed"
+      },
+      {
+        "metric": "central_range_90",
+        "available": false,
+        "reason_code": "density_rejected",
+        "reason": "Unavailable \u2014 distribution validation failed"
+      },
+      {
+        "metric": "tail_probabilities",
+        "available": false,
+        "reason_code": "density_rejected",
+        "reason": "Unavailable \u2014 distribution validation failed"
+      },
+      {
+        "metric": "digital_probabilities",
+        "available": false,
+        "reason_code": "density_rejected",
+        "reason": "Unavailable \u2014 distribution validation failed"
+      }
+    ]
+  }
+}
