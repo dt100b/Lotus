@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 import sys
@@ -18,19 +19,47 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .repository import SnapshotRepository
+from pipeline.deribit_iv_chain import IvChainProviderError
+from project.options_surface.market_data.futures import DeribitFuturesProvider
 from .schemas import (
     DashboardConfigResponse,
     ExpiryListResponse,
+    GexForwardSurfaceResponse,
     GexHeatmapSurfaceResponse,
     GexProfileResponse,
     HealthResponse,
+    IvSignalScanResponse,
+    OptionsSurfaceResponse,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 FRONTEND_DIST_DIR = BASE_DIR.parents[1] / "frontend" / "dist"
 
-app = FastAPI(title=settings.app_name)
+_repository = SnapshotRepository(
+    settings.snapshot_path,
+    settings.artifacts_dir,
+    futures_provider=DeribitFuturesProvider(),
+)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Own the ticker worker without opening sockets during module import."""
+
+    app.state.repository = _repository
+    try:
+        _repository.start()
+        app.state.iv_stream_start_error = None
+    except Exception as exc:  # keep non-IV dashboard surfaces available
+        app.state.iv_stream_start_error = f"{type(exc).__name__}: {exc}"
+    try:
+        yield
+    finally:
+        _repository.close()
+
+
+app = FastAPI(title=settings.app_name, lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -45,8 +74,6 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if (FRONTEND_DIST_DIR / "assets").exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="frontend-assets")
-
-_repository = SnapshotRepository(settings.snapshot_path, settings.artifacts_dir)
 
 
 def get_repository() -> SnapshotRepository:
@@ -164,6 +191,130 @@ def terminal_snapshot(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/options-surface", response_model=OptionsSurfaceResponse)
+def options_surface(
+    expiry: str = Query(
+        ...,
+        description="One listed ISO expiry (YYYY-MM-DD); ALL is not supported.",
+    ),
+    repository: SnapshotRepository = Depends(get_repository),
+) -> OptionsSurfaceResponse:
+    """Market-implied options surface for one expiry. Not a directional forecast."""
+    try:
+        return repository.get_options_surface(
+            expiry=expiry,
+            freshness_threshold_seconds=(
+                settings.refresh_seconds * settings.freshness_multiplier
+            ),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except IvChainProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/iv-signal-scan", response_model=IvSignalScanResponse)
+def iv_signal_scan(
+    expiry: str = Query(
+        ...,
+        description="One listed ISO expiry (YYYY-MM-DD); ALL is not supported.",
+    ),
+    tail_threshold: float = Query(
+        0.02,
+        gt=0.0,
+        lt=0.5,
+        description="Fractional distance from spot defining each far tail.",
+    ),
+    band_width: float = Query(
+        0.03,
+        gt=0.0,
+        lt=0.5,
+        description="Fractional half-width of the near-spot concentration band.",
+    ),
+    signal_delta: float = Query(
+        0.03,
+        gt=0.0,
+        lt=0.5,
+        description="Minimum probability-mass difference needed to activate a vote.",
+    ),
+    repository: SnapshotRepository = Depends(get_repository),
+) -> IvSignalScanResponse:
+    """Quick-view IV density scanner for one live snapshot expiry."""
+    try:
+        return repository.get_iv_signal_scan(
+            expiry=expiry,
+            tail_threshold=tail_threshold,
+            band_width=band_width,
+            signal_delta=signal_delta,
+            freshness_threshold_seconds=(
+                settings.refresh_seconds * settings.freshness_multiplier
+            ),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except IvChainProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/gex-forward-surface", response_model=GexForwardSurfaceResponse)
+def gex_forward_surface(
+    n_times: int = Query(64, ge=8, le=256, description="Time samples from now → settle."),
+    n_prices: int = Query(128, ge=16, le=512, description="Price grid density."),
+    price_window_pct: float = Query(
+        8.0,
+        ge=2.0,
+        le=25.0,
+        description="Half-window around spot expanded by active selected-expiry strikes.",
+    ),
+    metric: Literal["gamma", "delta", "delta_change", "charm", "vanna"] = Query(
+        "gamma", description="Projected dealer Greek field."
+    ),
+    iv_shift: float = Query(
+        0.0,
+        ge=-10.0,
+        le=10.0,
+        description=(
+            "Parallel IV shock in volatility points before projection. "
+            "Scope caps: ±2 (0DTE), ±5 (EOW), ±10 (EOM)."
+        ),
+    ),
+    expiry_scope: Literal["0dte", "eow", "eom"] = Query(
+        "0dte",
+        description=(
+            "Single expiry cliff: nearest live (0dte), this Friday (eow), "
+            "or the next last-Friday monthly (eom)."
+        ),
+    ),
+    repository: SnapshotRepository = Depends(get_repository),
+) -> GexForwardSurfaceResponse:
+    """Single-expiry forward Greek surface (pure τ projection; not historical heatmap).
+
+    Holds the front-expiry chain fixed and revalues net GEX ($/1%) on a dense
+    future (time × price) grid. Empty grid when the selected book is unavailable.
+    """
+    try:
+        return repository.get_forward_surface(
+            n_times=n_times,
+            n_prices=n_prices,
+            price_window_pct=price_window_pct,
+            metric=metric,
+            iv_shift=iv_shift,
+            expiry_scope=expiry_scope,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

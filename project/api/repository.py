@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 import json
 import math
 
@@ -11,6 +11,8 @@ import httpx
 
 from .schemas import (
     ExpiryListResponse,
+    GexForwardSurfaceMeta,
+    GexForwardSurfaceResponse,
     GexHeatmapCell,
     GexHeatmapSample,
     GexHeatmapSurfaceMeta,
@@ -18,15 +20,56 @@ from .schemas import (
     GexPoint,
     GexProfileResponse,
     HealthResponse,
+    IvSignalEligibility,
+    IvSignalEligibilityRequirements,
+    IvSignalFreshness,
+    IvSignalFeedHealth,
+    IvSignalOutlookState,
+    IvSignalParameters,
+    IvSignalScanResponse,
+    OptionsSurfaceResponse,
+)
+from pipeline.forward_gamma_surface import (
+    FORWARD_SURFACE_VERSION,
+    ForwardExpiryScope,
+    ForwardMetric,
+    MIN_REF_GAMMA,
+    MIN_TAU_YEARS,
+    MS_PER_YEAR,
+    bs_delta,
+    bs_gamma,
+    build_forward_gamma_surface,
+    empty_forward_surface,
+    normalize_mark_iv,
+    select_forward_expiry,
+    settle_ms_from_expiry,
 )
 from pipeline.flow_regime import (
     HISTORY_RETENTION_MS,
     HISTORY_VERSION,
     load_history_doc,
 )
+from pipeline.deribit_iv_chain import (
+    DeribitTickerIvChainProvider,
+    IvChainProvider,
+    IvChainProviderError,
+)
+from pipeline.iv_signal_scanner import (
+    MIN_SIGNAL_IV_COVERAGE_RATIO,
+    confirm_published_verdict,
+    scan_expiry_rows,
+    tenor_coverage_spec,
+)
+from project.options_surface.api_adapter import (
+    to_legacy_scan_response,
+    to_options_surface_response,
+)
+from project.options_surface.market_data.futures import DeribitFuturesProvider, FutureBookError
+from project.options_surface.market_data.snapshots import OptionsSurfaceSnapshotStore
+from project.options_surface.service import build_options_surface
 from pipeline.vol_compare import (
     DEFAULT_WINDOW as VOL_COMPARE_DEFAULT_WINDOW,
-    RV_LOOKBACK_RETURNS,
+    RV30_LOOKBACK_RETURNS,
     WINDOW_MS as VOL_COMPARE_WINDOW_MS,
     assemble_vol_compare,
     empty_vol_compare_payload,
@@ -48,6 +91,15 @@ DERIBIT_DVOL_CACHE_SECONDS = 30
 DERIBIT_DVOL_INDEX = "btcdvol_usdc"
 _deribit_dvol_cache: tuple[datetime, float] | None = None
 
+IV_SIGNAL_STANDARD_REFRESH_SECONDS = 600
+IV_SIGNAL_ZERO_DTE_REFRESH_SECONDS = 120
+IV_SIGNAL_ZERO_DTE_MIN_HOURS = 4.0
+IV_SIGNAL_ZERO_DTE_MAX_QUOTE_AGE_SECONDS = 10.0
+IV_SIGNAL_ZERO_DTE_NEAR_SPOT_WINDOW_PERCENT = 3.0
+IV_SIGNAL_ZERO_DTE_MAX_NEAREST_GAP_PERCENT = 1.5
+IV_SIGNAL_ZERO_DTE_MIN_CANONICAL_STRIKES_PER_SIDE = 3
+IV_SIGNAL_ZERO_DTE_MIN_ALIGNED_SIGNALS = 2
+
 # Live BTC settlement index for Price panel Index/basis (not GEX snapshot spot).
 DERIBIT_BTC_USD_INDEX = "btc_usd"
 DERIBIT_BTC_USD_INDEX_CACHE_SECONDS = 10
@@ -58,32 +110,48 @@ RV_TREND_CACHE_SECONDS = 60
 _rv_trend_cache: tuple[datetime, dict[str, Any]] | None = None
 
 # DVOL vs RV time series for Regime vol-compare mini chart (not every UI poll).
-VOL_COMPARE_CACHE_SECONDS = 90
-_vol_compare_cache: tuple[datetime, dict[str, Any]] | None = None
-# Mass filter for Gamma Flip cumulative zero-crossings.
-# Softened from 2.0% → 1.5% of Σ|net_gex| to reduce cliff risk near the old
-# hard threshold. A crossing is kept only when |prev_cum| + |next_cum| at the
-# step is ≥ max(this fraction × Σ|net_gex|, tiny epsilon). Crosses that fail
-# are discarded permanently — never resurrected as Flip via flattest-bar fallback.
+VOL_COMPARE_CACHE_SECONDS = 300
+# Cache key includes window so a 7d payload cannot be served after a 30d default flip.
+_vol_compare_cache: tuple[datetime, str, dict[str, Any]] | None = None
+# Mass filter for HVL (cumulative net-GEX zero-cross).
+# HVL = cumulative flow-GEX zero-cross on this expiry within spot ±12%
+# (mass filter 1.5%). Not classic OI gamma flip.
+# Crossing kept only when |prev_cum| + |next_cum| ≥ this fraction × Σ|net_gex|
+# measured on the *eligibility window* (falls back to full book if empty).
+# Window-local mass avoids far-wing inventory burying near-spot crosses on
+# taker-flow books. Crosses that fail are discarded permanently — never
+# resurrected via flattest-bar fallback.
 GAMMA_FLIP_MIN_MASS_FRACTION = 0.015  # 1.5%
-# Near-spot eligibility window for Gamma Flip. A mass-valid cumulative zero-cross
-# is only published when |level − spot| / spot ≤ this fraction. Far crosses
-# (e.g. deep wing zeros on a one-sided near-spot book) yield no_cross — never
-# fall back to flattest |net_gex| or an out-of-window cross.
+# Near-spot eligibility for HVL. Tightened 15% → 12% so published
+# levels stay local enough to trade against while covering typical BTC
+# strike spacing. Far wing zeros on a one-sided near-spot book → no_cross.
 # Separate from the Regime profile corridor (display-only, spot ± 8%).
-GAMMA_FLIP_MAX_DISTANCE_FRAC = 0.15  # ±15% of spot
-# Clean polarity for empty-state copy when Flip is unavailable.
+GAMMA_FLIP_MAX_DISTANCE_FRAC = 0.12  # ±12% of spot
+# Clean polarity for empty-state copy when HVL is unavailable.
 # |net| / Σ|net| of strikes inside the eligibility window (fallback: full book)
 # must meet this fraction before suffixing (short)/(long); otherwise neutral.
 GAMMA_FLIP_ONE_SIDED_MIN_FRAC = 0.05
-# Locked empty-state copy (Regime headline subline + optional API note).
-GAMMA_FLIP_EMPTY_NEUTRAL = "No local flip · GEX one-sided"
-GAMMA_FLIP_EMPTY_SHORT = "No local flip · GEX one-sided (short)"
-GAMMA_FLIP_EMPTY_LONG = "No local flip · GEX one-sided (long)"
+# Locked empty-state copy (Levels rail + optional API note). HVL naming.
+GAMMA_FLIP_EMPTY_NEUTRAL = "No local HVL · GEX one-sided"
+GAMMA_FLIP_EMPTY_SHORT = "No local HVL · GEX one-sided (short)"
+GAMMA_FLIP_EMPTY_LONG = "No local HVL · GEX one-sided (long)"
+# Book HVL tooltip (multi-expiry sum — secondary only).
+HVL_BOOK_NOTE = (
+    "Book HVL: multi-expiry cumulative zero-cross on the ALL surface "
+    "(summed inventory). Prefer session HVL on the active/front expiry."
+)
 
 
 class SnapshotRepository:
-    def __init__(self, snapshot_path: Path, artifacts_dir: Path | None = None):
+    def __init__(
+        self,
+        snapshot_path: Path,
+        artifacts_dir: Path | None = None,
+        *,
+        iv_chain_provider: IvChainProvider | None = None,
+        futures_provider: DeribitFuturesProvider | None = None,
+        options_surface_store: OptionsSurfaceSnapshotStore | None = None,
+    ):
         self.snapshot_path = Path(snapshot_path)
         # Heatmap surface history lives under the materialize artifacts dir.
         if artifacts_dir is not None:
@@ -94,6 +162,28 @@ class SnapshotRepository:
             self.artifacts_dir = Path(snapshot_path).resolve().parent
         self._cache_mtime_ns: int | None = None
         self._cache_payload: dict | None = None
+        self.iv_chain_provider = (
+            iv_chain_provider
+            if iv_chain_provider is not None
+            else DeribitTickerIvChainProvider()
+        )
+        self._iv_signal_state: dict[str, dict[str, Any]] = {}
+        self.futures_provider = futures_provider
+        self.options_surface_store = options_surface_store or OptionsSurfaceSnapshotStore(
+            Path(self.artifacts_dir) / "options_surface"
+        )
+
+    def start(self) -> bool:
+        """Start optional live services without performing network I/O inline."""
+
+        start = getattr(self.iv_chain_provider, "start", None)
+        return bool(start()) if callable(start) else False
+
+    def close(self) -> bool:
+        """Stop optional live services during application shutdown."""
+
+        close = getattr(self.iv_chain_provider, "close", None)
+        return bool(close()) if callable(close) else True
 
     def _load_payload(self) -> dict:
         if not self.snapshot_path.exists():
@@ -179,6 +269,81 @@ class SnapshotRepository:
         normalized = value.replace("Z", "+00:00")
         parsed = datetime.fromisoformat(normalized)
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+    @staticmethod
+    def _iv_feed_health(
+        raw_feed: Mapping[str, Any] | None,
+        *,
+        source: str,
+        chain_as_of: datetime,
+        now: datetime,
+        expiry_row_count: int,
+    ) -> IvSignalFeedHealth:
+        raw = dict(raw_feed or {})
+        last_message = raw.get("last_message_at")
+        if isinstance(last_message, datetime):
+            last_message_at = (
+                last_message
+                if last_message.tzinfo
+                else last_message.replace(tzinfo=UTC)
+            ).astimezone(UTC)
+        elif last_message:
+            try:
+                last_message_at = SnapshotRepository._parse_as_of(str(last_message))
+            except ValueError:
+                last_message_at = None
+        else:
+            last_message_at = chain_as_of
+        last_message_age = (
+            max((now - last_message_at).total_seconds(), 0.0)
+            if last_message_at is not None
+            else None
+        )
+        expected = max(int(raw.get("expected_expiry_instruments") or expiry_row_count), 0)
+        initialized = max(int(raw.get("initialized_expiry_instruments") or 0), 0)
+        completeness = (
+            min(max(initialized / expected, 0.0), 1.0)
+            if expected
+            else 0.0
+        )
+        transport = str(raw.get("transport") or "snapshot")
+        if transport not in {"websocket", "snapshot"}:
+            transport = "snapshot"
+        interval = raw.get("channel_interval")
+        if interval not in {"incremental", "100ms", "agg2"}:
+            interval = None
+        status = str(raw.get("status") or "DISCONNECTED").upper()
+        if status not in {"READY", "WARMING", "DEGRADED", "DISCONNECTED"}:
+            status = "DISCONNECTED"
+        return IvSignalFeedHealth(
+            source=str(raw.get("source") or source),
+            transport=transport,
+            channel_interval=interval,
+            status=status,
+            connected=bool(raw.get("connected")),
+            warmup_complete=bool(raw.get("warmup_complete")),
+            universe_is_current=bool(raw.get("universe_is_current")),
+            expected_expiry_instruments=expected,
+            subscribed_expiry_instruments=max(
+                int(raw.get("subscribed_expiry_instruments") or 0), 0
+            ),
+            initialized_expiry_instruments=initialized,
+            fresh_expiry_instruments=max(
+                int(raw.get("fresh_expiry_instruments") or 0), 0
+            ),
+            completeness_ratio=float(
+                raw.get("completeness_ratio")
+                if raw.get("completeness_ratio") is not None
+                else completeness
+            ),
+            last_message_at=last_message_at,
+            last_message_age_seconds=last_message_age,
+            reconnect_count=max(int(raw.get("reconnect_count") or 0), 0),
+            connection_generation=max(
+                int(raw.get("connection_generation") or 0), 0
+            ),
+            last_error=(str(raw.get("last_error"))[:240] if raw.get("last_error") else None),
+        )
 
     def health(self, freshness_threshold_seconds: int, contract_version: str) -> HealthResponse:
         payload = self._load_payload()
@@ -276,6 +441,237 @@ class SnapshotRepository:
             include_otc_prints_available=otc_available,
         )
 
+    def get_iv_signal_scan(
+        self,
+        *,
+        expiry: str,
+        tail_threshold: float = 0.02,
+        band_width: float = 0.03,
+        signal_delta: float = 0.03,
+        freshness_threshold_seconds: int = 180,
+        feed_silence_threshold_seconds: float = 5.0,
+    ) -> IvSignalScanResponse:
+        """Deprecated adapter. Directional fields are retired (always NO_TRADE)."""
+        selected_expiry = str(expiry or "").strip()
+        if selected_expiry.upper() == "ALL":
+            raise ValueError(
+                'IV signal scan requires one ISO expiry; "ALL" is not supported.'
+            )
+        result, feed, freshness = self._compute_options_surface(
+            selected_expiry,
+            freshness_threshold_seconds=freshness_threshold_seconds,
+            feed_silence_threshold_seconds=feed_silence_threshold_seconds,
+        )
+        return to_legacy_scan_response(
+            result,
+            expiry=selected_expiry,
+            feed=feed,
+            freshness=freshness,
+            tail_threshold=tail_threshold,
+            band_width=band_width,
+            signal_delta=signal_delta,
+        )
+
+    def get_options_surface(
+        self,
+        *,
+        expiry: str,
+        freshness_threshold_seconds: int = 180,
+        feed_silence_threshold_seconds: float = 5.0,
+        persist: bool = True,
+    ) -> OptionsSurfaceResponse:
+        """Build the market-implied options surface for one expiry."""
+        selected_expiry = str(expiry or "").strip()
+        if selected_expiry.upper() == "ALL":
+            raise ValueError(
+                'Options surface requires one ISO expiry; "ALL" is not supported.'
+            )
+        result, feed, freshness = self._compute_options_surface(
+            selected_expiry,
+            freshness_threshold_seconds=freshness_threshold_seconds,
+            feed_silence_threshold_seconds=feed_silence_threshold_seconds,
+            persist=persist,
+        )
+        return to_options_surface_response(
+            result,
+            expiry=selected_expiry,
+            feed=feed,
+            freshness=freshness,
+        )
+
+    def _compute_options_surface(
+        self,
+        selected_expiry: str,
+        *,
+        freshness_threshold_seconds: int,
+        feed_silence_threshold_seconds: float,
+        persist: bool = True,
+    ):
+        chain, feed, feed_ready, as_of, now = self._iv_chain_context(
+            selected_expiry,
+            freshness_threshold_seconds=freshness_threshold_seconds,
+            feed_silence_threshold_seconds=feed_silence_threshold_seconds,
+        )
+        del feed_ready
+        futures = ()
+        if self.futures_provider is not None:
+            try:
+                futures = self.futures_provider.fetch()
+            except Exception:
+                futures = ()
+        result = build_options_surface(
+            chain.rows,
+            expiry=selected_expiry,
+            as_of_utc=as_of,
+            index_usd=float(chain.spot),
+            futures=futures,
+            underlying="BTC",
+            feed={
+                "source": chain.source,
+                "transport": feed.transport,
+                "status": feed.status,
+            },
+            require_iv_market=str(chain.source).startswith("deribit_ticker_ws"),
+            require_open_state=str(chain.source).startswith("deribit_ticker_ws"),
+            require_sizes=str(chain.source).startswith("deribit_ticker_ws"),
+        )
+        if persist:
+            try:
+                self.options_surface_store.persist(result)
+            except OSError:
+                pass
+        snapshot_age_seconds = max(
+            float(feed.last_message_age_seconds or 0.0),
+            max((now - (
+                chain.as_of if chain.as_of.tzinfo else chain.as_of.replace(tzinfo=UTC)
+            ).astimezone(UTC)).total_seconds(), 0.0),
+        )
+        freshness = IvSignalFreshness(
+            snapshot_age_seconds=snapshot_age_seconds,
+            threshold_seconds=freshness_threshold_seconds,
+            is_fresh=snapshot_age_seconds <= freshness_threshold_seconds,
+        )
+        return result, feed, freshness
+
+    def _iv_chain_context(
+        self,
+        selected_expiry: str,
+        *,
+        freshness_threshold_seconds: int,
+        feed_silence_threshold_seconds: float,
+    ):
+        try:
+            chain = self.iv_chain_provider.fetch(expiry=selected_expiry)
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            chain = self.iv_chain_provider.fetch()
+        expiries = sorted({str(row.get("expiry")) for row in chain.rows})
+        if selected_expiry not in expiries:
+            raise KeyError(f"Unknown expiry: {selected_expiry}")
+        if freshness_threshold_seconds < 1:
+            raise ValueError("freshness_threshold_seconds must be at least 1.")
+        if (
+            not math.isfinite(float(feed_silence_threshold_seconds))
+            or feed_silence_threshold_seconds <= 0
+        ):
+            raise ValueError(
+                "feed_silence_threshold_seconds must be positive and finite."
+            )
+        chain_as_of = (
+            chain.as_of if chain.as_of.tzinfo else chain.as_of.replace(tzinfo=UTC)
+        ).astimezone(UTC)
+        now = self._utc_now()
+        feed = self._iv_feed_health(
+            chain.feed,
+            source=chain.source,
+            chain_as_of=chain_as_of,
+            now=now,
+            expiry_row_count=sum(
+                1 for row in chain.rows if str(row.get("expiry")) == selected_expiry
+            ),
+        )
+        feed_silent = (
+            feed.last_message_age_seconds is None
+            or feed.last_message_age_seconds > feed_silence_threshold_seconds
+        )
+        if feed_silent and feed.status == "READY":
+            feed.status = "DEGRADED"
+        feed_ready = (
+            feed.transport == "websocket"
+            and feed.status == "READY"
+            and feed.connected
+            and feed.warmup_complete
+            and feed.universe_is_current
+            and feed.expected_expiry_instruments > 0
+            and feed.subscribed_expiry_instruments
+            == feed.expected_expiry_instruments
+            and feed.initialized_expiry_instruments
+            == feed.expected_expiry_instruments
+            and feed.fresh_expiry_instruments
+            == feed.expected_expiry_instruments
+            and math.isclose(feed.completeness_ratio, 1.0, abs_tol=1e-9)
+            and not feed_silent
+        )
+        as_of = now if feed.transport == "websocket" else chain_as_of
+        return chain, feed, feed_ready, as_of, now
+
+    def get_forward_surface(
+        self,
+        *,
+        n_times: int = 64,
+        n_prices: int = 128,
+        price_window_pct: float = 8.0,
+        metric: ForwardMetric = "gamma",
+        iv_shift: float = 0.0,
+        expiry_scope: ForwardExpiryScope = "0dte",
+    ) -> GexForwardSurfaceResponse:
+        """Single-expiry forward dealer-Greek surface (not historical heatmap).
+
+        Holds the front-expiry chain fixed and revalues net GEX on a dense
+        future (time × price) grid by advancing τ toward Deribit settle.
+        """
+        payload = self._load_payload()
+        rows = list(payload.get("rows") or [])
+        try:
+            spot = float(payload.get("spot_price") or 0.0)
+        except (TypeError, ValueError):
+            spot = 0.0
+        as_of = payload.get("as_of")
+        as_of_ms = _as_of_to_ms(as_of)
+
+        expiries = sorted({str(r.get("expiry")) for r in rows if r.get("expiry")})
+        # One clean chain cliff for the selected tenor — never an ALL aggregate.
+        front = select_forward_expiry(
+            expiries, now_ms=as_of_ms, scope=expiry_scope
+        ) or ""
+
+        surface = build_forward_gamma_surface(
+            rows,
+            spot=spot,
+            as_of_ms=as_of_ms,
+            front_expiry=front or None,
+            n_times=n_times,
+            n_prices=n_prices,
+            price_window_pct=price_window_pct,
+            metric=metric,
+            iv_shift=iv_shift,
+            expiry_scope=expiry_scope,
+        )
+        if not surface.times_ms:
+            empty = empty_forward_surface(
+                spot=spot if math.isfinite(spot) else 0.0,
+                as_of_ms=as_of_ms,
+                expiry=front,
+                note=str(surface.meta.get("note") or "empty forward surface"),
+                metric=metric,
+                iv_shift=iv_shift,
+                expiry_scope=expiry_scope,
+            )
+            return _forward_surface_response(empty)
+
+        return _forward_surface_response(surface)
+
     def get_heatmap_surface(
         self,
         *,
@@ -372,31 +768,63 @@ class SnapshotRepository:
             raise KeyError(f"Unknown expiry: {selected_expiry}")
 
         spot = float(payload["spot_price"])
+        as_of_ms = int(self._parse_as_of(str(payload["as_of"])).timestamp() * 1000)
+        exposure_rows = _attach_delta_exposures(
+            payload["rows"],
+            spot=spot,
+            as_of_ms=as_of_ms,
+        )
         # Live Deribit btc_usd for Price Index, chart spot lines, and DIST %.
         # GEX bars / Flip / EM methodology stay on materialize ``spot``.
         live_index = _fetch_deribit_btc_usd_index()
         display_spot = float(live_index) if live_index is not None else spot
-        all_rows = _aggregate_rows(payload["rows"])
+        all_rows = _aggregate_rows(exposure_rows)
         selected_rows = all_rows if selected_expiry == "ALL" else _aggregate_rows(
-            [row for row in payload["rows"] if str(row["expiry"]) == selected_expiry]
+            [row for row in exposure_rows if str(row["expiry"]) == selected_expiry]
         )
         front_expiry = expiries[0] if expiries else selected_expiry
-        front_rows = _aggregate_rows([row for row in payload["rows"] if str(row["expiry"]) == front_expiry])
+        front_rows = _aggregate_rows([row for row in exposure_rows if str(row["expiry"]) == front_expiry])
         # Level peaks from GEX surface; distance labels vs display_spot (live index).
         all_levels = _build_all_expiry_levels(all_rows, display_spot)
         zero_dte_levels = _build_zero_dte_levels(front_rows, display_spot)
         weekly_levels = _build_kind_levels(payload["rows"], display_spot, kind="weekly")
         monthly_levels = _build_kind_levels(payload["rows"], display_spot, kind="monthly")
         quarterly_levels = _build_kind_levels(payload["rows"], display_spot, kind="quarterly")
-        # Single shared Gamma Flip estimate (ALL-expiry net_gex).
-        # Null when no mass-valid cross inside spot ± 15% eligibility window.
+        # HVL = cumulative flow-GEX zero-cross on this expiry within spot ±12%
+        # (mass filter 1.5%). Not classic OI gamma flip.
+        # Per-expiry map + Book (ALL) secondary. Levels default HVL uses the
+        # active/front session expiry — never the ALL-book aggregate as primary.
         # Eligibility window uses materialize spot (GEX methodology), not live index.
-        gamma_flip, gamma_flip_status = _estimate_gamma_flip(all_rows, spot=spot)
-        gamma_flip_note = _gamma_flip_empty_note(
-            all_rows,
-            spot=spot,
-            status=gamma_flip_status,
+        hvl_by_expiry = _compute_hvl_by_expiry(payload["rows"], spot=spot, expiries=expiries)
+        book_hvl_level, book_hvl_status = _estimate_gamma_flip(all_rows, spot=spot)
+        book_hvl_note = _gamma_flip_empty_note(
+            all_rows, spot=spot, status=book_hvl_status
         )
+        hvl_book = {
+            "level": book_hvl_level,
+            "status": book_hvl_status,
+            "note": book_hvl_note,
+        }
+
+        # Primary HVL surface: selected expiry when filtered; else front session.
+        if selected_expiry != "ALL":
+            hvl_primary_expiry = selected_expiry
+            primary_rows = selected_rows
+        else:
+            hvl_primary_expiry = front_expiry
+            primary_rows = front_rows if front_rows else selected_rows
+
+        primary_entry = hvl_by_expiry.get(hvl_primary_expiry)
+        if primary_entry is not None:
+            gamma_flip = primary_entry.get("level")
+            gamma_flip_status = str(primary_entry.get("status") or "no_cross")
+            gamma_flip_note = primary_entry.get("note")
+        else:
+            gamma_flip, gamma_flip_status = _estimate_gamma_flip(primary_rows, spot=spot)
+            gamma_flip_note = _gamma_flip_empty_note(
+                primary_rows, spot=spot, status=gamma_flip_status
+            )
+
         reference_levels = _build_reference_levels(
             all_rows,
             payload["rows"],
@@ -405,6 +833,10 @@ class SnapshotRepository:
             gamma_flip=gamma_flip,
             gamma_flip_status=gamma_flip_status,
             gamma_flip_note=gamma_flip_note,
+            hvl_scope_label=hvl_primary_expiry if hvl_primary_expiry != "ALL" else front_expiry,
+            hvl_book_level=book_hvl_level,
+            hvl_book_status=book_hvl_status,
+            hvl_book_note=book_hvl_note,
             distance_spot=display_spot,
         )
 
@@ -412,11 +844,16 @@ class SnapshotRepository:
         otc_available = isinstance(otc_source, list) and len(otc_source) > 0
         gamma_bars_include_otc = None
         if otc_available:
+            otc_exposure_rows = _attach_delta_exposures(
+                otc_source,
+                spot=spot,
+                as_of_ms=as_of_ms,
+            )
             otc_selected = (
-                _aggregate_rows(otc_source)
+                _aggregate_rows(otc_exposure_rows)
                 if selected_expiry == "ALL"
                 else _aggregate_rows(
-                    [row for row in otc_source if str(row["expiry"]) == selected_expiry]
+                    [row for row in otc_exposure_rows if str(row["expiry"]) == selected_expiry]
                 )
             )
             gamma_bars_include_otc = [_to_gamma_bar(row) for row in otc_selected]
@@ -437,8 +874,15 @@ class SnapshotRepository:
             "total_put_gex_usd": sum(row["put_gex"] for row in selected_rows),
             "max_positive_gamma_strike": _strike_for_extreme(selected_rows, highest=True),
             "max_negative_gamma_strike": _strike_for_extreme(selected_rows, highest=False),
-            # Gamma Flip: real cumulative zero-cross only. null + no_cross when absent.
-            # zero_gamma is a legacy alias of gamma_flip (same nullability).
+            # HVL: real cumulative zero-cross only. null + no_cross when absent.
+            # Primary = active/front session expiry (not ALL-book aggregate).
+            # gamma_flip / zero_gamma remain temporary API aliases of hvl.
+            "hvl": gamma_flip,
+            "hvl_status": gamma_flip_status,
+            "hvl_note": gamma_flip_note,
+            "hvl_expiry": hvl_primary_expiry if hvl_primary_expiry != "ALL" else front_expiry,
+            "hvl_by_expiry": hvl_by_expiry,
+            "hvl_book": hvl_book,
             "gamma_flip": gamma_flip,
             "gamma_flip_status": gamma_flip_status,
             # Locked empty-state copy when status is no_cross; null when ok.
@@ -674,7 +1118,8 @@ def _fetch_rv_trend() -> dict[str, Any]:
     - short window: last ~24 hours (24 × 1h returns)
     - long window: last ~7 days (168 × 1h returns)
     - ratio = short_rv / long_rv
-    - Expanding ≥ 1.12, Compressing ≤ 0.88, else Neutral
+    - Accelerating ≥ 1.30, Expanding ≥ 1.10, Stable ≥ 0.90,
+      Contracting ≥ 0.70, else Collapsing
 
     Light Regime confirmation only — never overrides Dealer Γ polarity.
     Cached; failure returns null fields without blocking the snapshot.
@@ -777,19 +1222,30 @@ def _compute_rv_trend_from_closes(closes: list[float]) -> dict[str, Any]:
         return empty
 
     ratio = short_rv / long_rv
-    if ratio >= 1.12:
-        label = "Expanding"
-    elif ratio <= 0.88:
-        label = "Compressing"
-    else:
-        label = "Neutral"
-
     return {
         "rv_ratio": round(ratio, 4),
-        "rv_trend": label,
+        "rv_trend": _rv_trend_label(ratio),
         "rv_short": round(short_rv * 100, 2),  # percent units
         "rv_long": round(long_rv * 100, 2),
     }
+
+
+def _rv_trend_label(ratio: float) -> str:
+    """EXPANDING ↔ CONTRACTING pair with outer extremes (desk label grammar).
+
+    Thresholds (short_rv / long_rv):
+      ≥ 1.30 Accelerating · ≥ 1.10 Expanding · ≥ 0.90 Stable ·
+      ≥ 0.70 Contracting · else Collapsing
+    """
+    if ratio >= 1.30:
+        return "Accelerating"
+    if ratio >= 1.10:
+        return "Expanding"
+    if ratio >= 0.90:
+        return "Stable"
+    if ratio >= 0.70:
+        return "Contracting"
+    return "Collapsing"
 
 
 def _sample_stdev(values: list[float]) -> float:
@@ -802,7 +1258,11 @@ def _sample_stdev(values: list[float]) -> float:
 
 
 def _fetch_vol_compare(*, window: str = VOL_COMPARE_DEFAULT_WINDOW) -> dict[str, Any]:
-    """DVOL history + aligned RV + spread for Regime vol-compare chart.
+    """DVOL history + aligned RV30 (primary) + spread for Regime vol-compare chart.
+
+    Primary pair is **DVOL (30d) vs RV30** (720 × 1h returns). RV7 is included
+    as an optional secondary overlay only — it does not drive the spread or
+    IV rich/cheap chip.
 
     Cached (~90s). On Deribit/HL failure, returns last good payload when available,
     otherwise an empty series shape — never raises into the terminal snapshot path.
@@ -813,50 +1273,56 @@ def _fetch_vol_compare(*, window: str = VOL_COMPARE_DEFAULT_WINDOW) -> dict[str,
     now = datetime.now(UTC)
     if (
         _vol_compare_cache is not None
+        and _vol_compare_cache[1] == win
         and (now - _vol_compare_cache[0]).total_seconds() <= VOL_COMPARE_CACHE_SECONDS
     ):
-        return _vol_compare_cache[1]
+        return _vol_compare_cache[2]
 
     as_of_ms = int(now.timestamp() * 1000)
     window_ms = VOL_COMPARE_WINDOW_MS[win]
     # Extra day buffer for sparse candles / clock skew.
     dvol_start_ms = as_of_ms - window_ms - 86_400_000
-    # RV needs lookback_returns of 1h bars before the window starts.
-    hl_start_ms = as_of_ms - window_ms - (RV_LOOKBACK_RETURNS + 24) * 3_600_000
-
+    # RV30 needs ~720 1h returns before the chart window starts (+ buffer).
+    rv30_start_ms = as_of_ms - window_ms - (RV30_LOOKBACK_RETURNS + 48) * 3_600_000
     try:
         dvol_candles = _fetch_deribit_dvol_history(
             start_ms=dvol_start_ms,
             end_ms=as_of_ms,
             resolution="3600",
         )
-        hl_candles = _fetch_hyperliquid_btc_1h_closes(
-            start_ms=hl_start_ms,
+        deribit_btc_closes = _fetch_deribit_btc_perpetual_1h_closes(
+            start_ms=rv30_start_ms,
             end_ms=as_of_ms,
         )
         if not dvol_candles:
             raise ValueError("empty DVOL history")
+        if not deribit_btc_closes:
+            raise ValueError("empty Deribit BTC-PERPETUAL history")
 
         window_start_ms = as_of_ms - window_ms
         payload = assemble_vol_compare(
             dvol_raw_candles=dvol_candles,
-            hl_candles=hl_candles,
+            # Use the full-depth Deribit history for every rolling RV tenor.
+            # Hyperliquid's ~5,000-candle retention capped RV1/RV7 near 208d.
+            hl_candles=deribit_btc_closes,
+            rv30_candles=deribit_btc_closes,
             as_of_ms=as_of_ms,
             window=win,
             window_start_ms=window_start_ms,
+            include_rv7=True,
         )
         if not payload.get("dvol_series"):
             raise ValueError("DVOL series empty after parse")
     except Exception as exc:  # noqa: BLE001 — never break Regime serve path
-        if _vol_compare_cache is not None:
-            return _vol_compare_cache[1]
+        if _vol_compare_cache is not None and _vol_compare_cache[1] == win:
+            return _vol_compare_cache[2]
         return empty_vol_compare_payload(
             as_of_ms=as_of_ms,
             window=win,
             error=str(exc)[:240],
         )
 
-    _vol_compare_cache = (now, payload)
+    _vol_compare_cache = (now, win, payload)
     return payload
 
 
@@ -866,7 +1332,61 @@ def _fetch_deribit_dvol_history(
     end_ms: int,
     resolution: str = "3600",
 ) -> list[Any]:
-    """Deribit BTC volatility index candles (OHLC; close is DVOL level)."""
+    """Deribit BTC volatility index candles (OHLC; close is DVOL level).
+
+    Deribit caps each response at ~1000 bars (~41d of 1h). Chunk the range
+    so long windows, including the full-year default, fill completely.
+    """
+    start = int(start_ms)
+    end = int(end_ms)
+    if end <= start:
+        return []
+
+    # ~30d of hourly bars stays under the 1000-candle cap with margin.
+    chunk_ms = 30 * 86_400_000
+    merged: list[Any] = []
+    seen_ts: set[int] = set()
+    cursor = start
+    while cursor < end:
+        chunk_end = min(cursor + chunk_ms, end)
+        rows = _fetch_deribit_dvol_history_chunk(
+            start_ms=cursor,
+            end_ms=chunk_end,
+            resolution=resolution,
+        )
+        for row in rows:
+            try:
+                if isinstance(row, (list, tuple)) and len(row) >= 1:
+                    ts = int(row[0])
+                elif isinstance(row, dict):
+                    ts = int(row.get("ts_ms") or row.get("timestamp") or 0)
+                else:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if ts <= 0 or ts in seen_ts:
+                continue
+            seen_ts.add(ts)
+            merged.append(row)
+        cursor = chunk_end
+
+    merged.sort(
+        key=lambda row: int(
+            row[0]
+            if isinstance(row, (list, tuple))
+            else (row.get("ts_ms") or row.get("timestamp") or 0)  # type: ignore[union-attr]
+        )
+    )
+    return merged
+
+
+def _fetch_deribit_dvol_history_chunk(
+    *,
+    start_ms: int,
+    end_ms: int,
+    resolution: str = "3600",
+) -> list[Any]:
+    """Single Deribit DVOL history request (≤ ~1000 bars)."""
     response = httpx.get(
         f"{DERIBIT_API_BASE}/public/get_volatility_index_data",
         params={
@@ -875,7 +1395,7 @@ def _fetch_deribit_dvol_history(
             "end_timestamp": int(end_ms),
             "resolution": str(resolution),
         },
-        timeout=4.0,
+        timeout=6.0,
     )
     response.raise_for_status()
     body = response.json()
@@ -891,35 +1411,93 @@ def _fetch_hyperliquid_btc_1h_closes(
     start_ms: int,
     end_ms: int,
 ) -> list[tuple[int, float]]:
-    """BTC 1h candle closes from Hyperliquid (same source as RV Trend)."""
-    response = httpx.post(
-        HYPERLIQUID_INFO_URL,
-        json={
-            "type": "candleSnapshot",
-            "req": {
-                "coin": "BTC",
-                "interval": "1h",
-                "startTime": int(start_ms),
-                "endTime": int(end_ms),
-            },
-        },
-        headers={"Content-Type": "application/json"},
-        timeout=4.0,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
+    """BTC 1h candle closes from Hyperliquid (same source as RV Trend).
+
+    Pages in ~45d chunks so long VRP windows (365d + RV30 lookback) fill fully
+    under HL's soft per-request candle cap.
+    """
+    start = int(start_ms)
+    end = int(end_ms)
+    if end <= start:
         return []
 
-    out: list[tuple[int, float]] = []
-    for row in payload:
-        ts_ms = _hyperliquid_candle_ts(row)
-        close = _hyperliquid_candle_close(row)
-        if ts_ms is None or close is None or close <= 0:
-            continue
-        out.append((ts_ms, close))
-    out.sort(key=lambda p: p[0])
+    chunk_ms = 45 * 86_400_000
+    by_ts: dict[int, float] = {}
+    cursor = start
+    while cursor < end:
+        chunk_end = min(cursor + chunk_ms, end)
+        response = httpx.post(
+            HYPERLIQUID_INFO_URL,
+            json={
+                "type": "candleSnapshot",
+                "req": {
+                    "coin": "BTC",
+                    "interval": "1h",
+                    "startTime": cursor,
+                    "endTime": chunk_end,
+                },
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=6.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, list):
+            for row in payload:
+                ts_ms = _hyperliquid_candle_ts(row)
+                close = _hyperliquid_candle_close(row)
+                if ts_ms is None or close is None or close <= 0:
+                    continue
+                by_ts[ts_ms] = close
+        cursor = chunk_end
+
+    out = sorted(by_ts.items(), key=lambda p: p[0])
     return out
+
+
+def _fetch_deribit_btc_perpetual_1h_closes(
+    *,
+    start_ms: int,
+    end_ms: int,
+) -> list[tuple[int, float]]:
+    """Full-depth BTC-PERPETUAL hourly closes for the primary RV30 series."""
+    start = int(start_ms)
+    end = int(end_ms)
+    if end <= start:
+        return []
+
+    chunk_ms = 30 * 86_400_000
+    by_ts: dict[int, float] = {}
+    cursor = start
+    while cursor < end:
+        chunk_end = min(cursor + chunk_ms, end)
+        response = httpx.get(
+            f"{DERIBIT_API_BASE}/public/get_tradingview_chart_data",
+            params={
+                "instrument_name": "BTC-PERPETUAL",
+                "start_timestamp": cursor,
+                "end_timestamp": chunk_end,
+                "resolution": "60",
+            },
+            timeout=6.0,
+        )
+        response.raise_for_status()
+        body = response.json()
+        result = body.get("result") if isinstance(body, dict) else None
+        ticks = result.get("ticks") if isinstance(result, dict) else None
+        closes = result.get("close") if isinstance(result, dict) else None
+        if isinstance(ticks, list) and isinstance(closes, list):
+            for raw_ts, raw_close in zip(ticks, closes, strict=False):
+                try:
+                    ts_ms = int(raw_ts)
+                    close = float(raw_close)
+                except (TypeError, ValueError):
+                    continue
+                if ts_ms > 0 and math.isfinite(close) and close > 0:
+                    by_ts[ts_ms] = close
+        cursor = chunk_end
+
+    return sorted(by_ts.items(), key=lambda point: point[0])
 
 
 def _hyperliquid_candle_ts(row: Any) -> int | None:
@@ -943,6 +1521,9 @@ def _aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, float]]:
             "net_gex": 0.0,
             "call_gex": 0.0,
             "put_gex": 0.0,
+            "net_delta_exposure_usd": 0.0,
+            "call_delta_exposure_usd": 0.0,
+            "put_delta_exposure_usd": 0.0,
             "open_interest": 0.0,
             "call_open_interest": 0.0,
             "put_open_interest": 0.0,
@@ -957,6 +1538,9 @@ def _aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, float]]:
         bucket["net_gex"] += float(row["net_gex"])
         bucket["call_gex"] += float(row["call_gex"])
         bucket["put_gex"] += float(row["put_gex"])
+        bucket["net_delta_exposure_usd"] += _row_float(row, "net_delta_exposure_usd")
+        bucket["call_delta_exposure_usd"] += _row_float(row, "call_delta_exposure_usd")
+        bucket["put_delta_exposure_usd"] += _row_float(row, "put_delta_exposure_usd")
         open_interest = _row_open_interest(row)
         bucket["open_interest"] += open_interest
         bucket["call_open_interest"] += _row_float(row, "call_open_interest")
@@ -981,11 +1565,105 @@ def _to_gamma_bar(row: dict[str, float]) -> dict[str, float]:
         "call_gamma_exposure_usd": row["call_gex"],
         "put_gamma_exposure_usd": row["put_gex"],
         "net_gamma_exposure_usd": row["net_gex"],
+        "delta_exposure_usd": row.get("net_delta_exposure_usd", 0.0),
+        "call_delta_exposure_usd": row.get("call_delta_exposure_usd", 0.0),
+        "put_delta_exposure_usd": row.get("put_delta_exposure_usd", 0.0),
+        "net_delta_exposure_usd": row.get("net_delta_exposure_usd", 0.0),
         "open_interest": row.get("open_interest", 0.0),
         "call_open_interest": row.get("call_open_interest", 0.0),
         "put_open_interest": row.get("put_open_interest", 0.0),
         "mark_iv": row.get("mark_iv", 0.0),
     }
+
+
+def _attach_delta_exposures(
+    rows: list[dict[str, Any]],
+    *,
+    spot: float,
+    as_of_ms: int,
+) -> list[dict[str, Any]]:
+    """Attach signed call/put/net USD delta notional at the live snapshot state."""
+    enriched: list[dict[str, Any]] = []
+    for source in rows:
+        row = dict(source)
+        strike = _row_float(row, "strike")
+        settle_ms = settle_ms_from_expiry(str(row.get("expiry") or ""))
+        if not (spot > 0 and strike > 0 and settle_ms is not None and settle_ms > as_of_ms):
+            call_delta_exposure = 0.0
+            put_delta_exposure = 0.0
+        else:
+            tau = max(MIN_TAU_YEARS, (settle_ms - as_of_ms) / MS_PER_YEAR)
+            call_delta_exposure = _row_delta_exposure(
+                row,
+                option_type="call",
+                spot=spot,
+                strike=strike,
+                t_years=tau,
+            )
+            put_delta_exposure = _row_delta_exposure(
+                row,
+                option_type="put",
+                spot=spot,
+                strike=strike,
+                t_years=tau,
+            )
+        row["call_delta_exposure_usd"] = call_delta_exposure
+        row["put_delta_exposure_usd"] = put_delta_exposure
+        row["net_delta_exposure_usd"] = call_delta_exposure + put_delta_exposure
+        enriched.append(row)
+    return enriched
+
+
+def _row_delta_exposure(
+    row: dict[str, Any],
+    *,
+    option_type: str,
+    spot: float,
+    strike: float,
+    t_years: float,
+) -> float:
+    iv = _row_leg_iv(row, option_type)
+    if iv is None:
+        return 0.0
+    delta = bs_delta(
+        spot=spot,
+        strike=strike,
+        t_years=t_years,
+        iv=iv,
+        option_type=option_type,
+    )
+    if delta is None:
+        return 0.0
+
+    position = _optional_row_float(row, f"{option_type}_position_units")
+    if position is None:
+        gamma = bs_gamma(spot=spot, strike=strike, t_years=t_years, iv=iv)
+        denominator = (gamma or 0.0) * spot * spot * 0.01
+        if gamma is None or gamma < MIN_REF_GAMMA or denominator == 0:
+            return 0.0
+        position = _row_float(row, f"{option_type}_gex") / denominator
+
+    exposure = position * delta * spot
+    return exposure if math.isfinite(exposure) else 0.0
+
+
+def _row_leg_iv(row: dict[str, Any], option_type: str) -> float | None:
+    for key in (f"{option_type}_flow_iv", f"{option_type}_mark_iv", "mark_iv"):
+        iv = normalize_mark_iv(row.get(key))
+        if iv is not None:
+            return iv
+    return None
+
+
+def _optional_row_float(row: dict[str, Any], key: str) -> float | None:
+    value = row.get(key)
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def _build_all_expiry_levels(rows: list[dict[str, float]], spot: float) -> list[dict[str, Any]]:
@@ -1103,6 +1781,32 @@ def _select_nearest_expiry_of_kind(
     return candidates[0][1]
 
 
+def _compute_hvl_by_expiry(
+    source_rows: list[dict[str, Any]],
+    *,
+    spot: float,
+    expiries: list[str],
+) -> dict[str, dict[str, Any]]:
+    """HVL per listed expiry: cumulative flow-GEX zero-cross on that surface.
+
+    HVL = cumulative flow-GEX zero-cross on this expiry within spot ±12%
+    (mass filter 1.5%). Not classic OI gamma flip.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for expiry in expiries:
+        rows = _aggregate_rows(
+            [row for row in source_rows if str(row["expiry"]) == expiry]
+        )
+        level, status = _estimate_gamma_flip(rows, spot=spot)
+        note = _gamma_flip_empty_note(rows, spot=spot, status=status)
+        out[str(expiry)] = {
+            "level": level,
+            "status": status,
+            "note": note,
+        }
+    return out
+
+
 def _build_reference_levels(
     all_rows: list[dict[str, float]],
     source_rows: list[dict[str, Any]],
@@ -1112,29 +1816,53 @@ def _build_reference_levels(
     gamma_flip: float | None = None,
     gamma_flip_status: str | None = None,
     gamma_flip_note: str | None = None,
+    hvl_scope_label: str | None = None,
+    hvl_book_level: float | None = None,
+    hvl_book_status: str | None = None,
+    hvl_book_note: str | None = None,
     distance_spot: float | None = None,
 ) -> list[dict[str, Any]]:
     """Reference metrics for the terminal Levels desk.
 
-    - Gamma Flip: shared cumulative net_gex zero-cross inside spot ± 15%
-      (see `_estimate_gamma_flip`). Same definition as terminal gamma_flip /
-      zero_gamma and Regime Flip. Value is "—" when status is no_cross
-      (never a fake flattest-bar level or a far out-of-window cross).
+    - HVL (primary): cumulative net_gex zero-cross on the **session / front
+      expiry** (or selected expiry), inside spot ± 12% (see
+      `_estimate_gamma_flip`). Not the ALL-book aggregate.
+      Value is "—" when status is no_cross (never a fake flattest-bar level).
       Optional `note` carries locked empty-state copy (one-sided short/long).
+    - Book HVL (secondary): optional multi-expiry ALL-surface zero-cross with
+      an explicit multi-expiry tooltip — never the default Levels readout.
     - Max Pain: OI-based settlement strike (minimizes call+put extrinsic payout).
     - Expected Move: vol-based 1σ band from front-expiry IV — independent of GEX.
 
-    ``spot`` is materialize GEX spot (Flip eligibility + Expected Move band).
-    ``distance_spot`` (default ``spot``) is the trading reference for Flip DIST %
+    ``spot`` is materialize GEX spot (HVL eligibility + Expected Move band).
+    ``distance_spot`` (default ``spot``) is the trading reference for DIST %
     — live Deribit index when available.
+
+    API aliases: historical label "Zero Gamma" / fields gamma_flip / zero_gamma
+    still map to the same HVL level for compatibility.
     """
     dist_ref = float(distance_spot) if distance_spot is not None else spot
+    scope_label = hvl_scope_label or front_expiry
     if gamma_flip_status is None:
-        # Callers that only pass rows (tests / older paths) recompute once here.
-        gamma_flip, gamma_flip_status = _estimate_gamma_flip(all_rows, spot=spot)
+        # Callers that only pass rows (tests / older paths): prefer front expiry
+        # surface over ALL-book aggregate when rows are multi-expiry.
+        front_rows = _aggregate_rows(
+            [row for row in source_rows if str(row["expiry"]) == front_expiry]
+        )
+        hvl_rows = front_rows if front_rows else all_rows
+        gamma_flip, gamma_flip_status = _estimate_gamma_flip(hvl_rows, spot=spot)
+        if gamma_flip_note is None and gamma_flip_status == "no_cross":
+            gamma_flip_note = _gamma_flip_empty_note(
+                hvl_rows, spot=spot, status=gamma_flip_status
+            )
     if gamma_flip_note is None and gamma_flip_status == "no_cross":
+        front_rows = _aggregate_rows(
+            [row for row in source_rows if str(row["expiry"]) == front_expiry]
+        )
         gamma_flip_note = _gamma_flip_empty_note(
-            all_rows, spot=spot, status=gamma_flip_status
+            front_rows if front_rows else all_rows,
+            spot=spot,
+            status=gamma_flip_status,
         )
     max_pain_expiry = _select_max_pain_expiry(source_rows, front_expiry)
     max_pain_rows = [row for row in source_rows if str(row["expiry"]) == max_pain_expiry] or source_rows
@@ -1147,34 +1875,73 @@ def _build_reference_levels(
         if gamma_flip is not None
         else None
     )
+    # Primary HVL — session/front (or selected) expiry, not ALL book.
     flip_metric: dict[str, Any] = {
-        "label": "Gamma Flip",
+        "label": "HVL",
         "value": flip_value,
         "change": flip_change,
         "color": "#d0bc62",
-        "scope": "book",
-        "scope_label": "ALL",
+        "scope": "session",
+        "scope_label": scope_label if scope_label and scope_label != "ALL" else front_expiry,
         "status": gamma_flip_status,
+        # HVL = cumulative flow-GEX zero-cross on this expiry within spot ±12%
+        # (mass filter 1.5%). Not classic OI gamma flip.
+        "definition": (
+            "HVL = cumulative flow-GEX zero-cross on this expiry within spot ±12% "
+            "(mass filter 1.5%). Not classic OI gamma flip."
+        ),
     }
     if gamma_flip_note:
         flip_metric["note"] = gamma_flip_note
-    return [
-        flip_metric,
-        {
-            "label": "Max Pain",
-            "value": _format_usd(max_pain),
-            "color": "#d35fe9",
-            "scope": "session",
-            "scope_label": max_pain_expiry,
-        },
-        {
-            "label": "Expected Move",
-            "value": f"{_format_usd(expected_move[0])}-{_format_usd(expected_move[1])}",
-            "color": "#e4cf7e",
-            "scope": "session",
-            "scope_label": front_expiry,
-        },
-    ]
+
+    metrics: list[dict[str, Any]] = [flip_metric]
+
+    # Optional Book HVL (ALL multi-expiry sum) — secondary, clearly labeled.
+    if hvl_book_status is not None:
+        book_value = (
+            _format_usd(hvl_book_level) if hvl_book_level is not None else "—"
+        )
+        book_change = (
+            f"{_distance_from_spot(hvl_book_level, dist_ref):+.2f}%"
+            if hvl_book_level is not None
+            else None
+        )
+        book_metric: dict[str, Any] = {
+            "label": "Book HVL",
+            "value": book_value,
+            "change": book_change,
+            "color": "#a8b7c4",
+            "scope": "book",
+            "scope_label": "ALL",
+            "status": hvl_book_status,
+            "note": hvl_book_note or HVL_BOOK_NOTE,
+            "tooltip": HVL_BOOK_NOTE,
+            "definition": (
+                "Book HVL = cumulative flow-GEX zero-cross on the multi-expiry "
+                "ALL surface (summed inventory). Secondary to session HVL."
+            ),
+        }
+        metrics.append(book_metric)
+
+    metrics.extend(
+        [
+            {
+                "label": "Max Pain",
+                "value": _format_usd(max_pain),
+                "color": "#d35fe9",
+                "scope": "session",
+                "scope_label": max_pain_expiry,
+            },
+            {
+                "label": "Expected Move",
+                "value": f"{_format_usd(expected_move[0])}-{_format_usd(expected_move[1])}",
+                "color": "#e4cf7e",
+                "scope": "session",
+                "scope_label": front_expiry,
+            },
+        ]
+    )
+    return metrics
 
 
 def _select_max_pain_expiry(source_rows: list[dict[str, Any]], front_expiry: str) -> str:
@@ -1384,30 +2151,37 @@ def _estimate_gamma_flip(
     spot: float | None = None,
 ) -> tuple[float | None, str]:
     """
-    Gamma Flip from the ALL-expiry net GEX profile (flow, not OI).
+    HVL from a taker-flow net GEX surface (cumulative zero-cross).
+
+    HVL = cumulative flow-GEX zero-cross on this expiry within spot ±12%
+    (mass filter 1.5%). Not classic OI gamma flip.
+
+    UI label is **HVL**. API fields ``gamma_flip`` / ``zero_gamma`` / ``hvl``
+    share this level for temporary compatibility.
+
+    ``rows`` is the surface under study — a single expiry (preferred) or the
+    full ALL book (Book HVL secondary only). Levels default uses front/active
+    session expiry, not the multi-expiry aggregate.
+
+    Taker-flow notes (vs common OI models):
+      - Sign is pure dealer inventory from cumulative taker flow (no put flip).
+      - Flow-netted books are smaller/noisier → mass filter drops zig-zag noise.
+      - Far wing zeros on one-sided near-spot books are not published.
 
     Shared definition used by:
-      - levels.reference → Gamma Flip
-      - terminal gamma_flip / zero_gamma (Regime distance / profile marker)
-      - any consumer of Flip on the map
+      - levels.reference → HVL (session) / Book HVL (ALL secondary)
+      - terminal hvl / gamma_flip / zero_gamma
+      - bands-chart HVL line (FE mirrors this estimator)
 
     Algorithm:
       1. Walk strikes low → high; accumulate net_gex.
       2. Detect zero-crossings of the *cumulative* series only
          (linear interpolation between adjacent cumulative sums).
-         True cumulative zeros at a strike are included; raw local
-         adjacent-bar sign changes and exact-zero bars that are not
-         cumulative zeros are ignored.
-      3. Keep crossings with meaningful mass on both sides of the step:
-         |prev_cum| + |next_cum| ≥ max(GAMMA_FLIP_MIN_MASS_FRACTION × Σ|net_gex|,
-         tiny epsilon). Constant is 1.5% (softened from 2.0%).
-      4. Eligibility window: only crosses with
-         |level − spot| / spot ≤ GAMMA_FLIP_MAX_DISTANCE_FRAC (0.15, ±15%).
-         Far mass-valid crosses are discarded (same empty state as no cross).
-      5. Among eligible crossings, pick the one nearest to spot
-         (tie-break: larger mass).
-      6. If none: return (None, "no_cross"). Never invent Flip from flattest
-         |net_gex|, a far out-of-window cross, or any non-zero bar.
+      3. Mass filter vs **window-local** Σ|net_gex| (eligibility window strikes;
+         full book if window empty): |prev_cum| + |next_cum| ≥ 1.5% of that sum.
+      4. Eligibility: |level − spot| / spot ≤ 0.12 (±12%).
+      5. Among eligible crossings, pick nearest to spot (tie → larger mass).
+      6. If none: return (None, "no_cross"). Never invent from flattest |net_gex|.
 
     Returns:
       (level, status) where status is "ok" | "no_cross".
@@ -1421,7 +2195,20 @@ def _estimate_gamma_flip(
         if spot is not None and spot > 0
         else float(sorted_rows[len(sorted_rows) // 2]["strike"])
     )
-    total_abs = sum(abs(float(row["net_gex"])) for row in sorted_rows)
+
+    # Mass denominator: prefer Σ|net| inside the eligibility window so far-wing
+    # inventory does not bury a real near-spot cumulative cross on flow books.
+    max_dist = ref * GAMMA_FLIP_MAX_DISTANCE_FRAC if ref > 0 else None
+    if max_dist is not None:
+        window_rows = [
+            row
+            for row in sorted_rows
+            if abs(float(row["strike"]) - ref) <= max_dist
+        ]
+    else:
+        window_rows = []
+    mass_rows = window_rows if window_rows else sorted_rows
+    total_abs = sum(abs(float(row["net_gex"])) for row in mass_rows)
     min_mass = max(total_abs * GAMMA_FLIP_MIN_MASS_FRACTION, 1e-12)
 
     # (level, mass) — mass = |prev_cum| + |next_cum| at the step
@@ -1458,9 +2245,8 @@ def _estimate_gamma_flip(
         previous_strike = strike
         previous_cumulative = cumulative
 
-    # Near-spot eligibility: discard mass-valid crosses outside spot ± 15%.
-    if ref > 0:
-        max_dist = ref * GAMMA_FLIP_MAX_DISTANCE_FRAC
+    # Near-spot eligibility: discard mass-valid crosses outside spot ± 12%.
+    if max_dist is not None:
         crossings = [item for item in crossings if abs(item[0] - ref) <= max_dist]
 
     if not crossings:
@@ -1647,6 +2433,182 @@ def _row_float(row: dict[str, Any], key: str) -> float:
         return 0.0
 
 
+def _build_iv_signal_eligibility(
+    *,
+    scan: Mapping[str, Any],
+    as_of: datetime,
+    spot: float,
+    snapshot_age_seconds: float,
+    has_base_suppression: bool,
+) -> tuple[IvSignalEligibility, list[str]]:
+    """Apply the fail-closed product policy layered over the parity model.
+
+    Longer-dated expiries retain the scanner's established release gates. A
+    true UTC settlement-day contract must additionally clear every 0DTE check
+    before either the API or the UI may expose a directional outlook.
+    """
+    normalized_as_of = as_of if as_of.tzinfo else as_of.replace(tzinfo=UTC)
+    normalized_as_of = normalized_as_of.astimezone(UTC)
+    settlement_at = scan.get("settlement_at")
+    if not isinstance(settlement_at, datetime):
+        raise ValueError("IV signal scan is missing an exact settlement timestamp.")
+    normalized_settlement = (
+        settlement_at
+        if settlement_at.tzinfo
+        else settlement_at.replace(tzinfo=UTC)
+    ).astimezone(UTC)
+    hours_to_settlement = max(
+        (normalized_settlement - normalized_as_of).total_seconds() / 3600.0,
+        0.0,
+    )
+    is_zero_dte = normalized_settlement.date() == normalized_as_of.date()
+
+    raw_signals = scan.get("signals")
+    signals = raw_signals if isinstance(raw_signals, Mapping) else {}
+    active_directions: list[str] = []
+    for signal_name in ("skew", "tails", "peak", "band"):
+        raw_signal = signals.get(signal_name)
+        if not isinstance(raw_signal, Mapping):
+            continue
+        direction = str(raw_signal.get("signal") or "NO_TRADE")
+        if direction in {"LONG", "SHORT"}:
+            active_directions.append(direction)
+    model_verdict = str(scan.get("model_verdict") or "NO_TRADE")
+    aligned_signal_count = (
+        active_directions.count(model_verdict)
+        if model_verdict in {"LONG", "SHORT"}
+        else 0
+    )
+    signal_alignment = (
+        model_verdict in {"LONG", "SHORT"}
+        and aligned_signal_count >= IV_SIGNAL_ZERO_DTE_MIN_ALIGNED_SIGNALS
+        and aligned_signal_count == len(active_directions)
+    )
+
+    selection = scan.get("selection")
+    selection_map = selection if isinstance(selection, Mapping) else {}
+    try:
+        otm_ref = float(
+            selection_map.get("otm_reference")
+            or selection_map.get("implied_forward")
+            or spot
+        )
+    except (TypeError, ValueError):
+        otm_ref = float(spot)
+    if not math.isfinite(otm_ref) or otm_ref <= 0:
+        otm_ref = float(spot)
+    lower_gaps: list[float] = []
+    upper_gaps: list[float] = []
+    if math.isfinite(otm_ref) and otm_ref > 0:
+        raw_curve = scan.get("iv_curve")
+        curve = raw_curve if isinstance(raw_curve, list) else []
+        for raw_point in curve:
+            if not isinstance(raw_point, Mapping) or raw_point.get("synthetic") is True:
+                continue
+            source = str(raw_point.get("source") or "")
+            try:
+                strike = float(raw_point.get("strike"))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(strike) or strike <= 0 or strike == otm_ref:
+                continue
+            gap_percent = abs((strike / otm_ref) - 1.0) * 100.0
+            if strike < otm_ref and source == "put_otm_mark_iv":
+                lower_gaps.append(gap_percent)
+            elif strike > otm_ref and source == "call_otm_mark_iv":
+                upper_gaps.append(gap_percent)
+
+    near_lower_count = sum(
+        gap <= IV_SIGNAL_ZERO_DTE_NEAR_SPOT_WINDOW_PERCENT for gap in lower_gaps
+    )
+    near_upper_count = sum(
+        gap <= IV_SIGNAL_ZERO_DTE_NEAR_SPOT_WINDOW_PERCENT for gap in upper_gaps
+    )
+    nearest_lower_gap = min(lower_gaps) if lower_gaps else None
+    nearest_upper_gap = min(upper_gaps) if upper_gaps else None
+    coverage = scan.get("coverage")
+    coverage_map = coverage if isinstance(coverage, Mapping) else {}
+    tenor = tenor_coverage_spec(hours_to_settlement / (365.0 * 24.0))
+    two_sided_coverage = (
+        near_lower_count >= IV_SIGNAL_ZERO_DTE_MIN_CANONICAL_STRIKES_PER_SIDE
+        and near_upper_count >= IV_SIGNAL_ZERO_DTE_MIN_CANONICAL_STRIKES_PER_SIDE
+        and nearest_lower_gap is not None
+        and nearest_lower_gap <= IV_SIGNAL_ZERO_DTE_MAX_NEAREST_GAP_PERCENT
+        and nearest_upper_gap is not None
+        and nearest_upper_gap <= IV_SIGNAL_ZERO_DTE_MAX_NEAREST_GAP_PERCENT
+        and bool(coverage_map.get("spot_bracketed"))
+        and float(
+            coverage_map.get("hard_valid_coverage_ratio")
+            if coverage_map.get("hard_valid_coverage_ratio") is not None
+            else coverage_map.get("iv_coverage_ratio")
+            or 0.0
+        )
+        >= MIN_SIGNAL_IV_COVERAGE_RATIO
+        and int(selection_map.get("selected_market_strikes") or 0)
+        >= tenor.min_strikes
+    )
+    curve_quality = scan.get("curve_quality")
+    quality_map = curve_quality if isinstance(curve_quality, Mapping) else {}
+    requirements = IvSignalEligibilityRequirements(
+        settlement_window=hours_to_settlement > IV_SIGNAL_ZERO_DTE_MIN_HOURS,
+        curve_quality=str(quality_map.get("level") or "") == "HIGH",
+        two_sided_coverage=two_sided_coverage,
+        quote_freshness=(
+            math.isfinite(float(snapshot_age_seconds))
+            and snapshot_age_seconds <= IV_SIGNAL_ZERO_DTE_MAX_QUOTE_AGE_SECONDS
+        ),
+        signal_alignment=signal_alignment,
+    )
+    zero_dte_requirements_pass = all(
+        (
+            requirements.settlement_window,
+            requirements.curve_quality,
+            requirements.two_sided_coverage,
+            requirements.quote_freshness,
+            requirements.signal_alignment,
+        )
+    )
+    directional_eligible = (
+        not has_base_suppression
+        and model_verdict in {"LONG", "SHORT"}
+        and (not is_zero_dte or zero_dte_requirements_pass)
+    )
+    zero_dte_eligible = is_zero_dte and directional_eligible
+
+    reasons: list[str] = []
+    if is_zero_dte:
+        if not requirements.settlement_window:
+            reasons.append("0DTE requires more than 4 hours to settlement")
+        if not requirements.curve_quality:
+            reasons.append("0DTE requires HIGH curve quality")
+        if not requirements.two_sided_coverage:
+            reasons.append("0DTE requires strong two-sided strike coverage around spot")
+        if not requirements.quote_freshness:
+            reasons.append("0DTE requires quotes no more than 10 seconds old")
+        if not requirements.signal_alignment:
+            reasons.append("0DTE requires at least two aligned signals")
+
+    eligibility = IvSignalEligibility(
+        is_zero_dte=is_zero_dte,
+        directional_eligible=directional_eligible,
+        zero_dte_eligible=zero_dte_eligible,
+        recommended_refresh_seconds=(
+            IV_SIGNAL_ZERO_DTE_REFRESH_SECONDS
+            if zero_dte_eligible
+            else IV_SIGNAL_STANDARD_REFRESH_SECONDS
+        ),
+        hours_to_settlement=hours_to_settlement,
+        active_signal_count=len(active_directions),
+        aligned_signal_count=aligned_signal_count,
+        lower_canonical_strikes=near_lower_count,
+        upper_canonical_strikes=near_upper_count,
+        nearest_lower_gap_percent=nearest_lower_gap,
+        nearest_upper_gap_percent=nearest_upper_gap,
+        requirements=requirements,
+    )
+    return eligibility, reasons
+
+
 def _normalize_expiry_key(expiry: str, known: list[str]) -> str:
     """Map a client expiry string onto a listed snapshot expiry when possible."""
     if not expiry or expiry == "ALL":
@@ -1710,6 +2672,66 @@ def _expiry_kind(expiry: str) -> str:
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return min(maximum, max(minimum, value))
+
+
+def _as_of_to_ms(as_of: Any) -> int:
+    """Best-effort snapshot as_of → epoch ms."""
+    if as_of is None:
+        return int(datetime.now(UTC).timestamp() * 1000)
+    if isinstance(as_of, (int, float)) and math.isfinite(float(as_of)):
+        v = float(as_of)
+        # Heuristic: seconds vs ms.
+        return int(v * 1000) if v < 1e12 else int(v)
+    text = str(as_of).strip()
+    if not text:
+        return int(datetime.now(UTC).timestamp() * 1000)
+    try:
+        dt = SnapshotRepository._parse_as_of(text)
+        return int(dt.timestamp() * 1000)
+    except (TypeError, ValueError):
+        return int(datetime.now(UTC).timestamp() * 1000)
+
+
+def _forward_surface_response(surface: Any) -> GexForwardSurfaceResponse:
+    meta = surface.meta if isinstance(surface.meta, dict) else {}
+    return GexForwardSurfaceResponse(
+        times=list(surface.times_ms),
+        prices=list(surface.prices),
+        values=[list(col) for col in surface.values],
+        spot=float(surface.spot) if math.isfinite(float(surface.spot)) else 0.0,
+        settle_ms=int(surface.settle_ms),
+        as_of_ms=int(surface.as_of_ms),
+        expiry=str(surface.expiry or ""),
+        meta=GexForwardSurfaceMeta(
+            version=str(meta.get("version") or FORWARD_SURFACE_VERSION),
+            methodology=str(meta.get("methodology") or ""),
+            note=str(meta.get("note") or ""),
+            leg_count=int(meta.get("leg_count") or 0),
+            n_times=int(meta.get("n_times") or 0),
+            n_prices=int(meta.get("n_prices") or 0),
+            price_window_pct=_optional_float(meta.get("price_window_pct")),
+            tau0_years=_optional_float(meta.get("tau0_years")),
+            tau0_hours=_optional_float(meta.get("tau0_hours")),
+            metric=str(meta.get("metric") or "gamma"),
+            unit=str(meta.get("unit") or "USD / 1% move"),
+            iv_shift=float(meta.get("iv_shift") or 0.0),
+            reference_iv=_optional_float(meta.get("reference_iv")),
+            settlement_strike=_optional_float(meta.get("settlement_strike")),
+            positioning_source="flow",
+            position_recovery=str(meta.get("position_recovery") or "unavailable"),
+            direct_position_leg_count=int(meta.get("direct_position_leg_count") or 0),
+            reference_gex_coverage=float(meta.get("reference_gex_coverage") or 0.0),
+            expiry_scope=str(meta.get("expiry_scope") or "0dte"),
+        ),
+    )
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
 
 
 def _heatmap_cells_from_by_strike(by_strike: Any) -> list[GexHeatmapCell]:
