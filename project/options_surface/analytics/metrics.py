@@ -36,9 +36,28 @@ def compute_analytics(
     k_call, iv_25_call = solve_delta_strike(fitted, target_delta=0.25, side="call", rate=rate)
     k_put, iv_25_put = solve_delta_strike(fitted, target_delta=-0.25, side="put", rate=rate)
     rr_25 = bf_25 = None
-    if iv_25_call is not None and iv_25_put is not None and atm_iv is not None:
+    k_25_call = k_25_put = None
+    if (
+        k_call is not None
+        and k_put is not None
+        and fitted.forward_usd > 0
+    ):
+        k_25_call = math.log(float(k_call) / fitted.forward_usd)
+        k_25_put = math.log(float(k_put) / fitted.forward_usd)
+    if (
+        iv_25_call is not None
+        and iv_25_put is not None
+        and atm_iv is not None
+        and k_25_call is not None
+        and k_25_put is not None
+        and fitted.k_min - 1e-12 <= k_25_call <= fitted.k_max + 1e-12
+        and fitted.k_min - 1e-12 <= k_25_put <= fitted.k_max + 1e-12
+    ):
         rr_25 = float((iv_25_call - iv_25_put) * 100.0)
         bf_25 = float(((iv_25_call + iv_25_put) / 2.0 - atm_iv) * 100.0)
+    else:
+        iv_25_call = iv_25_call if k_25_call is not None else None
+        iv_25_put = iv_25_put if k_25_put is not None else None
 
     left_ivs = [point.iv for point in observed if point.log_moneyness < -1e-9]
     right_ivs = [point.iv for point in observed if point.log_moneyness > 1e-9]
@@ -91,6 +110,8 @@ def compute_analytics(
         central_range_50=range_50,
         central_range_90=range_90,
         risk_neutral_mean=rn_mean,
+        k_25_call=k_25_call,
+        k_25_put=k_25_put,
     )
 
 

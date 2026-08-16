@@ -92,23 +92,25 @@ def diagnose_slice_arbitrage(
         )
 
     steps = np.diff(call)
-    min_step = float(np.min(steps))
-    monotone = bool(min_step <= MONOTONE_TOL)
-    # Calls must be decreasing in K: C[i+1] - C[i] <= tol, i.e. min_step should be <= 0
-    # Wait: C[i+1] <= C[i] means steps = C[i+1]-C[i] <= 0, so min_step <= 0 is expected,
-    # and we fail if any step is positive beyond tolerance: max(steps) > MONOTONE_TOL
+    # Calls must be decreasing in K: C[i+1] - C[i] <= tol.
     max_step = float(np.max(steps))
     monotone = bool(max_step <= MONOTONE_TOL)
     min_call_step = max_step
+    worst_monotone_strike = None
     if not monotone:
         violations.append("call_not_decreasing_in_strike")
+        idx = int(np.argmax(steps))
+        worst_monotone_strike = float(strikes[idx])
 
     butterflies = call[:-2] - 2.0 * call[1:-1] + call[2:]
     # For non-uniform grids this is only approximate. Prefer uniform grids.
     min_bf = float(np.min(butterflies))
     convex = bool(min_bf >= -CONVEX_TOL)
+    worst_convexity_strike = None
     if not convex:
         violations.append("call_not_convex_in_strike")
+        idx = int(np.argmin(butterflies))
+        worst_convexity_strike = float(strikes[idx + 1])
 
     return ArbitrageReport(
         positive_variance=positive,
@@ -121,6 +123,8 @@ def diagnose_slice_arbitrage(
         min_butterfly=min_bf,
         min_calendar_dw=None,
         violations=tuple(violations),
+        worst_convexity_strike=worst_convexity_strike,
+        worst_monotone_strike=worst_monotone_strike,
     )
 
 

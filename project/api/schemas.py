@@ -514,6 +514,27 @@ class OptionsSurfaceSmile(BaseModel):
     notes: list[str]
 
 
+class OptionsSurfaceFailedGate(BaseModel):
+    code: str
+    criterion: str
+    measured: float | None = None
+    threshold: float | None = None
+    comparison: str
+    location: str | None = None
+    severity: str
+    message: str
+
+
+class OptionsSurfaceDensityDiagnostic(BaseModel):
+    """Opt-in raw curve. Never a valid probability distribution when attached."""
+
+    label: str
+    is_valid_distribution: bool = False
+    strikes_usd: list[float]
+    raw_density: list[float]
+    cdf: list[float]
+
+
 class OptionsSurfaceDensity(BaseModel):
     status: Literal["accepted", "degraded", "rejected", "research"]
     method: str
@@ -532,6 +553,8 @@ class OptionsSurfaceDensity(BaseModel):
     grid_converged: bool | None = None
     digital_atm_error: float | None = None
     notes: list[str]
+    failed_gates: list[OptionsSurfaceFailedGate] = Field(default_factory=list)
+    diagnostic: OptionsSurfaceDensityDiagnostic | None = None
 
 
 class OptionsSurfaceAnalytics(BaseModel):
@@ -554,13 +577,34 @@ class OptionsSurfaceAnalytics(BaseModel):
     central_range_50: list[float] | None = None
     central_range_90: list[float] | None = None
     risk_neutral_mean: float | None = None
+    k_25_call: float | None = None
+    k_25_put: float | None = None
+
+
+class OptionsSurfaceMetricEligibility(BaseModel):
+    metric: str
+    available: bool
+    reason_code: str | None = None
+    reason: str | None = None
+
+
+class OptionsSurfaceDisplayState(BaseModel):
+    quote_status: Literal["accepted", "degraded", "rejected"]
+    smile_status: Literal["accepted", "degraded", "rejected", "research"]
+    density_status: Literal["accepted", "degraded", "rejected", "unavailable"]
+    surface_display_status: Literal["ready", "degraded", "rejected", "unavailable"]
+    reason_codes: list[str]
+    human_readable_reason: str
+    diagnostic_detail: str
+    failed_checks: list[str]
+    metric_eligibility: list[OptionsSurfaceMetricEligibility]
 
 
 class OptionsSurfaceValidation(BaseModel):
     model_status: Literal["accepted", "degraded", "rejected", "research"]
     forward_quality: Literal["high", "medium", "low", "unavailable"]
     smile_status: Literal["accepted", "degraded", "rejected", "research"]
-    density_status: Literal["accepted", "degraded", "rejected", "research"]
+    density_status: Literal["accepted", "degraded", "rejected", "research", "unavailable"]
     quote_reason_counts: dict[str, int]
     warnings: list[str]
     summary: str
@@ -570,6 +614,10 @@ class OptionsSurfaceValidation(BaseModel):
     butterfly_ok: bool
     calendar_ok: bool | None = None
     arbitrage_violations: list[str]
+    quote_status: Literal["accepted", "degraded", "rejected"] | None = None
+    surface_display_status: Literal["ready", "degraded", "rejected", "unavailable"] | None = None
+    human_readable_reason: str | None = None
+    failed_checks: list[str] = Field(default_factory=list)
 
 
 class OptionsSurfaceResponse(BaseModel):
@@ -595,6 +643,7 @@ class OptionsSurfaceResponse(BaseModel):
     model_status: Literal["accepted", "degraded", "rejected", "research"]
     fitter_name: str
     fitter_grade: Literal["production", "diagnostic", "research"]
+    display: OptionsSurfaceDisplayState
     feed: IvSignalFeedHealth
     freshness: IvSignalFreshness
     warnings: list[str]

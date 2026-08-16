@@ -9,7 +9,12 @@ import numpy as np
 from scipy.integrate import trapezoid
 
 from project.options_surface.distribution.black76 import black76_call
-from project.options_surface.types import DensityMethod, DensityValidation, ModelStatus
+from project.options_surface.types import (
+    DensityMethod,
+    DensityValidation,
+    ModelStatus,
+    ValidationGate,
+)
 
 MASS_ACCEPT = 0.02
 MASS_REJECT = 0.10
@@ -37,12 +42,28 @@ def validate_density(
     raw = np.asarray(list(raw_density), dtype=float)
     notes: list[str] = []
     if len(strikes) < 5 or len(strikes) != len(raw):
-        return _rejected("insufficient_grid", grid_points=len(strikes))
+        return _rejected(
+            "insufficient_grid",
+            grid_points=len(strikes),
+            gates=(
+                _gate(
+                    "insufficient_grid",
+                    "grid_points",
+                    float(len(strikes)),
+                    5.0,
+                    "lt",
+                    None,
+                    "reject",
+                    "Strike grid too short to validate a density",
+                ),
+            ),
+        )
 
     mass = float(trapezoid(raw, strikes))
     negative = np.clip(-raw, 0.0, None)
     raw_negative_mass = float(trapezoid(negative, strikes))
     nonnegative = bool(raw_negative_mass <= NEG_ACCEPT)
+    gates: list[ValidationGate] = []
 
     pos = np.clip(raw, 0.0, None)
     pos_mass = float(trapezoid(pos, strikes))
@@ -53,24 +74,105 @@ def validate_density(
         mean = None
         moment_error = None
         notes.append("nonpositive_mass")
+        gates.append(
+            _gate(
+                "mass_out_of_range",
+                "positive_mass",
+                pos_mass,
+                0.0,
+                "le",
+                None,
+                "reject",
+                "Positive density mass is not usable",
+            )
+        )
 
     cdf = _raw_cdf(strikes, raw)
     diffs = np.diff(cdf)
     cdf_monotone = bool(np.all(diffs >= -1e-8))
     cdf_start = float(cdf[0]) if len(cdf) else None
     cdf_end = float(cdf[-1]) if len(cdf) else None
-    if not cdf_monotone:
+    if not cdf_monotone and len(diffs):
+        worst = int(np.argmin(diffs))
         notes.append("cdf_not_monotone")
+        gates.append(
+            _gate(
+                "cdf_not_monotone",
+                "min_cdf_step",
+                float(diffs[worst]),
+                -1e-8,
+                "lt",
+                f"K={float(strikes[worst]):.4f}->{float(strikes[worst + 1]):.4f}",
+                "reject",
+                "Raw CDF decreased between adjacent strikes",
+            )
+        )
+
+    if raw_negative_mass > NEG_ACCEPT:
+        worst_neg = int(np.argmin(raw)) if len(raw) else 0
+        severity = "reject" if raw_negative_mass > NEG_REJECT else "degrade"
+        gates.append(
+            _gate(
+                "negative_density_mass",
+                "raw_negative_mass",
+                raw_negative_mass,
+                NEG_REJECT if severity == "reject" else NEG_ACCEPT,
+                "gt",
+                f"K={float(strikes[worst_neg]):.4f}" if len(strikes) else None,
+                severity,
+                "Integrated negative Breeden–Litzenberger mass",
+            )
+        )
+
+    if math.isfinite(mass) and abs(mass - 1.0) > MASS_ACCEPT:
+        severity = "reject" if abs(mass - 1.0) > MASS_REJECT else "degrade"
+        gates.append(
+            _gate(
+                "mass_out_of_range",
+                "abs(mass-1)",
+                abs(mass - 1.0),
+                MASS_REJECT if severity == "reject" else MASS_ACCEPT,
+                "gt",
+                None,
+                severity,
+                "Raw density mass away from 1",
+            )
+        )
+
+    if moment_error is not None and moment_error > MOMENT_ACCEPT:
+        severity = "reject" if moment_error > MOMENT_REJECT else "degrade"
+        gates.append(
+            _gate(
+                "forward_moment",
+                "abs(E[K]-F)/F",
+                moment_error,
+                MOMENT_REJECT if severity == "reject" else MOMENT_ACCEPT,
+                "gt",
+                f"E[K]={mean:.4f}" if mean is not None else None,
+                severity,
+                "Density mean disagrees with the selected forward",
+            )
+        )
 
     edge = 0.0
     if pos_mass > 0:
-        edge = float((pos[0] + pos[-1]) * 0.5 * (strikes[-1] - strikes[0]) / max(len(strikes) - 1, 1))
-        # Tail mass outside a more informative measure: leftover vs 1.
         leftover = abs(1.0 - pos_mass)
         edge = leftover
     truncation_warning = bool(edge > 0.03)
     if truncation_warning:
         notes.append("edge_mass_or_truncation")
+        gates.append(
+            _gate(
+                "insufficient_wing_coverage",
+                "abs(1-positive_mass)",
+                edge,
+                0.03,
+                "gt",
+                None,
+                "degrade",
+                "Material mass sits outside the observed strike grid",
+            )
+        )
 
     grid_converged = None
     if compare_strikes is not None and compare_density is not None:
@@ -79,6 +181,18 @@ def validate_density(
         )
         if grid_converged is False:
             notes.append("grid_not_converged")
+            gates.append(
+                _gate(
+                    "grid_not_converged",
+                    "rel_p50_change",
+                    None,
+                    GRID_Q50_TOL,
+                    "gt",
+                    None,
+                    "degrade",
+                    "Median moved when the strike grid was refined",
+                )
+            )
 
     digital_err = _digital_error(
         strikes,
@@ -90,6 +204,19 @@ def validate_density(
     )
     if digital_err is not None and digital_err > DIGITAL_TOL_ACCEPT:
         notes.append(f"digital_atm_error={digital_err:.4f}")
+        severity = "reject" if digital_err > DIGITAL_TOL_REJECT else "degrade"
+        gates.append(
+            _gate(
+                "digital_atm",
+                "abs(Q(S>F)-digital)",
+                digital_err,
+                DIGITAL_TOL_REJECT if severity == "reject" else DIGITAL_TOL_ACCEPT,
+                "gt",
+                f"K={forward_usd:.4f}",
+                severity,
+                "ATM digital-spread disagreement",
+            )
+        )
 
     status = ModelStatus.ACCEPTED
     if (
@@ -131,6 +258,7 @@ def validate_density(
         grid_converged=grid_converged,
         digital_atm_error=digital_err,
         notes=tuple(notes),
+        failed_gates=tuple(gates),
     )
 
 
@@ -206,7 +334,34 @@ def _digital_error(
     return abs(p_above - q_spread)
 
 
-def _rejected(note: str, *, grid_points: int) -> DensityValidation:
+def _gate(
+    code: str,
+    criterion: str,
+    measured: float | None,
+    threshold: float | None,
+    comparison: str,
+    location: str | None,
+    severity: str,
+    message: str,
+) -> ValidationGate:
+    return ValidationGate(
+        code=code,
+        criterion=criterion,
+        measured=measured,
+        threshold=threshold,
+        comparison=comparison,
+        location=location,
+        severity=severity,
+        message=message,
+    )
+
+
+def _rejected(
+    note: str,
+    *,
+    grid_points: int,
+    gates: tuple[ValidationGate, ...] = (),
+) -> DensityValidation:
     return DensityValidation(
         status=ModelStatus.REJECTED,
         method=DensityMethod.BREEDEN_LITZENBERGER_BLACK76,
@@ -224,4 +379,5 @@ def _rejected(note: str, *, grid_points: int) -> DensityValidation:
         grid_converged=None,
         digital_atm_error=None,
         notes=(note,),
+        failed_gates=gates,
     )

@@ -99,6 +99,12 @@ def test_options_surface_contract(tmp_path: Path, monkeypatch) -> None:
         assert body["model_status"] in {"accepted", "degraded", "rejected", "research"}
         assert body["validation"]["summary"]
         assert body["fitter_grade"] == "diagnostic"
+        assert body["display"]["quote_status"] in {"accepted", "degraded", "rejected"}
+        assert body["display"]["smile_status"] in {"accepted", "degraded", "rejected", "research"}
+        assert body["display"]["density_status"] in {"accepted", "degraded", "rejected", "unavailable"}
+        assert body["display"]["surface_display_status"] in {"ready", "degraded", "rejected", "unavailable"}
+        assert body["display"]["human_readable_reason"]
+        assert isinstance(body["display"]["metric_eligibility"], list)
         text = str(body).lower()
         for token in ("long", "short", "bullish", "bearish", "forecast", "verdict"):
             assert token not in text
@@ -161,3 +167,8 @@ def test_degraded_and_good_example_payloads(tmp_path: Path, monkeypatch) -> None
     assert good_body.model_status in {"accepted", "degraded"}
     assert thin_body.model_status == "rejected"
     assert thin_body.analytics.central_range_50 is None
+    assert thin_body.display.density_status in {"rejected", "unavailable"}
+    assert thin_body.display.surface_display_status in {"rejected", "unavailable"}
+    if thin_body.density is not None:
+        assert thin_body.density.strikes_usd == []
+        assert thin_body.density.quantiles == {}

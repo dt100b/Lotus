@@ -29,7 +29,11 @@ from project.api.schemas import (
     IvSignalSmilePoint,
     OptionsSurfaceAnalytics,
     OptionsSurfaceDensity,
+    OptionsSurfaceDensityDiagnostic,
+    OptionsSurfaceDisplayState,
+    OptionsSurfaceFailedGate,
     OptionsSurfaceForward,
+    OptionsSurfaceMetricEligibility,
     OptionsSurfaceQuoteSummary,
     OptionsSurfaceResponse,
     OptionsSurfaceSmile,
@@ -42,6 +46,7 @@ from project.options_surface.types import (
     ModelStatus,
     OptionsSurfaceResult,
     SmilePoint,
+    ValidationGate,
 )
 
 _FORWARD_SOURCE_LEGACY = {
@@ -139,14 +144,14 @@ def to_options_surface_response(
                 list(analytics.central_range_90) if analytics.central_range_90 else None
             ),
             risk_neutral_mean=analytics.risk_neutral_mean,
+            k_25_call=analytics.k_25_call,
+            k_25_put=analytics.k_25_put,
         ),
         validation=OptionsSurfaceValidation(
             model_status=result.model_status.value,
             forward_quality=result.forward.source_quality.value,
             smile_status=result.smile.diagnostics.status.value,
-            density_status=(
-                result.density.status.value if result.density is not None else "rejected"
-            ),
+            density_status=result.display.density_status.value,
             quote_reason_counts=dict(result.quotes.reason_counts),
             warnings=list(result.warnings),
             summary=result.validation.summary,
@@ -156,10 +161,15 @@ def to_options_surface_response(
             butterfly_ok=result.smile.arbitrage.butterfly_ok,
             calendar_ok=result.smile.arbitrage.calendar_ok,
             arbitrage_violations=list(result.smile.arbitrage.violations),
+            quote_status=result.display.quote_status.value,
+            surface_display_status=result.display.surface_display_status.value,
+            human_readable_reason=result.display.human_readable_reason,
+            failed_checks=list(result.display.failed_checks),
         ),
         model_status=result.model_status.value,
         fitter_name=result.fitter_name,
         fitter_grade=result.fitter_grade.value,
+        display=_display_schema(result),
         feed=feed,
         freshness=freshness,
         warnings=list(result.warnings),
@@ -179,7 +189,12 @@ def to_legacy_scan_response(
     """Deprecated response. Directional fields are retired and always NO_TRADE."""
     forward = result.forward.forward_usd or result.index_usd
     density_points = []
-    if result.density is not None:
+    # Rejected densities are not a customer-facing probability chart.
+    if (
+        result.density is not None
+        and result.density.status is not ModelStatus.REJECTED
+        and result.display.density_status.value == "accepted"
+    ):
         density_points = [
             {"strike": strike, "raw": raw, "smoothed": raw}
             for strike, raw in zip(
@@ -492,14 +507,24 @@ def _legacy_smile_point(point: SmilePoint) -> IvSignalSmilePoint:
 
 
 def _density_schema(density: DensityResult) -> OptionsSurfaceDensity:
+    rejected = density.status is ModelStatus.REJECTED
+    diagnostic = None
+    if rejected:
+        diagnostic = OptionsSurfaceDensityDiagnostic(
+            label="Diagnostic only — not a valid probability distribution",
+            is_valid_distribution=False,
+            strikes_usd=list(density.strikes_usd),
+            raw_density=list(density.raw_density),
+            cdf=list(density.cdf),
+        )
     return OptionsSurfaceDensity(
         status=density.status.value,
         method=density.validation.method.value,
-        strikes_usd=list(density.strikes_usd),
-        raw_density=list(density.raw_density),
-        cdf=list(density.cdf),
-        quantiles=dict(density.quantiles),
-        mean=density.mean,
+        strikes_usd=[] if rejected else list(density.strikes_usd),
+        raw_density=[] if rejected else list(density.raw_density),
+        cdf=[] if rejected else list(density.cdf),
+        quantiles={} if rejected else dict(density.quantiles),
+        mean=None if rejected else density.mean,
         mass=density.validation.mass,
         raw_negative_mass=density.validation.raw_negative_mass,
         cdf_monotone=density.validation.cdf_monotone,
@@ -510,6 +535,44 @@ def _density_schema(density: DensityResult) -> OptionsSurfaceDensity:
         grid_converged=density.validation.grid_converged,
         digital_atm_error=density.validation.digital_atm_error,
         notes=list(density.validation.notes),
+        failed_gates=[_gate_schema(gate) for gate in density.validation.failed_gates],
+        diagnostic=diagnostic,
+    )
+
+
+def _gate_schema(gate: ValidationGate) -> OptionsSurfaceFailedGate:
+    return OptionsSurfaceFailedGate(
+        code=gate.code,
+        criterion=gate.criterion,
+        measured=gate.measured,
+        threshold=gate.threshold,
+        comparison=gate.comparison,
+        location=gate.location,
+        severity=gate.severity,
+        message=gate.message,
+    )
+
+
+def _display_schema(result: OptionsSurfaceResult) -> OptionsSurfaceDisplayState:
+    state = result.display
+    return OptionsSurfaceDisplayState(
+        quote_status=state.quote_status.value,
+        smile_status=state.smile_status.value,
+        density_status=state.density_status.value,
+        surface_display_status=state.surface_display_status.value,
+        reason_codes=list(state.reason_codes),
+        human_readable_reason=state.human_readable_reason,
+        diagnostic_detail=state.diagnostic_detail,
+        failed_checks=list(state.failed_checks),
+        metric_eligibility=[
+            OptionsSurfaceMetricEligibility(
+                metric=item.metric,
+                available=item.available,
+                reason_code=item.reason_code,
+                reason=item.reason,
+            )
+            for item in state.metric_eligibility
+        ],
     )
 
 

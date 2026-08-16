@@ -35,6 +35,7 @@ from project.options_surface.types import (
     ValidationReport,
 )
 from project.options_surface.analytics.metrics import compute_analytics
+from project.options_surface.display import build_display_state
 from project.options_surface.market_data.snapshots import SCHEMA_VERSION
 
 MIN_OBSERVED_FOR_FIT = 4
@@ -177,6 +178,16 @@ def build_options_surface(
         analytics = _clear_probability_headlines(analytics)
 
     quote_summary = _quote_summary(all_obs, selected, matching)
+    display = build_display_state(
+        forward=forward,
+        quotes=quote_summary,
+        smile=smile,
+        density=density,
+        analytics=analytics,
+        fitter_grade=engine.grade,
+        warnings=warnings,
+        sparse=sparse,
+    )
     model_status = _combine_status(
         smile_status=smile.diagnostics.status,
         density_status=density.status if density is not None else ModelStatus.REJECTED,
@@ -222,6 +233,7 @@ def build_options_surface(
         fitter_grade=engine.grade,
         feed=dict(feed or {}),
         warnings=tuple(dict.fromkeys(warnings)),
+        display=display,
         rejected_observations=tuple(item for item in all_obs if not item.accepted),
         accepted_observations=tuple(item for item in all_obs if item.accepted),
     )
@@ -303,6 +315,8 @@ def _clear_probability_headlines(analytics: SurfaceAnalytics) -> SurfaceAnalytic
         central_range_50=None,
         central_range_90=None,
         risk_neutral_mean=None,
+        k_25_call=analytics.k_25_call,
+        k_25_put=analytics.k_25_put,
     )
 
 
@@ -428,6 +442,18 @@ def _rejected_result(
         central_range_50=None,
         central_range_90=None,
         risk_neutral_mean=None,
+        k_25_call=None,
+        k_25_put=None,
+    )
+    display = build_display_state(
+        forward=forward,
+        quotes=quotes,
+        smile=smile,
+        density=None,
+        analytics=analytics,
+        fitter_grade=FitterGrade.DIAGNOSTIC,
+        warnings=warnings,
+        sparse=True,
     )
     validation = ValidationReport(
         as_of_utc=as_of,
@@ -460,6 +486,7 @@ def _rejected_result(
         fitter_grade=FitterGrade.DIAGNOSTIC,
         feed=dict(feed),
         warnings=tuple(warnings),
+        display=display,
         rejected_observations=tuple(item for item in observations if not item.accepted),
         accepted_observations=tuple(item for item in observations if item.accepted),
     )

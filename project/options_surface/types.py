@@ -68,6 +68,26 @@ class ModelStatus(str, Enum):
     RESEARCH = "research"
 
 
+class QuoteStatus(str, Enum):
+    ACCEPTED = "accepted"
+    DEGRADED = "degraded"
+    REJECTED = "rejected"
+
+
+class DensityDisplayStatus(str, Enum):
+    ACCEPTED = "accepted"
+    DEGRADED = "degraded"
+    REJECTED = "rejected"
+    UNAVAILABLE = "unavailable"
+
+
+class SurfaceDisplayStatus(str, Enum):
+    READY = "ready"
+    DEGRADED = "degraded"
+    REJECTED = "rejected"
+    UNAVAILABLE = "unavailable"
+
+
 class FitterGrade(str, Enum):
     PRODUCTION = "production"
     DIAGNOSTIC = "diagnostic"
@@ -242,6 +262,8 @@ class ArbitrageReport:
     min_butterfly: float | None
     min_calendar_dw: float | None
     violations: tuple[str, ...]
+    worst_convexity_strike: float | None = None
+    worst_monotone_strike: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +276,20 @@ class SurfaceQueryResult:
     put_price_usd: float | None
     log_moneyness: float | None
     note: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationGate:
+    """One measured validation criterion. Never used to invent a density."""
+
+    code: str
+    criterion: str
+    measured: float | None
+    threshold: float | None
+    comparison: str
+    location: str | None
+    severity: str
+    message: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +310,7 @@ class DensityValidation:
     grid_converged: bool | None
     digital_atm_error: float | None
     notes: tuple[str, ...]
+    failed_gates: tuple[ValidationGate, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -327,6 +364,31 @@ class SurfaceAnalytics:
     central_range_50: tuple[float, float] | None
     central_range_90: tuple[float, float] | None
     risk_neutral_mean: float | None
+    k_25_call: float | None = None
+    k_25_put: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MetricEligibility:
+    metric: str
+    available: bool
+    reason_code: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceDisplayState:
+    """Explicit customer-facing state. Frontends must not infer this from nulls."""
+
+    quote_status: QuoteStatus
+    smile_status: ModelStatus
+    density_status: DensityDisplayStatus
+    surface_display_status: SurfaceDisplayStatus
+    reason_codes: tuple[str, ...]
+    human_readable_reason: str
+    diagnostic_detail: str
+    failed_checks: tuple[str, ...]
+    metric_eligibility: tuple[MetricEligibility, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,5 +441,6 @@ class OptionsSurfaceResult:
     fitter_grade: FitterGrade
     feed: Mapping[str, Any]
     warnings: tuple[str, ...]
+    display: SurfaceDisplayState
     rejected_observations: tuple[QuoteObservation, ...] = field(default_factory=tuple)
     accepted_observations: tuple[QuoteObservation, ...] = field(default_factory=tuple)
