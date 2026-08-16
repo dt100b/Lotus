@@ -1,4 +1,9 @@
 import { normalizeLiveExpiry } from '@/api/liveTerminal'
+import type {
+  DensityDiagnostic,
+  SurfaceDisplayState,
+} from '@/data/optionsSurfaceDisplay'
+import { DIAGNOSTIC_DENSITY_LABEL } from '@/data/optionsSurfaceDisplay'
 
 export type IvSignalDirection = 'LONG' | 'SHORT' | 'NO_TRADE'
 export type IvSignalCurveQualityLevel = 'HIGH' | 'CAUTION' | 'LOW'
@@ -248,6 +253,8 @@ export type IvSignalScan = {
       signalAlignment: boolean
     }
   }
+  display: SurfaceDisplayState
+  diagnosticDensity: DensityDiagnostic | null
   feed: {
     source: string
     transport: 'websocket' | 'snapshot' | 'unknown'
@@ -320,8 +327,9 @@ function surfaceToScan(value: unknown): IvSignalScan {
   const feedRaw = asRecord(raw.feed)
   const freshnessRaw = asRecord(raw.freshness)
   const forwardUsd = optionalNonNegativeNumber(forward.forward_usd) ?? finiteNumber(raw.index_usd, Number.NaN)
-  const status = stringValue(raw.model_status).toLowerCase()
-  const rejected = status === 'rejected' || !raw.density
+  const display = mapDisplay(raw.display, raw)
+  const status = stringValue(raw.model_status).toLowerCase() || display.surfaceDisplayStatus
+  const rejected = display.densityStatus === 'rejected' || display.densityStatus === 'unavailable' || !raw.density
   const observed = arrayValue(smile.observed).map(mapSurfaceSmilePoint)
   const synthetic = arrayValue(smile.synthetic).map(mapSurfaceSmilePoint)
   const fit = arrayValue(smile.fit).map((point) => {
@@ -377,18 +385,22 @@ function surfaceToScan(value: unknown): IvSignalScan {
         deltaAxisAvailable: points.some((point) => point.delta != null),
       },
     },
-    density: strikes.map((strike, index) => ({
-      strike,
-      raw: rawDensity[index] ?? 0,
-      smoothed: rawDensity[index] ?? 0,
-    })).filter((point) => Number.isFinite(point.strike)),
+    density: rejected
+      ? []
+      : strikes.map((strike, index) => ({
+        strike,
+        raw: rawDensity[index] ?? 0,
+        smoothed: rawDensity[index] ?? 0,
+      })).filter((point) => Number.isFinite(point.strike)),
+    diagnosticDensity: mapDiagnosticDensity(density),
+    display,
     markers: {
       spot: forwardUsd,
       tailLower: forwardUsd * 0.95,
       tailUpper: forwardUsd * 1.05,
-      bandLower: optionalFiniteNumber(quantiles.p25) ?? forwardUsd * 0.97,
-      bandUpper: optionalFiniteNumber(quantiles.p75) ?? forwardUsd * 1.03,
-      peakStrike: optionalFiniteNumber(quantiles.p50) ?? forwardUsd,
+      bandLower: rejected ? Number.NaN : optionalFiniteNumber(quantiles.p25) ?? Number.NaN,
+      bandUpper: rejected ? Number.NaN : optionalFiniteNumber(quantiles.p75) ?? Number.NaN,
+      peakStrike: rejected ? Number.NaN : optionalFiniteNumber(quantiles.p50) ?? Number.NaN,
     },
     signals: {
       skew: idle,
@@ -547,6 +559,158 @@ function surfaceToScan(value: unknown): IvSignalScan {
     warnings: arrayValue(raw.warnings).map((item) => stringValue(item)),
     modelStatus: status || stringValue(validation.model_status),
   } as IvSignalScan
+}
+
+function mapDisplay(value: unknown, raw: Record<string, unknown>): SurfaceDisplayState {
+  const display = asRecord(value)
+  const validation = asRecord(raw.validation)
+  const analytics = asRecord(raw.analytics)
+  const smile = asRecord(raw.smile)
+  const density = asRecord(raw.density)
+  const quoteStatus = statusThree(display.quote_status ?? validation.quote_status, fallbackQuoteStatus(raw))
+  const smileStatus = statusSmile(display.smile_status ?? validation.smile_status ?? smile.status, 'rejected')
+  const densityStatus = statusDensity(
+    display.density_status ?? validation.density_status ?? density.status,
+    raw.density == null ? 'unavailable' : 'rejected',
+  )
+  const surfaceStatus = statusSurface(
+    display.surface_display_status ?? validation.surface_display_status,
+    densityStatus === 'rejected' || smileStatus === 'rejected' ? 'rejected' : 'degraded',
+  )
+  const eligibility = mapEligibilityList(display.metric_eligibility, {
+    quoteStatus,
+    smileStatus,
+    densityStatus,
+    analytics,
+  })
+  return {
+    quoteStatus,
+    smileStatus,
+    densityStatus,
+    surfaceDisplayStatus: surfaceStatus,
+    reasonCodes: stringArray(display.reason_codes).length
+      ? stringArray(display.reason_codes)
+      : stringArray(raw.warnings),
+    humanReadableReason: stringValue(display.human_readable_reason)
+      || stringValue(validation.human_readable_reason)
+      || fallbackHumanReason(densityStatus),
+    diagnosticDetail: stringValue(display.diagnostic_detail),
+    failedChecks: stringArray(display.failed_checks).length
+      ? stringArray(display.failed_checks)
+      : stringArray(validation.failed_checks),
+    metricEligibility: eligibility,
+  }
+}
+
+function mapEligibilityList(
+  value: unknown,
+  context: {
+    quoteStatus: QuoteStatusLike
+    smileStatus: string
+    densityStatus: string
+    analytics: Record<string, unknown>
+  },
+): SurfaceDisplayState['metricEligibility'] {
+  const rows = arrayValue(value)
+  if (rows.length > 0) {
+    const mapped: SurfaceDisplayState['metricEligibility'] = {}
+    for (const row of rows) {
+      const item = asRecord(row)
+      const name = stringValue(item.metric)
+      if (!name) continue
+      mapped[name] = {
+        available: item.available === true,
+        reasonCode: stringValue(item.reason_code) || null,
+        reason: stringValue(item.reason) || null,
+      }
+    }
+    return mapped
+  }
+  const densityOk = context.densityStatus === 'accepted'
+  const smileOk = context.smileStatus !== 'rejected'
+  const rrOk = smileOk
+    && optionalFiniteNumber(context.analytics.rr_25) != null
+    && optionalFiniteNumber(context.analytics.bf_25) != null
+  const atmOk = smileOk && optionalNonNegativeNumber(context.analytics.atm_iv) != null
+  return {
+    forward: { available: true, reasonCode: null, reason: null },
+    index: { available: true, reasonCode: null, reason: null },
+    quote_coverage: { available: true, reasonCode: null, reason: null },
+    atm_iv: { available: atmOk, reasonCode: atmOk ? null : 'smile_unavailable', reason: atmOk ? null : 'Unavailable — no accepted smile' },
+    implied_move_1sd: { available: atmOk, reasonCode: atmOk ? null : 'smile_unavailable', reason: atmOk ? null : 'Unavailable — no accepted smile' },
+    rr_25: { available: rrOk, reasonCode: rrOk ? null : 'rr_unsolved', reason: rrOk ? null : 'Unavailable — 25Δ roots did not solve inside observed smile coverage' },
+    bf_25: { available: rrOk, reasonCode: rrOk ? null : 'rr_unsolved', reason: rrOk ? null : 'Unavailable — 25Δ roots did not solve inside observed smile coverage' },
+    density_chart: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
+    median: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
+    mode: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
+    central_range_50: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
+    central_range_90: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
+    tail_probabilities: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
+    digital_probabilities: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
+  }
+}
+
+function mapDiagnosticDensity(density: Record<string, unknown>): DensityDiagnostic | null {
+  const diagnostic = asRecord(density.diagnostic)
+  const strikes = arrayValue(diagnostic.strikes_usd).map((item) => finiteNumber(item, Number.NaN))
+    .filter((value) => Number.isFinite(value))
+  const raw = arrayValue(diagnostic.raw_density).map((item) => finiteNumber(item, Number.NaN))
+  if (strikes.length < 2) return null
+  return {
+    label: stringValue(diagnostic.label) || DIAGNOSTIC_DENSITY_LABEL,
+    isValidDistribution: false,
+    strikesUsd: strikes,
+    rawDensity: raw,
+  }
+}
+
+type QuoteStatusLike = 'accepted' | 'degraded' | 'rejected'
+
+function statusThree(value: unknown, fallback: QuoteStatusLike): QuoteStatusLike {
+  const normalized = stringValue(value).toLowerCase()
+  if (normalized === 'accepted' || normalized === 'degraded' || normalized === 'rejected') return normalized
+  return fallback
+}
+
+function statusSmile(value: unknown, fallback: SurfaceDisplayState['smileStatus']): SurfaceDisplayState['smileStatus'] {
+  const normalized = stringValue(value).toLowerCase()
+  if (normalized === 'accepted' || normalized === 'degraded' || normalized === 'rejected' || normalized === 'research') {
+    return normalized
+  }
+  return fallback
+}
+
+function statusDensity(value: unknown, fallback: SurfaceDisplayState['densityStatus']): SurfaceDisplayState['densityStatus'] {
+  const normalized = stringValue(value).toLowerCase()
+  if (normalized === 'accepted' || normalized === 'degraded' || normalized === 'rejected' || normalized === 'unavailable') {
+    return normalized
+  }
+  return fallback
+}
+
+function statusSurface(value: unknown, fallback: SurfaceDisplayState['surfaceDisplayStatus']): SurfaceDisplayState['surfaceDisplayStatus'] {
+  const normalized = stringValue(value).toLowerCase()
+  if (normalized === 'ready' || normalized === 'degraded' || normalized === 'rejected' || normalized === 'unavailable') {
+    return normalized
+  }
+  return fallback
+}
+
+function fallbackQuoteStatus(raw: Record<string, unknown>): QuoteStatusLike {
+  const quotes = asRecord(raw.quotes)
+  if (finiteNumber(quotes.accepted_strikes, 0) <= 0) return 'rejected'
+  if (quotes.synthetic_atm_added === true || finiteNumber(quotes.rejected_rows, 0) > 0) return 'degraded'
+  return 'accepted'
+}
+
+function fallbackHumanReason(densityStatus: string): string {
+  if (densityStatus === 'rejected') {
+    return 'Distribution unavailable: the implied density was not a valid monotone probability distribution.'
+  }
+  if (densityStatus === 'unavailable') {
+    return 'Unavailable — distribution validation failed'
+  }
+  return ''
 }
 
 function mapSurfaceSmilePoint(value: unknown): IvSignalSmilePoint {
@@ -766,6 +930,8 @@ export function toIvSignalScan(value: unknown): IvSignalScan {
     eligibility,
     feed,
     warnings: stringArray(raw.warnings),
+    display: mapDisplay(raw.display, raw),
+    diagnosticDensity: mapDiagnosticDensity(asRecord(raw.density)),
   }
 }
 

@@ -26,9 +26,50 @@ Deprecated adapter: `GET /api/v1/iv-signal-scan` (directional fields retired).
 | `model_status` | enum | `accepted` `degraded` `rejected` `research` |
 | `fitter_name` | string | `tv_pchip` or `svi_raw` |
 | `fitter_grade` | enum | `production` `diagnostic` `research` |
+| `display` | object | Explicit customer-facing state. Frontends must not infer this from nulls. |
 | `feed` | object | Ticker transport health |
 | `freshness` | object | Snapshot age vs threshold |
 | `warnings` | string[] | Human-readable flags |
+
+## Display state
+
+`display` is the typed UI contract.
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `quote_status` | `accepted` `degraded` `rejected` | Book quality after reason-coded filters |
+| `smile_status` | `accepted` `degraded` `rejected` `research` | Served fitter status |
+| `density_status` | `accepted` `degraded` `rejected` `unavailable` | B–L validation. `unavailable` = not built |
+| `surface_display_status` | `ready` `degraded` `rejected` `unavailable` | What the pane may present |
+| `reason_codes` | string[] | Machine-readable failed checks |
+| `human_readable_reason` | string | One-line customer-safe explanation |
+| `diagnostic_detail` | string | Developer/debug only |
+| `failed_checks` | string[] | Concise customer labels |
+| `metric_eligibility` | list | Per-metric `{metric, available, reason_code, reason}` |
+
+A smile can be `degraded` while density is `rejected`. That combination
+yields `surface_display_status = rejected`. A diagnostic fitter cannot
+produce `ready`.
+
+### Metric eligibility
+
+| Metric | Rejected density? | Condition |
+| --- | --- | --- |
+| `forward` | yes | forward exists; show source/quality |
+| `index` | yes | index exists |
+| `quote_coverage` | yes | always |
+| `atm_iv` | yes, labeled diagnostic | ATM `k=0` inside observed coverage |
+| `implied_move_1sd` | yes, as diagnostic smile-implied move | ATM IV valid |
+| `rr_25` / `bf_25` | yes, same gate | both 25Δ roots solve inside observed `k` |
+| `density_chart` | no | density `accepted` only |
+| `median` / `mode` | no | density `accepted` only |
+| `central_range_50` / `central_range_90` | no | density `accepted` only |
+| `tail_probabilities` / `digital_probabilities` | no | density `accepted` only |
+
+When `density.status = rejected`, the default `density.strikes_usd` /
+`raw_density` / `cdf` / `quantiles` arrays are empty. The raw curve is
+only in `density.diagnostic`, labeled
+“Diagnostic only — not a valid probability distribution”.
 
 ## ForwardEstimate
 

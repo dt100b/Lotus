@@ -26,10 +26,21 @@ import {
 import {
   formatExpiryLong,
   formatExpiryShort,
+  formatForwardSource,
   getIvScannerSummaryReads,
   getSurfaceHeadline,
   type IvNamedRead,
 } from '@/data/ivSignalOutlook'
+import {
+  DIAGNOSTIC_DENSITY_LABEL,
+  DIAGNOSTIC_SMILE_CAPTION,
+  REJECTED_DENSITY_BODY,
+  REJECTED_DENSITY_TITLE,
+  densityIsRejected,
+  formatCoverage,
+  smileIsDiagnostic,
+  statusLabel,
+} from '@/data/optionsSurfaceDisplay'
 import { useIvSignalScan } from '@/hooks/useIvSignalScan'
 import { cn } from '@/lib/utils'
 
@@ -142,42 +153,19 @@ function ScannerResult({
         onExpiryChange={onExpiryChange}
       />
 
-      <section className="iv-signal-chart-panel" aria-label="Risk-neutral terminal-price distribution">
-        <header className="iv-signal-chart-panel__head">
-          <div>
-            <h3 title="Risk-neutral terminal-price density from Black-76 calls. Q-measure, not a physical forecast.">Risk-neutral terminal-price distribution</h3>
-            <span>
-              {formatExpiryLabel(scan.expiry)} · {formatTenorShort(scan.timeToExpiryYears)}
-            </span>
-          </div>
-          <div className="iv-surface-inline-stats" aria-label="Distribution statistics">
-            <span>
-              <em title="Options-implied forward used for OTM, smile, and density.">Fwd</em>
-              <strong>{formatStrike(scan.rnd.forward)}</strong>
-            </span>
-            <span>
-              <em>Med</em>
-              <strong>{formatStrike(scan.rnd.percentile50)}</strong>
-            </span>
-            <span>
-              <em>Mode</em>
-              <strong>{formatStrike(scan.markers.peakStrike)}</strong>
-            </span>
-          </div>
-        </header>
-        <div className="iv-signal-chart-panel__chart">
-          <IvSignalDensityChart scan={scan} layers={DEFAULT_DENSITY_LAYERS} />
-        </div>
-      </section>
+      <RejectedOrReadyDensity scan={scan} />
 
       <section className="iv-signal-chart-panel" aria-label="Implied volatility smile">
         <header className="iv-signal-chart-panel__head">
           <div>
-            <h3 title="Accepted mark IVs versus the fitted total-variance smile. Extrapolated wings are not shown as observations.">Implied volatility smile</h3>
+            <h3 title="Accepted mark IVs versus the fitted total-variance smile. Extrapolated wings are not shown as observations.">
+              {smileIsDiagnostic(scan) ? 'Diagnostic volatility smile' : 'Implied volatility smile'}
+            </h3>
             <span
               className="iv-signal-smile-metrics"
-              title="25-delta risk reversal and butterfly from numerically solved model deltas."
+              title="25-delta risk reversal and butterfly from numerically solved model deltas. Both require in-coverage 25Δ roots."
             >
+              {smileIsDiagnostic(scan) ? `${DIAGNOSTIC_SMILE_CAPTION} · ` : ''}
               {formatSmileMetrics(scan)}
             </span>
           </div>
@@ -248,6 +236,104 @@ function ScannerResult({
   )
 }
 
+function RejectedOrReadyDensity({ scan }: { scan: IvSignalScan }) {
+  const [showDiagnostic, setShowDiagnostic] = useState(false)
+  const rejected = densityIsRejected(scan)
+  if (!rejected) {
+    return (
+      <section className="iv-signal-chart-panel" aria-label="Risk-neutral terminal-price distribution">
+        <header className="iv-signal-chart-panel__head">
+          <div>
+            <h3 title="Risk-neutral terminal-price density from Black-76 calls. Q-measure, not a physical forecast.">
+              Risk-neutral terminal-price distribution
+            </h3>
+            <span>
+              {formatExpiryLabel(scan.expiry)} · {formatTenorShort(scan.timeToExpiryYears)}
+            </span>
+          </div>
+          <div className="iv-surface-inline-stats" aria-label="Distribution statistics">
+            <span>
+              <em title="Options-implied forward used for OTM, smile, and density.">Fwd</em>
+              <strong>{formatStrike(scan.rnd.forward)}</strong>
+            </span>
+            <span>
+              <em>Med</em>
+              <strong>{formatStrike(scan.rnd.percentile50)}</strong>
+            </span>
+            <span>
+              <em>Mode</em>
+              <strong>{formatStrike(scan.markers.peakStrike)}</strong>
+            </span>
+          </div>
+        </header>
+        <div className="iv-signal-chart-panel__chart">
+          <IvSignalDensityChart scan={scan} layers={DEFAULT_DENSITY_LAYERS} />
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="iv-signal-chart-panel iv-signal-chart-panel--unavailable" aria-label={REJECTED_DENSITY_TITLE}>
+      <header className="iv-signal-chart-panel__head">
+        <div>
+          <h3 title="The density is withheld because it failed validation. This is not a usable probability distribution.">
+            {REJECTED_DENSITY_TITLE}
+          </h3>
+          <span>Selected expiry {formatExpiryLabel(scan.expiry)} · {formatTenorShort(scan.timeToExpiryYears)}</span>
+        </div>
+        <div className="iv-surface-inline-stats" aria-label="Selected forward">
+          <span>
+            <em title="Options-implied forward used for OTM, smile, and density. Source and quality are shown separately from quote or density status.">Fwd</em>
+            <strong>{formatStrike(scan.rnd.forward)}</strong>
+          </span>
+        </div>
+      </header>
+      <div className="iv-signal-density-empty">
+        <p>{REJECTED_DENSITY_BODY}</p>
+        <dl className="iv-signal-density-empty__facts">
+          <div>
+            <dt>Options-implied forward</dt>
+            <dd>
+              {formatStrike(scan.rnd.forward)} · {formatForwardSource(scan.selection.forwardSource)} · quality {scan.selection.forwardSource === 'spot_fallback' ? 'low' : 'high'}
+            </dd>
+          </div>
+          <div>
+            <dt>Failed checks</dt>
+            <dd>{scan.display.failedChecks.length ? scan.display.failedChecks.join(' · ') : scan.display.humanReadableReason}</dd>
+          </div>
+          <div>
+            <dt>Quote coverage</dt>
+            <dd>{formatCoverage(scan)}</dd>
+          </div>
+          <div>
+            <dt>Smile status</dt>
+            <dd>{statusLabel(scan.display.smileStatus)} · {scan.display.smileStatus === 'degraded' || scan.display.smileStatus === 'research' ? DIAGNOSTIC_SMILE_CAPTION : 'Observed coverage only'}</dd>
+          </div>
+        </dl>
+        {scan.diagnosticDensity ? (
+          <div className="iv-signal-density-empty__actions">
+            <button
+              type="button"
+              className="iv-signal-density-empty__toggle"
+              aria-expanded={showDiagnostic}
+              onClick={() => setShowDiagnostic((open) => !open)}
+            >
+              {showDiagnostic ? 'Hide diagnostic details' : 'View diagnostic details'}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {showDiagnostic && scan.diagnosticDensity ? (
+        <div className="iv-signal-chart-panel__chart iv-signal-chart-panel__chart--diagnostic">
+          <p className="iv-signal-diagnostic-banner" role="note">{DIAGNOSTIC_DENSITY_LABEL}</p>
+          <IvSignalDensityChart scan={scan} layers={{ forward: true, band: false, wings: false, sigma: false }} mode="diagnostic" />
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 function ScannerDiagnostics({
   scan,
   open,
@@ -271,10 +357,11 @@ function ScannerDiagnostics({
       </button>
       {open ? (
         <div className="iv-signal-details">
-          <DetailRow label="Forward source" value={`${scan.selection.forwardSource} · ${scan.selection.forwardPairCount} parity pairs`} />
-          <DetailRow label="Quote coverage" value={`${scan.selection.selectedMarketStrikes} strikes · ${scan.coverage.lowerStrikes}/${scan.coverage.upperStrikes} around forward`} />
-          <DetailRow label="Risk-neutral mass" value={scan.curveQuality.normalizationIntegral.toFixed(3)} />
-          <DetailRow label="Raw negative mass" value={scan.curveQuality.negativeArea.toExponential(2)} />
+          <DetailRow label="Forward source" value={`${scan.selection.forwardSource} · quality ${scan.selection.forwardSource === 'spot_fallback' ? 'low' : 'high'} · ${scan.selection.forwardPairCount} parity pairs`} />
+          <DetailRow label="Quote / smile / density" value={`${scan.display.quoteStatus} · ${scan.display.smileStatus} · ${scan.display.densityStatus}`} />
+          <DetailRow label="Quote coverage" value={formatCoverage(scan)} />
+          <DetailRow label="Failed checks" value={scan.display.failedChecks.join(' · ') || 'none'} />
+          <DetailRow label="Developer detail" value={scan.display.diagnosticDetail || 'n/a'} />
           <DetailRow
             label="Rejected quotes"
             value={`zero bid ${scan.selection.rejectedZeroBidRows} · spread ${scan.selection.rejectedWideSpreadRows} · stale ${scan.selection.rejectedStaleQuoteRows}`}
@@ -492,21 +579,17 @@ function ScannerRefreshing({
 
 function getUserNotice(scan: IvSignalScan, refreshFailed: boolean) {
   if (refreshFailed) return 'Live options data is delayed. Surface quality is shown as degraded.'
-  const reason = scan.suppressionReasons[0]
-  if (!reason) return null
-  if (/sparse|insufficient/i.test(reason)) {
-    return 'Quote coverage is too sparse for an accepted surface. Headline percentiles are withheld.'
+  if (scan.display.humanReadableReason && (
+    scan.display.surfaceDisplayStatus === 'rejected'
+    || scan.display.surfaceDisplayStatus === 'unavailable'
+    || densityIsRejected(scan)
+  )) {
+    return scan.display.humanReadableReason
   }
-  if (/density/i.test(reason)) {
-    return 'The risk-neutral density did not pass validation. Percentiles are withheld.'
+  if (scan.display.surfaceDisplayStatus === 'degraded') {
+    return scan.display.humanReadableReason || 'Surface quality is degraded. Treat displayed metrics as diagnostic.'
   }
-  if (/forward/i.test(reason)) {
-    return 'No accepted options-implied forward is available for this expiry.'
-  }
-  if (/quote|stale|ticker|stream|feed|subscription|warm/i.test(reason)) {
-    return 'Live options pricing is temporarily delayed.'
-  }
-  return 'Surface quality is degraded. Treat displayed metrics as diagnostic.'
+  return null
 }
 
 function formatStrike(value: number) {
@@ -539,7 +622,11 @@ function formatExpiryLabel(expiry: string) {
 }
 
 function formatSmileMetrics(scan: IvSignalScan) {
-  return `RR25 ${formatVolPoints(scan.smile.metrics.rr25)} · BF25 ${formatVolPoints(scan.smile.metrics.bf25)}`
+  const rrOk = scan.display.metricEligibility.rr_25?.available
+  const bfOk = scan.display.metricEligibility.bf_25?.available
+  const rr = rrOk ? formatVolPoints(scan.smile.metrics.rr25) : 'unavailable'
+  const bf = bfOk ? formatVolPoints(scan.smile.metrics.bf25) : 'unavailable'
+  return `RR25 ${rr} · BF25 ${bf}`
 }
 
 function formatVolPoints(value: number | null) {

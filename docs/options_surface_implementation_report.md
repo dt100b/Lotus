@@ -103,7 +103,7 @@ Deribit WS ticker cache          Deribit REST future book
 .\.venv\Scripts\python.exe -m pytest project/tests/options_surface project/tests/test_iv_signal_scanner.py -q
 ```
 
-Result: **60 passed**.
+Result: **69 passed** (2026-08-16 display-state pass).
 
 ```
 .\frontend\node_modules\.bin\tsc -p frontend\tsconfig.app.json --noEmit
@@ -130,8 +130,9 @@ production-ready.
   through the hierarchy.
 - Legacy `/iv-signal-scan` still exists with retired directional fields
   (`NO_TRADE` / `false`) for one migration window.
-- No live Deribit snapshot was frozen in this pass; the “live-style”
-  fixture is a deterministic Deribit-shaped synthetic chain.
+- Live Aug 21 2026 rejection was frozen:
+  `docs/diagnostics/options_surface_live_rejection_20260816T230839Z.md`
+  and `runtime/options_surface_debug/20260816T230839Z/`.
 
 ## 7. Example payloads
 
@@ -232,6 +233,88 @@ Headline percentiles are absent. The UI shows “Surface not accepted”.
 - Every result has data/model quality (`forward.source_quality`,
   `model_status`, `fitter_grade`).
 - Invalid densities fail closed.
-- Validation suite: 60 passed.
+- Validation suite: 69 options-surface tests; 265 passed, 1 skipped in the full backend suite.
 - Remaining research-grade component: **`tv_pchip` is diagnostic;
   `svi_raw` is research. Neither is production-promoted.**
+
+## 10. Live rejection follow-up (2026-08-16)
+
+A first live pane run on expiry **2026-08-21** correctly fail-closed
+(`Surface not accepted`) but still rendered a jagged raw density,
+FWD/MED/MODE, RR/BF inconsistently, and “quality low · listed-future
+forward”. That mixed rejected density with a usable smile.
+
+### Root cause
+
+Not a forward mismatch and not a grid bug.
+
+- Forward: matching listed future `BTC-21AUG26`, quality **high**,
+  `F_T ≈ 62,885`.
+- Quotes: 36 in, 16 accepted (7 calls / 9 puts), 13 unique strikes,
+  7 below / 6 above, center gap `0.016`. 15 `invalid_iv_market`,
+  5 `zero_bid`. Coverage clears the 3–14 DTE floors. The screenshot
+  “7.6 around ATM” was `7/6` lower/upper strikes, not 7.6.
+- Smile: served `tv_pchip` diagnostic, exact at 14 knots, **not
+  convex** (`min_butterfly ≈ -0.73` near `K ≈ 56,179`).
+- Density reject gate: **`cdf_not_monotone`**. Measured
+  `min_cdf_step = -2.39e-5` (threshold `-1e-8`) at
+  `K=56105→56137.5`. Mass `0.985`, moment error `3e-4`, digital ATM
+  `0.009`, grid 401 vs 201 converged. Negative mass `2.4e-4` is
+  **below** the `0.01` reject threshold and did not cause the reject.
+- RR25/BF25 backend values were both present. The UI hid only RR25
+  when `surface_rejected` was set — a presentation bug, not a
+  delta-root disagreement.
+
+**Recommendation: combination.** No validation-threshold change.
+UX fail-closed (this pass). A later calibration/model correction is
+required before any production smile promotion. Do not promote PCHIP.
+
+### UX changes
+
+- Typed `display` object: `quote_status`, `smile_status`,
+  `density_status`, `surface_display_status`, `reason_codes`,
+  `human_readable_reason`, `diagnostic_detail`, `metric_eligibility`.
+- Rejected density default payload has empty `strikes_usd` /
+  `raw_density` / quantiles. Raw curve is opt-in
+  `density.diagnostic` only.
+- Pane: “Risk-neutral distribution unavailable” empty state, no
+  MED/MODE/bands/percentiles. Forward kept with source/quality.
+  Diagnostic plot behind “View diagnostic details”.
+- Smile labeled “Diagnostic volatility smile”. Fit quality split
+  into data / smile / distribution. Coverage labeled as accepted
+  observations + below/above forward + center gap. RR25 and BF25
+  share one 25Δ-root gate. 1-sd move labeled diagnostic
+  smile-implied move.
+
+### Tests run
+
+```
+.\.venv\Scripts\python.exe -m pytest project/tests/options_surface project/tests/test_iv_signal_scanner.py -q
+.\frontend\node_modules\.bin\tsc -p frontend\tsconfig.app.json --noEmit
+node frontend\scripts\check-options-surface-display.mjs
+```
+
+69 options-surface + scanner tests passed; full backend suite
+**265 passed, 1 skipped**; tsc clean; display copy checks passed.
+
+Live API was restarted on :8000. A subsequent fetch of
+`/options-surface?expiry=2026-08-21` returned
+`density_status=accepted`, `surface_display_status=degraded`
+(smile still `call_not_convex_in_strike`). The frozen 23:00 UTC
+snapshot remains the rejected-density artifact. No browser MCP was
+available; rejected UX is covered by fixtures and adapter tests.
+
+### Still deferred
+
+- PCHIP production promotion
+- Constrained SVI/SSVI
+- Futures on the option WebSocket
+- ETH
+- True historical evaluation
+- No validation-threshold loosening
+- Browser click-through of the exact rejected-density screenshot
+  state: no browser MCP in this session. The rejected payload is
+  covered by fixtures + API adapter tests. After API restart the
+  live Aug 21 book had moved to `density_status=accepted` /
+  `surface_display_status=degraded` (smile still not convex). The
+  frozen 23:00 UTC snapshot remains the rejected artifact.

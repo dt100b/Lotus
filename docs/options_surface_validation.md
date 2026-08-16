@@ -13,7 +13,7 @@ The first command is the new engine suite. The second also runs the
 legacy scanner unit tests (isolated prototype math) plus the migrated
 API adapter tests.
 
-Last run (2026-08-16): **60 passed**.
+Last run (2026-08-16 display-state pass): **69 passed**.
 
 Frontend typecheck:
 
