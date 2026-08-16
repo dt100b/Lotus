@@ -385,7 +385,7 @@ function surfaceToScan(value: unknown): IvSignalScan {
         deltaAxisAvailable: points.some((point) => point.delta != null),
       },
     },
-    density: rejected
+    density: display.densityStatus === 'rejected' || display.densityStatus === 'unavailable'
       ? []
       : strikes.map((strike, index) => ({
         strike,
@@ -599,7 +599,25 @@ function mapDisplay(value: unknown, raw: Record<string, unknown>): SurfaceDispla
       ? stringArray(display.failed_checks)
       : stringArray(validation.failed_checks),
     metricEligibility: eligibility,
+    servedFitterName: stringValue(display.served_fitter_name) || stringValue(raw.fitter_name) || 'tv_pchip',
+    servedFitterGrade: gradeOf(display.served_fitter_grade ?? raw.fitter_grade),
+    researchFitterName: stringValue(display.research_fitter_name) || null,
+    researchFailedChecks: stringArray(display.research_failed_checks),
+    researchHumanReason: stringValue(display.research_human_reason) || null,
+    customerWarningScope: scopeOf(display.customer_warning_scope),
   }
+}
+
+function gradeOf(value: unknown): SurfaceDisplayState['servedFitterGrade'] {
+  const normalized = stringValue(value).toLowerCase()
+  if (normalized === 'production' || normalized === 'diagnostic' || normalized === 'research') return normalized
+  return 'diagnostic'
+}
+
+function scopeOf(value: unknown): SurfaceDisplayState['customerWarningScope'] {
+  const normalized = stringValue(value).toLowerCase()
+  if (normalized === 'served' || normalized === 'research' || normalized === 'none') return normalized
+  return 'none'
 }
 
 function mapEligibilityList(
@@ -626,7 +644,7 @@ function mapEligibilityList(
     }
     return mapped
   }
-  const densityOk = context.densityStatus === 'accepted'
+  const densityOk = context.densityStatus === 'accepted' || context.densityStatus === 'degraded'
   const smileOk = context.smileStatus !== 'rejected'
   const rrOk = smileOk
     && optionalFiniteNumber(context.analytics.rr_25) != null

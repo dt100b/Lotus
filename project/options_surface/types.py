@@ -377,6 +377,20 @@ class MetricEligibility:
 
 
 @dataclass(frozen=True, slots=True)
+class ResearchFitterReport:
+    """Non-serving candidate. Must never reject a separately passing served density."""
+
+    fitter_name: str
+    fitter_grade: FitterGrade
+    status: ModelStatus
+    call_monotone: bool
+    call_convex: bool
+    violations: tuple[str, ...]
+    worst_convexity_strike: float | None = None
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SurfaceDisplayState:
     """Explicit customer-facing state. Frontends must not infer this from nulls."""
 
@@ -389,6 +403,12 @@ class SurfaceDisplayState:
     diagnostic_detail: str
     failed_checks: tuple[str, ...]
     metric_eligibility: tuple[MetricEligibility, ...]
+    served_fitter_name: str = "tv_pchip"
+    served_fitter_grade: FitterGrade = FitterGrade.DIAGNOSTIC
+    research_fitter_name: str | None = None
+    research_failed_checks: tuple[str, ...] = ()
+    research_human_reason: str | None = None
+    customer_warning_scope: str = "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,3 +464,4 @@ class OptionsSurfaceResult:
     display: SurfaceDisplayState
     rejected_observations: tuple[QuoteObservation, ...] = field(default_factory=tuple)
     accepted_observations: tuple[QuoteObservation, ...] = field(default_factory=tuple)
+    research: ResearchFitterReport | None = None

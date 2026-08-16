@@ -11,6 +11,9 @@ export type MetricEligibility = {
   reason: string | null
 }
 
+export type WarningScope = 'served' | 'research' | 'none'
+export type FitterGrade = 'production' | 'diagnostic' | 'research'
+
 export type SurfaceDisplayState = {
   quoteStatus: QuoteStatus
   smileStatus: SmileStatus
@@ -21,6 +24,12 @@ export type SurfaceDisplayState = {
   diagnosticDetail: string
   failedChecks: string[]
   metricEligibility: Record<string, MetricEligibility>
+  servedFitterName: string
+  servedFitterGrade: FitterGrade
+  researchFitterName: string | null
+  researchFailedChecks: string[]
+  researchHumanReason: string | null
+  customerWarningScope: WarningScope
 }
 
 export type DensityDiagnostic = {
@@ -37,8 +46,22 @@ export const REJECTED_DENSITY_TITLE = 'Risk-neutral distribution unavailable'
 export const REJECTED_DENSITY_BODY =
   'The fitted smile did not meet distribution-validity checks for this expiry. Probability ranges and percentiles are withheld.'
 
+export const DIAGNOSTIC_DISTRIBUTION_TITLE = 'Market-implied distribution — diagnostic fit'
+
+export const DIAGNOSTIC_ANALYTICS_CAPTION = 'Market-implied analytics — diagnostic fit'
+
 export const DIAGNOSTIC_SMILE_CAPTION =
   'Diagnostic interpolant; not promoted to an arbitrage-controlled surface.'
+
+export const DIAGNOSTIC_MOVE_LABEL = 'Diagnostic smile-implied 1σ move'
+
+export const SERVED_PCHIP_CAPTION = 'Served diagnostic interpolant: tv_pchip'
+
+export const RESEARCH_CONVEXITY_NOTICE =
+  'Research SVI candidate failed convexity diagnostics; it is not used for the displayed surface.'
+
+export const SERVED_CONVEXITY_REASON =
+  'Distribution unavailable: fitted call prices were not convex across the observed strike range.'
 
 export function emptyEligibility(reason = 'Unavailable'): MetricEligibility {
   return { available: false, reasonCode: null, reason }
@@ -53,6 +76,13 @@ export function metricOf(
 
 export function densityIsRejected(scan: Pick<IvSignalScan, 'display'>): boolean {
   return scan.display.densityStatus === 'rejected' || scan.display.densityStatus === 'unavailable'
+}
+
+export function densityAnalyticsEligible(scan: Pick<IvSignalScan, 'display'>): boolean {
+  if (densityIsRejected(scan)) return false
+  const chart = scan.display.metricEligibility.density_chart
+  if (chart) return chart.available
+  return scan.display.densityStatus === 'accepted' || scan.display.densityStatus === 'degraded'
 }
 
 export function smileIsDiagnostic(scan: Pick<IvSignalScan, 'display'>): boolean {

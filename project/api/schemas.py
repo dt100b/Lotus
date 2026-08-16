@@ -598,6 +598,23 @@ class OptionsSurfaceDisplayState(BaseModel):
     diagnostic_detail: str
     failed_checks: list[str]
     metric_eligibility: list[OptionsSurfaceMetricEligibility]
+    served_fitter_name: str = "tv_pchip"
+    served_fitter_grade: Literal["production", "diagnostic", "research"] = "diagnostic"
+    research_fitter_name: str | None = None
+    research_failed_checks: list[str] = Field(default_factory=list)
+    research_human_reason: str | None = None
+    customer_warning_scope: Literal["served", "research", "none"] = "none"
+
+
+class OptionsSurfaceResearchCandidate(BaseModel):
+    fitter_name: str
+    fitter_grade: Literal["production", "diagnostic", "research"]
+    status: Literal["accepted", "degraded", "rejected", "research"]
+    call_monotone: bool
+    call_convex: bool
+    violations: list[str]
+    worst_convexity_strike: float | None = None
+    notes: list[str] = Field(default_factory=list)
 
 
 class OptionsSurfaceValidation(BaseModel):
@@ -644,6 +661,7 @@ class OptionsSurfaceResponse(BaseModel):
     fitter_name: str
     fitter_grade: Literal["production", "diagnostic", "research"]
     display: OptionsSurfaceDisplayState
+    research: OptionsSurfaceResearchCandidate | None = None
     feed: IvSignalFeedHealth
     freshness: IvSignalFreshness
     warnings: list[str]

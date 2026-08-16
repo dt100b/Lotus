@@ -10,10 +10,18 @@ from scipy.integrate import trapezoid
 
 from project.options_surface.distribution.black76 import black76_call
 from project.options_surface.types import (
+    ArbitrageReport,
     DensityMethod,
     DensityValidation,
     ModelStatus,
     ValidationGate,
+)
+
+SERVING_GATE_CODES = frozenset(
+    {
+        "call_not_convex_in_strike",
+        "call_not_decreasing_in_strike",
+    }
 )
 
 MASS_ACCEPT = 0.02
@@ -354,6 +362,84 @@ def _gate(
         severity=severity,
         message=message,
     )
+
+
+def apply_served_call_curve_gates(
+    validation: DensityValidation,
+    report: ArbitrageReport,
+) -> DensityValidation:
+    """Reject a density whose generating Black-76 call curve is not monotone/convex.
+
+    Static call-price convexity is a prerequisite for Breeden–Litzenberger.
+    Mass, forward moment, digitals, and grid convergence cannot override this.
+    """
+    gates = list(validation.failed_gates)
+    notes = list(validation.notes)
+    if not report.call_monotone:
+        if not any(gate.code == "call_not_decreasing_in_strike" for gate in gates):
+            location = None
+            if report.worst_monotone_strike is not None:
+                location = f"K={report.worst_monotone_strike:.4f}"
+            gates.append(
+                _gate(
+                    "call_not_decreasing_in_strike",
+                    "max_call_step",
+                    report.min_call_step,
+                    1e-10,
+                    "gt",
+                    location,
+                    "reject",
+                    "Fitted Black-76 call prices were not decreasing in strike",
+                )
+            )
+        if "call_not_decreasing_in_strike" not in notes:
+            notes.append("call_not_decreasing_in_strike")
+    if not report.call_convex:
+        if not any(gate.code == "call_not_convex_in_strike" for gate in gates):
+            location = None
+            if report.worst_convexity_strike is not None:
+                location = f"K={report.worst_convexity_strike:.4f}"
+            gates.append(
+                _gate(
+                    "call_not_convex_in_strike",
+                    "min_butterfly",
+                    report.min_butterfly,
+                    1e-8,
+                    "lt",
+                    location,
+                    "reject",
+                    "Fitted Black-76 call prices were not convex in strike",
+                )
+            )
+        if "call_not_convex_in_strike" not in notes:
+            notes.append("call_not_convex_in_strike")
+    serving_failed = (not report.call_monotone) or (not report.call_convex)
+    status = ModelStatus.REJECTED if serving_failed else validation.status
+    if serving_failed and "density_rejected" not in notes:
+        notes.append("density_rejected")
+    return DensityValidation(
+        status=status,
+        method=validation.method,
+        mass=validation.mass,
+        raw_negative_mass=validation.raw_negative_mass,
+        nonnegative=validation.nonnegative,
+        cdf_monotone=validation.cdf_monotone,
+        cdf_start=validation.cdf_start,
+        cdf_end=validation.cdf_end,
+        forward_moment=validation.forward_moment,
+        forward_moment_error=validation.forward_moment_error,
+        edge_mass=validation.edge_mass,
+        truncation_warning=validation.truncation_warning,
+        grid_points=validation.grid_points,
+        grid_converged=validation.grid_converged,
+        digital_atm_error=validation.digital_atm_error,
+        notes=tuple(notes),
+        failed_gates=tuple(gates),
+    )
+
+
+def serving_gates_failed(validation: DensityValidation) -> bool:
+    return any(gate.code in SERVING_GATE_CODES and gate.severity == "reject" for gate in validation.failed_gates)
 
 
 def _rejected(

@@ -18,6 +18,7 @@ from project.options_surface.types import (
     ModelStatus,
     QuoteQualitySummary,
     QuoteStatus,
+    ResearchFitterReport,
     SmileSlice,
     SourceQuality,
     SurfaceAnalytics,
@@ -68,7 +69,26 @@ CUSTOMER_REASONS: Mapping[str, str] = {
     "rr_unsolved": "Unavailable — 25Δ roots did not solve inside observed smile coverage",
     "atm_outside_coverage": "Unavailable — ATM query is outside observed smile coverage",
     "smile_unavailable": "Unavailable — no accepted smile",
+    "call_not_convex_in_strike": (
+        "Distribution unavailable: fitted call prices were not convex "
+        "across the observed strike range."
+    ),
+    "call_not_decreasing_in_strike": (
+        "Distribution unavailable: fitted call prices were not monotone "
+        "decreasing across the observed strike range."
+    ),
 }
+
+RESEARCH_CONVEXITY_REASON = (
+    "Research SVI candidate failed convexity diagnostics; it is not used "
+    "for the displayed surface."
+)
+RESEARCH_MONOTONE_REASON = (
+    "Research SVI candidate failed call-price monotonicity diagnostics; "
+    "it is not used for the displayed surface."
+)
+SERVED_PCHIP_CAPTION = "Served diagnostic interpolant: tv_pchip"
+DIAGNOSTIC_ANALYTICS_CAPTION = "Market-implied analytics — diagnostic fit"
 
 FAILED_CHECK_LABELS: Mapping[str, str] = {
     "cdf_not_monotone": "Density CDF was not monotone",
@@ -136,6 +156,8 @@ def build_display_state(
     fitter_grade: FitterGrade,
     warnings: Sequence[str],
     sparse: bool,
+    fitter_name: str = "tv_pchip",
+    research: ResearchFitterReport | None = None,
 ) -> SurfaceDisplayState:
     quote_status = _quote_status(quotes, sparse=sparse, forward=forward)
     smile_status = smile.diagnostics.status
@@ -156,19 +178,28 @@ def build_display_state(
         sparse=sparse,
         forward=forward,
     )
-    human = _human_reason(codes, density_status=density_status, forward=forward)
+    human = _human_reason(
+        codes,
+        density_status=density_status,
+        forward=forward,
+        fitter_grade=fitter_grade,
+    )
     detail = _diagnostic_detail(
         codes=codes,
         forward=forward,
         smile=smile,
         density=density,
         fitter_grade=fitter_grade,
+        fitter_name=fitter_name,
+        research=research,
     )
     checks = _failed_checks(codes, smile=smile, density=density)
+    research_checks, research_reason = _research_disclosure(research)
     eligibility = build_metric_eligibility(
         forward=forward,
         quotes=quotes,
         smile=smile,
+        density=density,
         density_status=density_status,
         analytics=analytics,
     )
@@ -182,6 +213,16 @@ def build_display_state(
         diagnostic_detail=detail,
         failed_checks=checks,
         metric_eligibility=eligibility,
+        served_fitter_name=fitter_name,
+        served_fitter_grade=fitter_grade,
+        research_fitter_name=None if research is None else research.fitter_name,
+        research_failed_checks=research_checks,
+        research_human_reason=research_reason,
+        customer_warning_scope=_warning_scope(
+            density_status=density_status,
+            codes=codes,
+            research=research,
+        ),
     )
 
 
@@ -192,18 +233,20 @@ def build_metric_eligibility(
     smile: SmileSlice,
     density_status: DensityDisplayStatus,
     analytics: SurfaceAnalytics,
+    density: DensityResult | None = None,
 ) -> tuple[MetricEligibility, ...]:
-    density_ok = density_status is DensityDisplayStatus.ACCEPTED
+    # Degraded is eligible only after serving gates have already passed.
+    # Serving-gate failures force density_status=rejected.
+    density_ok = density_status in {
+        DensityDisplayStatus.ACCEPTED,
+        DensityDisplayStatus.DEGRADED,
+    }
     forward_ok = forward.forward_usd is not None and forward.source_quality is not SourceQuality.UNAVAILABLE
     atm_inside = _atm_inside_coverage(smile)
     smile_usable = smile.diagnostics.status is not ModelStatus.REJECTED
     atm_ok = smile_usable and atm_inside and analytics.atm_iv is not None
     rr_code, rr_ok = _delta_metric_gate(smile, analytics)
-    density_reason = None if density_ok else (
-        "density_rejected"
-        if density_status is DensityDisplayStatus.REJECTED
-        else "density_not_built"
-    )
+    density_reason = None if density_ok else _density_unavailable_code(density, density_status)
     return (
         _metric("forward", forward_ok, None if forward_ok else "forward_unavailable"),
         _metric("index", True, None),
@@ -319,7 +362,19 @@ def _reason_codes(
         codes.append("forward_unavailable")
     if sparse or "insufficient_or_sparse_observations" in warnings:
         codes.append("insufficient_or_sparse_observations")
-    codes.extend(smile.arbitrage.violations)
+    served_curve_codes = {
+        gate.code
+        for gate in (density.validation.failed_gates if density is not None else ())
+        if gate.code in {"call_not_convex_in_strike", "call_not_decreasing_in_strike"}
+    }
+    for violation in smile.arbitrage.violations:
+        # Smile-grid convexity is diagnostic. Customer serving codes come from
+        # the exact Black-76 curve that generated the density.
+        if violation in {"call_not_convex_in_strike", "call_not_decreasing_in_strike"}:
+            if violation not in served_curve_codes:
+                continue
+        if violation not in codes:
+            codes.append(violation)
     validation = density.validation if density is not None else None
     if validation is not None:
         for gate in validation.failed_gates:
@@ -344,34 +399,41 @@ def _human_reason(
     *,
     density_status: DensityDisplayStatus,
     forward: ForwardEstimate,
+    fitter_grade: FitterGrade = FitterGrade.DIAGNOSTIC,
 ) -> str:
     if "forward_unavailable" in codes or (
         forward.source_quality is SourceQuality.UNAVAILABLE or not forward.forward_usd
     ):
         return CUSTOMER_REASONS["forward_unavailable"]
-    priority = (
-        "cdf_not_monotone",
-        "negative_density_mass",
-        "mass_out_of_range",
-        "forward_moment",
-        "grid_not_converged",
-        "digital_atm",
-        "insufficient_grid",
-        "insufficient_wing_coverage",
-        "density_rejected",
-        "insufficient_or_sparse_observations",
-        "sparse_quotes",
-        "call_not_convex_in_strike",
-    )
-    for code in priority:
-        if code in codes:
-            return CUSTOMER_REASONS.get(code, FAILED_CHECK_LABELS.get(code, CUSTOMER_REASONS["density_rejected"]))
-    if density_status is DensityDisplayStatus.REJECTED:
-        return CUSTOMER_REASONS["density_rejected"]
-    if density_status is DensityDisplayStatus.UNAVAILABLE:
+    if density_status in {DensityDisplayStatus.REJECTED, DensityDisplayStatus.UNAVAILABLE}:
+        priority = (
+            "call_not_convex_in_strike",
+            "call_not_decreasing_in_strike",
+            "cdf_not_monotone",
+            "negative_density_mass",
+            "mass_out_of_range",
+            "forward_moment",
+            "grid_not_converged",
+            "digital_atm",
+            "insufficient_grid",
+            "insufficient_wing_coverage",
+            "density_rejected",
+            "insufficient_or_sparse_observations",
+            "sparse_quotes",
+        )
+        for code in priority:
+            if code in codes:
+                return CUSTOMER_REASONS.get(
+                    code,
+                    FAILED_CHECK_LABELS.get(code, CUSTOMER_REASONS["density_rejected"]),
+                )
+        if density_status is DensityDisplayStatus.REJECTED:
+            return CUSTOMER_REASONS["density_rejected"]
         return CUSTOMER_REASONS["density_not_built"]
+    if fitter_grade is not FitterGrade.PRODUCTION:
+        return DIAGNOSTIC_ANALYTICS_CAPTION
     if codes:
-        return CUSTOMER_REASONS.get(codes[0], "Surface quality is degraded. Treat displayed metrics as diagnostic.")
+        return "Surface quality is degraded. Treat displayed metrics as diagnostic."
     return "Market-implied surface is ready for this expiry."
 
 
@@ -386,7 +448,15 @@ def _failed_checks(
         label = FAILED_CHECK_LABELS.get(code)
         if label and label not in labels:
             labels.append(label)
+    served_curve_codes = {
+        gate.code
+        for gate in (density.validation.failed_gates if density is not None else ())
+        if gate.code in {"call_not_convex_in_strike", "call_not_decreasing_in_strike"}
+    }
     for violation in smile.arbitrage.violations:
+        if violation in {"call_not_convex_in_strike", "call_not_decreasing_in_strike"}:
+            if violation not in served_curve_codes:
+                continue
         label = FAILED_CHECK_LABELS.get(violation)
         if label and label not in labels:
             labels.append(label)
@@ -406,9 +476,11 @@ def _diagnostic_detail(
     smile: SmileSlice,
     density: DensityResult | None,
     fitter_grade: FitterGrade,
+    fitter_name: str = "tv_pchip",
+    research: ResearchFitterReport | None = None,
 ) -> str:
     parts: list[str] = [
-        f"fitter={smile.diagnostics.fitter_name}/{fitter_grade.value}",
+        f"fitter={fitter_name}/{fitter_grade.value}",
         f"forward={forward.source.value if forward.source else 'none'}/{forward.source_quality.value}",
     ]
     if forward.forward_usd is not None:
@@ -441,7 +513,72 @@ def _diagnostic_detail(
         parts.append(f"k_coverage=[{smile.diagnostics.k_min:.6f}, {smile.diagnostics.k_max:.6f}]")
     if codes:
         parts.append("codes=" + ",".join(codes))
+    if research is not None:
+        parts.append(
+            f"research={research.fitter_name}/{research.fitter_grade.value}"
+            f" convex={research.call_convex} monotone={research.call_monotone}"
+        )
+        if research.violations:
+            parts.append("research_codes=" + ",".join(research.violations))
     return "; ".join(parts)
+
+
+def _density_unavailable_code(
+    density: DensityResult | None,
+    density_status: DensityDisplayStatus,
+) -> str:
+    if density is not None:
+        for gate in density.validation.failed_gates:
+            if gate.code in {"call_not_convex_in_strike", "call_not_decreasing_in_strike"}:
+                return gate.code
+    if density_status is DensityDisplayStatus.REJECTED:
+        return "density_rejected"
+    return "density_not_built"
+
+
+def _research_disclosure(
+    research: ResearchFitterReport | None,
+) -> tuple[tuple[str, ...], str | None]:
+    if research is None:
+        return (), None
+    checks: list[str] = []
+    reason = None
+    if not research.call_convex or "call_not_convex_in_strike" in research.violations:
+        checks.append(
+            "Research SVI candidate failed convexity diagnostics; it is not used for the displayed surface."
+        )
+        reason = RESEARCH_CONVEXITY_REASON
+    if not research.call_monotone or "call_not_decreasing_in_strike" in research.violations:
+        checks.append(
+            "Research SVI candidate failed call-price monotonicity diagnostics; "
+            "it is not used for the displayed surface."
+        )
+        if reason is None:
+            reason = RESEARCH_MONOTONE_REASON
+    return tuple(checks), reason
+
+
+def _warning_scope(
+    *,
+    density_status: DensityDisplayStatus,
+    codes: Sequence[str],
+    research: ResearchFitterReport | None,
+) -> str:
+    served_gate = any(
+        code in {"call_not_convex_in_strike", "call_not_decreasing_in_strike"}
+        for code in codes
+    )
+    if (
+        density_status is DensityDisplayStatus.REJECTED
+        or density_status is DensityDisplayStatus.UNAVAILABLE
+        or served_gate
+    ):
+        return "served"
+    if research is not None and (
+        not research.call_convex or not research.call_monotone
+    ):
+        return "research"
+    return "none"
 
 
 def _delta_metric_gate(

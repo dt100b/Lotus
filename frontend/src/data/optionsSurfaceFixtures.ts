@@ -29,6 +29,12 @@ const baseDisplay = (overrides: Partial<SurfaceDisplayState> = {}): SurfaceDispl
     tail_probabilities: { available: false, reasonCode: 'density_rejected', reason: 'Unavailable — distribution validation failed' },
     digital_probabilities: { available: false, reasonCode: 'density_rejected', reason: 'Unavailable — distribution validation failed' },
   },
+  servedFitterName: 'tv_pchip',
+  servedFitterGrade: 'diagnostic',
+  researchFitterName: 'svi_raw',
+  researchFailedChecks: ['Research SVI candidate failed convexity diagnostics; it is not used for the displayed surface.'],
+  researchHumanReason: 'Research SVI candidate failed convexity diagnostics; it is not used for the displayed surface.',
+  customerWarningScope: 'served',
   ...overrides,
 })
 
@@ -139,6 +145,9 @@ export const readyDensity = scanFixture({
     reasonCodes: [],
     humanReadableReason: 'Market-implied surface is ready for this expiry.',
     failedChecks: [],
+    researchFailedChecks: [],
+    researchHumanReason: null,
+    customerWarningScope: 'none',
     metricEligibility: {
       ...baseDisplay().metricEligibility,
       density_chart: { available: true, reasonCode: null, reason: null },
@@ -168,9 +177,113 @@ export const degradedDensity = scanFixture({
   display: baseDisplay({
     densityStatus: 'degraded',
     surfaceDisplayStatus: 'degraded',
+    reasonCodes: ['negative_density_mass'],
     humanReadableReason: 'Surface quality is degraded. Treat displayed metrics as diagnostic.',
-    failedChecks: ['Call-price convexity failed'],
+    failedChecks: ['Negative density mass exceeded tolerance'],
+    customerWarningScope: 'none',
+    researchFailedChecks: [],
+    researchHumanReason: null,
+    metricEligibility: {
+      ...baseDisplay().metricEligibility,
+      density_chart: { available: true, reasonCode: null, reason: null },
+      median: { available: true, reasonCode: null, reason: null },
+      mode: { available: true, reasonCode: null, reason: null },
+      central_range_50: { available: true, reasonCode: null, reason: null },
+      central_range_90: { available: true, reasonCode: null, reason: null },
+    },
   }),
+})
+
+const passingDensityEligibility = {
+  ...baseDisplay().metricEligibility,
+  density_chart: { available: true, reasonCode: null, reason: null },
+  median: { available: true, reasonCode: null, reason: null },
+  mode: { available: true, reasonCode: null, reason: null },
+  central_range_50: { available: true, reasonCode: null, reason: null },
+  central_range_90: { available: true, reasonCode: null, reason: null },
+}
+
+export const servedPassResearchFail = scanFixture({
+  density: [
+    { strike: 55000, raw: 0.00001, smoothed: 0.00001 },
+    { strike: 62885, raw: 0.00004, smoothed: 0.00004 },
+    { strike: 68000, raw: 0.00001, smoothed: 0.00001 },
+  ],
+  diagnosticDensity: null,
+  display: baseDisplay({
+    quoteStatus: 'accepted',
+    smileStatus: 'degraded',
+    densityStatus: 'accepted',
+    surfaceDisplayStatus: 'degraded',
+    reasonCodes: [],
+    humanReadableReason: 'Market-implied analytics — diagnostic fit',
+    failedChecks: [],
+    researchFitterName: 'svi_raw',
+    researchFailedChecks: ['Research SVI candidate failed convexity diagnostics; it is not used for the displayed surface.'],
+    researchHumanReason: 'Research SVI candidate failed convexity diagnostics; it is not used for the displayed surface.',
+    customerWarningScope: 'research',
+    metricEligibility: passingDensityEligibility,
+  }),
+  rnd: {
+    ...scanFixture().rnd,
+    percentile05: 56000,
+    percentile25: 60000,
+    percentile50: 62885,
+    percentile75: 65000,
+    percentile95: 69000,
+  },
+})
+
+export const servedFailResearchPass = scanFixture({
+  display: baseDisplay({
+    reasonCodes: ['call_not_convex_in_strike', 'density_rejected'],
+    humanReadableReason: 'Distribution unavailable: fitted call prices were not convex across the observed strike range.',
+    failedChecks: ['Call-price convexity failed'],
+    researchFitterName: 'svi_raw',
+    researchFailedChecks: [],
+    researchHumanReason: null,
+    customerWarningScope: 'served',
+  }),
+})
+
+export const servedFailResearchFail = scanFixture({
+  display: baseDisplay({
+    reasonCodes: ['call_not_convex_in_strike', 'density_rejected'],
+    humanReadableReason: 'Distribution unavailable: fitted call prices were not convex across the observed strike range.',
+    failedChecks: ['Call-price convexity failed'],
+    customerWarningScope: 'served',
+  }),
+})
+
+export const servedPassNoResearch = scanFixture({
+  density: [
+    { strike: 55000, raw: 0.00001, smoothed: 0.00001 },
+    { strike: 62885, raw: 0.00004, smoothed: 0.00004 },
+    { strike: 68000, raw: 0.00001, smoothed: 0.00001 },
+  ],
+  diagnosticDensity: null,
+  display: baseDisplay({
+    quoteStatus: 'accepted',
+    smileStatus: 'degraded',
+    densityStatus: 'accepted',
+    surfaceDisplayStatus: 'degraded',
+    reasonCodes: [],
+    humanReadableReason: 'Market-implied analytics — diagnostic fit',
+    failedChecks: [],
+    researchFitterName: null,
+    researchFailedChecks: [],
+    researchHumanReason: null,
+    customerWarningScope: 'none',
+    metricEligibility: passingDensityEligibility,
+  }),
+  rnd: {
+    ...scanFixture().rnd,
+    percentile05: 56000,
+    percentile25: 60000,
+    percentile50: 62885,
+    percentile75: 65000,
+    percentile95: 69000,
+  },
 })
 
 export const sparseRejectedSmile = scanFixture({

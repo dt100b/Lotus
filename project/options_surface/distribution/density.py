@@ -10,7 +10,11 @@ import numpy as np
 from scipy.integrate import cumulative_trapezoid, trapezoid
 
 from project.options_surface.distribution.black76 import black76_call
-from project.options_surface.distribution.validate import validate_density
+from project.options_surface.distribution.validate import (
+    apply_served_call_curve_gates,
+    validate_density,
+)
+from project.options_surface.surface.arbitrage import diagnose_slice_arbitrage
 from project.options_surface.types import (
     DensityMethod,
     DensityResult,
@@ -66,6 +70,16 @@ def extract_density(
         compare_strikes=compare[0],
         compare_density=compare[1],
     )
+    validation = apply_served_call_curve_gates(
+        validation,
+        _call_curve_report(
+            strikes=strikes,
+            iv_from_strike=iv_from_strike,
+            forward_usd=forward_usd,
+            time_to_expiry_years=time_to_expiry_years,
+            rate=rate,
+        ),
+    )
     cdf = _cdf(strikes, raw)
     quantiles: dict[str, float] = {}
     mean = None
@@ -87,6 +101,72 @@ def extract_density(
         mean=mean,
         validation=validation,
         display_smooth=None,
+    )
+
+
+def apply_served_smile_arbitrage(
+    density: DensityResult,
+    report,
+) -> DensityResult:
+    """Apply the served smile's call-curve arbitrage report as a serving gate."""
+    validation = apply_served_call_curve_gates(density.validation, report)
+    if validation.status is ModelStatus.REJECTED:
+        return DensityResult(
+            as_of_utc=density.as_of_utc,
+            expiry_utc=density.expiry_utc,
+            forward_usd=density.forward_usd,
+            status=ModelStatus.REJECTED,
+            strikes_usd=density.strikes_usd,
+            raw_density=density.raw_density,
+            cdf=density.cdf,
+            quantiles={},
+            mean=None,
+            validation=validation,
+            display_smooth=density.display_smooth,
+        )
+    return DensityResult(
+        as_of_utc=density.as_of_utc,
+        expiry_utc=density.expiry_utc,
+        forward_usd=density.forward_usd,
+        status=validation.status,
+        strikes_usd=density.strikes_usd,
+        raw_density=density.raw_density,
+        cdf=density.cdf,
+        quantiles=density.quantiles,
+        mean=density.mean,
+        validation=validation,
+        display_smooth=density.display_smooth,
+    )
+
+
+def _call_curve_report(
+    *,
+    strikes,
+    iv_from_strike,
+    forward_usd: float,
+    time_to_expiry_years: float,
+    rate: float,
+):
+    prices = []
+    for strike in strikes:
+        iv = iv_from_strike(float(strike))
+        if iv is None or iv <= 0:
+            prices.append(float("nan"))
+        else:
+            prices.append(
+                black76_call(
+                    forward_usd=float(forward_usd),
+                    strike_usd=float(strike),
+                    time_to_expiry_years=float(time_to_expiry_years),
+                    rate=rate,
+                    sigma=float(iv),
+                )
+            )
+    return diagnose_slice_arbitrage(
+        strikes_usd=[float(strike) for strike in strikes],
+        call_prices=prices,
+        forward_usd=float(forward_usd),
+        time_to_expiry_years=float(time_to_expiry_years),
     )
 
 

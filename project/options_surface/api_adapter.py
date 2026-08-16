@@ -35,6 +35,7 @@ from project.api.schemas import (
     OptionsSurfaceForward,
     OptionsSurfaceMetricEligibility,
     OptionsSurfaceQuoteSummary,
+    OptionsSurfaceResearchCandidate,
     OptionsSurfaceResponse,
     OptionsSurfaceSmile,
     OptionsSurfaceSmilePoint,
@@ -170,6 +171,7 @@ def to_options_surface_response(
         fitter_name=result.fitter_name,
         fitter_grade=result.fitter_grade.value,
         display=_display_schema(result),
+        research=_research_schema(result),
         feed=feed,
         freshness=freshness,
         warnings=list(result.warnings),
@@ -193,7 +195,7 @@ def to_legacy_scan_response(
     if (
         result.density is not None
         and result.density.status is not ModelStatus.REJECTED
-        and result.display.density_status.value == "accepted"
+        and result.display.density_status.value in {"accepted", "degraded"}
     ):
         density_points = [
             {"strike": strike, "raw": raw, "smoothed": raw}
@@ -573,6 +575,30 @@ def _display_schema(result: OptionsSurfaceResult) -> OptionsSurfaceDisplayState:
             )
             for item in state.metric_eligibility
         ],
+        served_fitter_name=state.served_fitter_name,
+        served_fitter_grade=state.served_fitter_grade.value,
+        research_fitter_name=state.research_fitter_name,
+        research_failed_checks=list(state.research_failed_checks),
+        research_human_reason=state.research_human_reason,
+        customer_warning_scope=state.customer_warning_scope
+        if state.customer_warning_scope in {"served", "research", "none"}
+        else "none",
+    )
+
+
+def _research_schema(result: OptionsSurfaceResult) -> OptionsSurfaceResearchCandidate | None:
+    report = result.research
+    if report is None:
+        return None
+    return OptionsSurfaceResearchCandidate(
+        fitter_name=report.fitter_name,
+        fitter_grade=report.fitter_grade.value,
+        status=report.status.value,
+        call_monotone=report.call_monotone,
+        call_convex=report.call_convex,
+        violations=list(report.violations),
+        worst_convexity_strike=report.worst_convexity_strike,
+        notes=list(report.notes),
     )
 
 

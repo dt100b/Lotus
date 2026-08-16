@@ -11,7 +11,11 @@ from project.options_surface.forward.estimate import estimate_forward
 from project.options_surface.market_data.ticker_adapter import quotes_from_scanner_rows
 from project.options_surface.normalization.otm import select_otm_observations
 from project.options_surface.normalization.quotes import classify_quotes
-from project.options_surface.surface.fitters import SmileFitter, TotalVariancePchipFitter
+from project.options_surface.surface.fitters import (
+    RawSviFitter,
+    SmileFitter,
+    TotalVariancePchipFitter,
+)
 from project.options_surface.surface.smile import calibrate_smile
 from project.options_surface.timeutil import (
     as_utc,
@@ -30,6 +34,7 @@ from project.options_surface.types import (
     OptionsSurfaceResult,
     QuoteQualitySummary,
     RejectionReason,
+    ResearchFitterReport,
     SourceQuality,
     SurfaceAnalytics,
     ValidationReport,
@@ -178,6 +183,17 @@ def build_options_surface(
         analytics = _clear_probability_headlines(analytics)
 
     quote_summary = _quote_summary(all_obs, selected, matching)
+    research = _research_candidate(
+        observed=observed,
+        synthetic=synthetic,
+        forward=forward,
+        tau=tau,
+        as_of=as_of,
+        expiry_utc=expiry_utc,
+        rate=rate,
+        sparse=sparse,
+        served_name=engine.name,
+    )
     display = build_display_state(
         forward=forward,
         quotes=quote_summary,
@@ -187,6 +203,8 @@ def build_options_surface(
         fitter_grade=engine.grade,
         warnings=warnings,
         sparse=sparse,
+        fitter_name=engine.name,
+        research=research,
     )
     model_status = _combine_status(
         smile_status=smile.diagnostics.status,
@@ -236,6 +254,7 @@ def build_options_surface(
         display=display,
         rejected_observations=tuple(item for item in all_obs if not item.accepted),
         accepted_observations=tuple(item for item in all_obs if item.accepted),
+        research=research,
     )
 
 
@@ -317,6 +336,46 @@ def _clear_probability_headlines(analytics: SurfaceAnalytics) -> SurfaceAnalytic
         risk_neutral_mean=None,
         k_25_call=analytics.k_25_call,
         k_25_put=analytics.k_25_put,
+    )
+
+
+def _research_candidate(
+    *,
+    observed,
+    synthetic,
+    forward,
+    tau,
+    as_of,
+    expiry_utc,
+    rate,
+    sparse: bool,
+    served_name: str,
+) -> ResearchFitterReport | None:
+    if sparse or served_name == "svi_raw" or not observed:
+        return None
+    try:
+        research_smile, _fitted = calibrate_smile(
+            observed=observed,
+            synthetic=synthetic,
+            forward=forward,
+            time_to_expiry_years=tau,
+            as_of_utc=as_of,
+            expiry_utc=expiry_utc,
+            fitter=RawSviFitter(),
+            rate=rate,
+        )
+    except Exception:
+        return None
+    arb = research_smile.arbitrage
+    return ResearchFitterReport(
+        fitter_name=research_smile.diagnostics.fitter_name,
+        fitter_grade=research_smile.diagnostics.fitter_grade,
+        status=research_smile.diagnostics.status,
+        call_monotone=arb.call_monotone,
+        call_convex=arb.call_convex,
+        violations=arb.violations,
+        worst_convexity_strike=arb.worst_convexity_strike,
+        notes=research_smile.diagnostics.notes,
     )
 
 
@@ -454,6 +513,8 @@ def _rejected_result(
         fitter_grade=FitterGrade.DIAGNOSTIC,
         warnings=warnings,
         sparse=True,
+        fitter_name="none",
+        research=None,
     )
     validation = ValidationReport(
         as_of_utc=as_of,

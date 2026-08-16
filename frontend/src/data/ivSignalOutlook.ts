@@ -1,5 +1,7 @@
 import type { IvSignalScan } from '@/api/ivSignalScanner'
 import {
+  DIAGNOSTIC_MOVE_LABEL,
+  densityAnalyticsEligible,
   densityIsRejected,
   formatCoverage,
   metricOf,
@@ -7,6 +9,7 @@ import {
   statusLabel,
   unavailableValue,
 } from '@/data/optionsSurfaceDisplay'
+import { describeSurfaceUi } from '@/data/optionsSurfacePresentation'
 
 export type IvOutlookTone = 'neutral' | 'caution' | 'low' | 'high'
 
@@ -37,52 +40,16 @@ export function getSurfaceHeadline(
   scan: Pick<IvSignalScan, 'rnd' | 'expiry' | 'smile' | 'curveQuality' | 'suppressionReasons' | 'selection' | 'display'>,
   refreshFailed: boolean,
 ): { kicker: string; title: string; keyPhrase: string | null; detail: string; tone: IvOutlookTone } {
-  const expiry = formatExpiryShort(scan.expiry)
-  const move = formatExpectedMovePercent(scan.rnd)
-  const source = formatForwardSource(scan.selection.forwardSource)
-  const forwardQuality = scan.selection.forwardSource === 'spot_fallback' ? 'forward quality low' : 'forward quality high'
-  if (refreshFailed) {
-    return {
-      kicker: 'Options-implied forward',
-      title: 'Surface delayed',
-      keyPhrase: null,
-      detail: `Expiry ${expiry} · ${source} · live book not current`,
-      tone: 'low',
-    }
-  }
-  if (scan.display.surfaceDisplayStatus === 'unavailable') {
-    return {
-      kicker: 'Options-implied forward',
-      title: 'Surface unavailable',
-      keyPhrase: null,
-      detail: `Expiry ${expiry} · ${scan.display.humanReadableReason}`,
-      tone: 'low',
-    }
-  }
-  if (scan.display.surfaceDisplayStatus === 'rejected' || densityIsRejected(scan)) {
-    return {
-      kicker: 'Options-implied forward',
-      title: 'Surface not accepted',
-      keyPhrase: null,
-      detail: `Expiry ${expiry} · ${source} · ${forwardQuality} · distribution withheld`,
-      tone: 'low',
-    }
-  }
-  if (scan.display.densityStatus === 'degraded') {
-    return {
-      kicker: 'Risk-neutral terminal-price distribution',
-      title: 'Density not validated',
-      keyPhrase: null,
-      detail: `Expiry ${expiry} · ${source} · headline percentiles shown as degraded`,
-      tone: 'low',
-    }
-  }
+  const ui = describeSurfaceUi(scan, refreshFailed)
+  const tone: IvOutlookTone = densityIsRejected(scan) || refreshFailed
+    ? 'low'
+    : scan.display.surfaceDisplayStatus === 'ready' ? 'high' : 'caution'
   return {
-    kicker: 'Risk-neutral terminal-price distribution',
-    title: `${move} implied move`,
-    keyPhrase: source,
-    detail: `To ${expiry} · market-implied central 50% ${formatCompactStrikeRange(scan.rnd.percentile25, scan.rnd.percentile75)}`,
-    tone: scan.display.surfaceDisplayStatus === 'ready' ? 'high' : 'caution',
+    kicker: ui.heroKicker,
+    title: ui.heroTitle,
+    keyPhrase: ui.heroKeyPhrase,
+    detail: ui.heroDetail,
+    tone,
   }
 }
 
@@ -169,19 +136,21 @@ export function getFitQuality(
 ): IvNamedRead {
   if (refreshFailed) {
     return {
-      label: 'Surface status',
+      label: 'Distribution status',
       value: 'Delayed',
       detail: 'Live book not current',
       tone: 'low',
-      title: 'Quote, smile, and distribution status are shown separately. They are not one fit grade.',
+      title: 'Distribution status is independent of listed-future forward quality.',
     }
   }
+  const ui = describeSurfaceUi(scan as Pick<IvSignalScan, 'display' | 'rnd' | 'expiry' | 'selection' | 'smile'>, false)
+  const distribution = ui.legend.find((line) => line.dimension === 'distribution')
   return {
-    label: 'Surface status',
-    value: `${statusLabel(scan.display.quoteStatus)} / ${statusLabel(scan.display.smileStatus)} / ${statusLabel(scan.display.densityStatus)}`,
-    detail: `Data · smile · distribution · ${formatCoverage(scan)}`,
-    tone: scan.display.densityStatus === 'accepted' ? 'caution' : 'low',
-    title: 'Data quality, smile-fit status, and distribution status are separate. A diagnostic smile can exist while the density is rejected.',
+    label: 'Distribution status',
+    value: distribution?.value ?? statusLabel(scan.display.densityStatus),
+    detail: `${scan.display.servedFitterName} · ${scan.display.servedFitterGrade} · not a forward-quality score`,
+    tone: densityAnalyticsEligible(scan) ? 'caution' : 'low',
+    title: 'Distribution status is independent of the listed-future forward. A failed smile or density does not mark the forward as low quality.',
   }
 }
 
@@ -190,7 +159,7 @@ export function getImpliedMoveRead(scan: Pick<IvSignalScan, 'rnd' | 'expiry' | '
   if (!eligibility.available) {
     const missing = unavailableValue(eligibility)
     return {
-      label: 'Diagnostic smile-implied move',
+      label: DIAGNOSTIC_MOVE_LABEL,
       value: missing.value,
       detail: missing.detail,
       tone: 'low',
@@ -198,7 +167,7 @@ export function getImpliedMoveRead(scan: Pick<IvSignalScan, 'rnd' | 'expiry' | '
     }
   }
   return {
-    label: 'Diagnostic smile-implied move',
+    label: DIAGNOSTIC_MOVE_LABEL,
     value: formatExpectedMovePercent(scan.rnd),
     detail: `ATM IV · to ${formatExpiryShort(scan.expiry)} · not a distribution range`,
     tone: 'neutral',
