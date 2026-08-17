@@ -16,6 +16,7 @@ from project.options_surface.types import (
     ForwardEstimate,
     MetricEligibility,
     ModelStatus,
+    PrimaryFailureCategory,
     QuoteQualitySummary,
     QuoteStatus,
     ResearchFitterReport,
@@ -69,6 +70,9 @@ CUSTOMER_REASONS: Mapping[str, str] = {
     "rr_unsolved": "Unavailable — 25Δ roots did not solve inside observed smile coverage",
     "atm_outside_coverage": "Unavailable — ATM query is outside observed smile coverage",
     "smile_unavailable": "Unavailable — no accepted smile",
+    "mode_not_served": (
+        "Unavailable — a density mode is not served; p50 is the median, not a mode."
+    ),
     "call_not_convex_in_strike": (
         "Distribution unavailable: fitted call prices were not convex "
         "across the observed strike range."
@@ -165,6 +169,9 @@ def build_display_state(
     sparse: bool,
     fitter_name: str = "tv_pchip",
     research: ResearchFitterReport | None = None,
+    serving_mode: str = "diagnostic_candidate",
+    config_version: str = "surface_serving.v1",
+    config_hash: str = "",
 ) -> SurfaceDisplayState:
     quote_status = _quote_status(quotes, sparse=sparse, forward=forward)
     smile_status = smile.diagnostics.status
@@ -230,6 +237,14 @@ def build_display_state(
             codes=codes,
             research=research,
         ),
+        serving_mode=serving_mode,
+        config_version=config_version,
+        config_hash=config_hash,
+        primary_failure_category=classify_primary_failure(
+            codes=codes,
+            density_status=density_status,
+            forward=forward,
+        ).value,
     )
 
 
@@ -272,7 +287,13 @@ def build_metric_eligibility(
         _metric("bf_25", rr_ok, None if rr_ok else rr_code),
         _metric("density_chart", density_ok, density_reason),
         _metric("median", density_ok, density_reason),
-        _metric("mode", density_ok, density_reason),
+        # No validated density argmax is served. p50 is the median and must
+        # not be exposed as a customer-facing mode.
+        _metric(
+            "mode",
+            False,
+            density_reason if not density_ok else "mode_not_served",
+        ),
         _metric("central_range_50", density_ok, density_reason),
         _metric("central_range_90", density_ok, density_reason),
         _metric("tail_probabilities", density_ok, density_reason),
@@ -369,6 +390,10 @@ def _reason_codes(
         codes.append("forward_unavailable")
     if sparse or "insufficient_or_sparse_observations" in warnings:
         codes.append("insufficient_or_sparse_observations")
+    if "serving_disabled" in warnings:
+        codes.append("serving_disabled")
+    if "shadow_compare_record_only" in warnings:
+        codes.append("shadow_compare_record_only")
     served_curve_codes = {
         gate.code
         for gate in (density.validation.failed_gates if density is not None else ())
@@ -631,3 +656,69 @@ def _metric(name: str, available: bool, code: str | None) -> MetricEligibility:
 
 def reject_gates(validation: DensityValidation) -> tuple[ValidationGate, ...]:
     return tuple(gate for gate in validation.failed_gates if gate.severity == "reject")
+
+
+MARKET_DATA_CODES = {
+    "forward_unavailable",
+    "insufficient_or_sparse_observations",
+    "sparse_quotes",
+    "stale_quote",
+    "stale_feed",
+    "insufficient_wing_coverage",
+    "density_not_built",
+    "coverage_too_narrow",
+}
+FIT_QUALITY_CODES = {
+    "residual_budget_exceeded",
+    "optimizer_failed",
+    "insufficient_observations",
+    "smile_rejected",
+    "smile_unavailable",
+    "ls_not_converged",
+    "projection_failed",
+    "no_eligible_constrained_start",
+    "serving_disabled",
+    "shadow_compare_record_only",
+}
+HARD_GATE_CODES = {
+    "call_not_convex_in_strike",
+    "call_not_decreasing_in_strike",
+    "served_call_not_convex",
+    "served_call_not_decreasing",
+    "cdf_not_monotone",
+    "negative_density_mass",
+    "mass_out_of_range",
+    "forward_moment",
+    "digital_atm",
+    "grid_not_converged",
+    "insufficient_grid",
+    "non_positive_total_variance",
+    "svi_butterfly_g_negative",
+    "lee_moment_violated",
+}
+
+
+def classify_primary_failure(
+    *,
+    codes: Sequence[str],
+    density_status: DensityDisplayStatus,
+    forward: ForwardEstimate,
+) -> PrimaryFailureCategory:
+    if density_status in {DensityDisplayStatus.ACCEPTED, DensityDisplayStatus.DEGRADED}:
+        return PrimaryFailureCategory.NONE
+    if "serving_disabled" in codes or "shadow_compare_record_only" in codes:
+        return PrimaryFailureCategory.FIT_QUALITY
+    if forward.source_quality is SourceQuality.UNAVAILABLE or not forward.forward_usd:
+        return PrimaryFailureCategory.MARKET_DATA
+    for code in codes:
+        if code in MARKET_DATA_CODES:
+            return PrimaryFailureCategory.MARKET_DATA
+    for code in codes:
+        if code in HARD_GATE_CODES:
+            return PrimaryFailureCategory.HARD_GATE
+    for code in codes:
+        if code in FIT_QUALITY_CODES:
+            return PrimaryFailureCategory.FIT_QUALITY
+    if density_status in {DensityDisplayStatus.REJECTED, DensityDisplayStatus.UNAVAILABLE}:
+        return PrimaryFailureCategory.FIT_QUALITY
+    return PrimaryFailureCategory.NONE

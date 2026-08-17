@@ -1,6 +1,7 @@
 import { normalizeLiveExpiry } from '@/api/liveTerminal'
 import type {
   DensityDiagnostic,
+  ForwardSourceQuality,
   SurfaceDisplayState,
 } from '@/data/optionsSurfaceDisplay'
 import { DIAGNOSTIC_DENSITY_LABEL } from '@/data/optionsSurfaceDisplay'
@@ -81,6 +82,7 @@ export type IvSignalScan = {
   ivCurve: IvSignalIvCurvePoint[]
   smile: IvSignalSmile
   density: IvSignalDensityPoint[]
+  servedCdf: number[] | null
   markers: {
     spot: number
     tailLower: number
@@ -185,6 +187,7 @@ export type IvSignalScan = {
     deltaCutoff: number | null
     impliedForward: number | null
     forwardSource: 'matching_future' | 'inverse_put_call_parity' | 'parity_pairs' | 'venue_underlying_price' | 'underlying_price' | 'spot_fallback' | 'unknown'
+    forwardSourceQuality: ForwardSourceQuality
     forwardPairCount: number
     otmReference: number | null
     medianSelectedIvSpreadPercentagePoints: number
@@ -345,7 +348,22 @@ function surfaceToScan(value: unknown): IvSignalScan {
   const points = [...observed, ...synthetic]
   const strikes = arrayValue(density.strikes_usd).map((item) => finiteNumber(item, Number.NaN))
   const rawDensity = arrayValue(density.raw_density).map((item) => finiteNumber(item, Number.NaN))
+  const servedCdfRaw = arrayValue(density.cdf).map((item) => finiteNumber(item, Number.NaN))
   const quantiles = asRecord(density.quantiles)
+  const densityEligible = display.densityStatus === 'accepted' || display.densityStatus === 'degraded'
+  const densityPoints = !densityEligible
+    ? []
+    : strikes.map((strike, index) => ({
+      strike,
+      raw: rawDensity[index] ?? 0,
+      smoothed: rawDensity[index] ?? 0,
+    })).filter((point) => Number.isFinite(point.strike))
+  const servedCdf = densityEligible
+    && servedCdfRaw.length === densityPoints.length
+    && servedCdfRaw.length > 0
+    && servedCdfRaw.every((value) => Number.isFinite(value))
+    ? servedCdfRaw
+    : null
   const reasons = asRecord(quotes.reason_counts)
   const quality: IvSignalCurveQualityLevel = status === 'accepted'
     ? 'HIGH'
@@ -385,13 +403,8 @@ function surfaceToScan(value: unknown): IvSignalScan {
         deltaAxisAvailable: points.some((point) => point.delta != null),
       },
     },
-    density: display.densityStatus === 'rejected' || display.densityStatus === 'unavailable'
-      ? []
-      : strikes.map((strike, index) => ({
-        strike,
-        raw: rawDensity[index] ?? 0,
-        smoothed: rawDensity[index] ?? 0,
-      })).filter((point) => Number.isFinite(point.strike)),
+    density: densityPoints,
+    servedCdf,
     diagnosticDensity: mapDiagnosticDensity(density),
     display,
     markers: {
@@ -400,7 +413,9 @@ function surfaceToScan(value: unknown): IvSignalScan {
       tailUpper: forwardUsd * 1.05,
       bandLower: rejected ? Number.NaN : optionalFiniteNumber(quantiles.p25) ?? Number.NaN,
       bandUpper: rejected ? Number.NaN : optionalFiniteNumber(quantiles.p75) ?? Number.NaN,
-      peakStrike: rejected ? Number.NaN : optionalFiniteNumber(quantiles.p50) ?? Number.NaN,
+      // peakStrike is a legacy field. It is not a density mode and must not
+      // be sourced from p50 / the risk-neutral median.
+      peakStrike: Number.NaN,
     },
     signals: {
       skew: idle,
@@ -487,6 +502,7 @@ function surfaceToScan(value: unknown): IvSignalScan {
       deltaCutoff: null,
       impliedForward: optionalNonNegativeNumber(forward.forward_usd),
       forwardSource: forwardSource(forward.source),
+      forwardSourceQuality: forwardSourceQuality(forward.source_quality),
       forwardPairCount: finiteNumber(forward.parity_pair_count, 0),
       otmReference: optionalNonNegativeNumber(forward.forward_usd),
       medianSelectedIvSpreadPercentagePoints: 0,
@@ -563,6 +579,7 @@ function surfaceToScan(value: unknown): IvSignalScan {
 
 function mapDisplay(value: unknown, raw: Record<string, unknown>): SurfaceDisplayState {
   const display = asRecord(value)
+  const residual = asRecord(raw.fit_residual_summary)
   const validation = asRecord(raw.validation)
   const analytics = asRecord(raw.analytics)
   const smile = asRecord(raw.smile)
@@ -605,7 +622,41 @@ function mapDisplay(value: unknown, raw: Record<string, unknown>): SurfaceDispla
     researchFailedChecks: stringArray(display.research_failed_checks),
     researchHumanReason: stringValue(display.research_human_reason) || null,
     customerWarningScope: scopeOf(display.customer_warning_scope),
+    servingMode: servingModeOf(display.serving_mode ?? raw.serving_mode),
+    configVersion: stringValue(display.config_version ?? raw.config_version) || null,
+    configHash: stringValue(display.config_hash ?? raw.config_hash) || null,
+    primaryFailureCategory: failureCategoryOf(
+      display.primary_failure_category ?? raw.primary_failure_category,
+    ),
+    residualBudgetOk: residualBudgetOf(display.residual_budget_ok ?? residual.residual_budget_ok),
   }
+}
+
+function residualBudgetOf(value: unknown): boolean | null {
+  if (value === true) return true
+  if (value === false) return false
+  return null
+}
+
+function servingModeOf(value: unknown): SurfaceDisplayState['servingMode'] {
+  const normalized = stringValue(value).toLowerCase()
+  if (
+    normalized === 'diagnostic_candidate'
+    || normalized === 'shadow_compare'
+    || normalized === 'disabled'
+  ) return normalized
+  return 'diagnostic_candidate'
+}
+
+function failureCategoryOf(value: unknown): SurfaceDisplayState['primaryFailureCategory'] {
+  const normalized = stringValue(value).toLowerCase()
+  if (
+    normalized === 'none'
+    || normalized === 'market_data'
+    || normalized === 'fit_quality'
+    || normalized === 'hard_gate'
+  ) return normalized
+  return null
 }
 
 function gradeOf(value: unknown): SurfaceDisplayState['servedFitterGrade'] {
@@ -647,7 +698,7 @@ function mapEligibilityList(
         reason: stringValue(item.reason) || null,
       }
     }
-    return mapped
+    return applyCustomerModePolicy(mapped)
   }
   const densityOk = context.densityStatus === 'accepted' || context.densityStatus === 'degraded'
   const smileOk = context.smileStatus !== 'rejected'
@@ -665,7 +716,13 @@ function mapEligibilityList(
     bf_25: { available: rrOk, reasonCode: rrOk ? null : 'rr_unsolved', reason: rrOk ? null : 'Unavailable — 25Δ roots did not solve inside observed smile coverage' },
     density_chart: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
     median: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
-    mode: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
+    mode: {
+      available: false,
+      reasonCode: densityOk ? 'mode_not_served' : 'density_rejected',
+      reason: densityOk
+        ? 'Unavailable — a density mode is not served; p50 is the median, not a mode.'
+        : 'Unavailable — distribution validation failed',
+    },
     central_range_50: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
     central_range_90: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
     tail_probabilities: { available: densityOk, reasonCode: densityOk ? null : 'density_rejected', reason: densityOk ? null : 'Unavailable — distribution validation failed' },
@@ -863,6 +920,7 @@ export function toIvSignalScan(value: unknown): IvSignalScan {
       }))
       .filter((point) => Number.isFinite(point.strike) && point.strike > 0)
       .sort((left, right) => left.strike - right.strike),
+    servedCdf: null,
     markers: {
       spot: finiteNumber(rawMarkers.spot, spotPrice),
       tailLower: finiteNumber(
@@ -929,6 +987,9 @@ export function toIvSignalScan(value: unknown): IvSignalScan {
       deltaCutoff: optionalNonNegativeNumber(rawSelection.delta_cutoff),
       impliedForward: optionalNonNegativeNumber(rawSelection.implied_forward),
       forwardSource: forwardSource(rawSelection.forward_source),
+      forwardSourceQuality: forwardSourceQuality(
+        rawSelection.forward_source_quality ?? asRecord(raw.forward).source_quality,
+      ),
       forwardPairCount: nonNegativeInteger(rawSelection.forward_pair_count),
       otmReference: optionalNonNegativeNumber(rawSelection.otm_reference),
       medianSelectedIvSpreadPercentagePoints: nonNegativeNumber(rawSelection.median_selected_iv_spread_percentage_points),
@@ -1254,6 +1315,30 @@ function curveQualityLevel(value: unknown): IvSignalCurveQualityLevel {
   const normalized = stringValue(value).trim().toUpperCase()
   if (normalized === 'HIGH' || normalized === 'CAUTION') return normalized
   return 'LOW'
+}
+
+function applyCustomerModePolicy(
+  eligibility: SurfaceDisplayState['metricEligibility'],
+): SurfaceDisplayState['metricEligibility'] {
+  const densityOk = eligibility.density_chart?.available === true
+  return {
+    ...eligibility,
+    mode: {
+      available: false,
+      reasonCode: densityOk ? 'mode_not_served' : (eligibility.mode?.reasonCode || 'density_rejected'),
+      reason: densityOk
+        ? 'Unavailable — a density mode is not served; p50 is the median, not a mode.'
+        : (eligibility.mode?.reason || 'Unavailable — distribution validation failed'),
+    },
+  }
+}
+
+function forwardSourceQuality(value: unknown): ForwardSourceQuality {
+  const normalized = stringValue(value).trim().toLowerCase()
+  if (normalized === 'high' || normalized === 'medium' || normalized === 'low' || normalized === 'unavailable') {
+    return normalized
+  }
+  return 'unavailable'
 }
 
 function forwardSource(value: unknown): IvSignalScan['selection']['forwardSource'] {
