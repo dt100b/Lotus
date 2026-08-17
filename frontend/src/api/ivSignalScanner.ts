@@ -610,7 +610,12 @@ function mapDisplay(value: unknown, raw: Record<string, unknown>): SurfaceDispla
 
 function gradeOf(value: unknown): SurfaceDisplayState['servedFitterGrade'] {
   const normalized = stringValue(value).toLowerCase()
-  if (normalized === 'production' || normalized === 'diagnostic' || normalized === 'research') return normalized
+  if (
+    normalized === 'production'
+    || normalized === 'diagnostic'
+    || normalized === 'diagnostic_candidate'
+    || normalized === 'research'
+  ) return normalized
   return 'diagnostic'
 }
 

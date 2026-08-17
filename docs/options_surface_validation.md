@@ -13,15 +13,8 @@ The first command is the new engine suite. The second also runs the
 legacy scanner unit tests (isolated prototype math) plus the migrated
 API adapter tests.
 
-Last run (2026-08-16 display-state pass): **69 passed**.
-
-Frontend typecheck:
-
-```powershell
-.\frontend\node_modules\.bin\tsc -p frontend\tsconfig.app.json --noEmit
-```
-
-Last run: clean.
+Last run (2026-08-17 constrained-smile pass): **64 passed** in this
+directory; see the fail-closed section for the combined counts.
 
 ## Mandatory numerical gates
 
@@ -41,10 +34,17 @@ Last run: clean.
 | 12 | Quote reason codes | `test_quality_reason_codes` |
 | 13 | API contract | `test_api_contract.py` |
 | 14 | Frozen live-style fixture | `test_service.py` + synthetic Deribit-like chain |
+| 15 | Constrained SVI recovery / robustness | `test_constrained_svi.py` |
+| 16 | No silent PCHIP fallback | `test_no_silent_pchip_fallback` |
+| 17 | Aug. 21 frozen honesty (PCHIP still fails) | `test_frozen_aug21_pchip_failure_and_constrained_honesty` |
 
 Rejected densities emit no headline percentiles
 (`test_rejected_density_has_no_headline_quantiles`,
 `test_sparse_book_fails_closed`).
+
+A smooth constrained fit is not required to recover accepted knots
+exactly. That is PCHIP’s property (`test_pchip_exact_at_knots`) and
+is why PCHIP is no longer the served density model.
 
 ## Tolerances
 
@@ -74,6 +74,30 @@ It **does**:
 
 - report raw negative mass
 - omit percentiles when `density.status = rejected`
-- label `tv_pchip` as `diagnostic` and `svi_raw` as `research`
+- label `constrained_svi` as `diagnostic_candidate`, `tv_pchip` as
+  `diagnostic`, and `svi_raw` as `research`
+- refuse to select PCHIP or raw SVI for density serving
 - mark maturity/`k` queries outside the observed range as
   `extrapolated` / unavailable
+
+Last run (2026-08-17 constrained-smile pass): **64 passed** in
+`project/tests/options_surface`; **93 passed** with the scanner
+adapter; full backend **289 passed, 1 skipped**.
+
+Frontend:
+
+```powershell
+.\frontend\node_modules\.bin\tsc -p frontend\tsconfig.app.json --noEmit
+node frontend\scripts\check-options-surface-display.mjs
+node frontend\scripts\check-options-surface-serving.mjs
+```
+
+Last run: clean.
+
+Harness:
+
+```powershell
+.\.venv\Scripts\python.exe -m project.scripts.run_smile_calibration_harness
+```
+
+Artifacts: `runtime/options_surface_debug/calibration_harness/`.

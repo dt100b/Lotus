@@ -6,6 +6,7 @@ import {
   REJECTED_DENSITY_TITLE,
   RESEARCH_CONVEXITY_NOTICE,
   SERVED_CONVEXITY_REASON,
+  SERVED_CONSTRAINED_SMILE_CAPTION,
   SERVED_PCHIP_CAPTION,
   densityAnalyticsEligible,
   densityIsRejected,
@@ -68,7 +69,9 @@ export function describeSurfaceUi(
   const eligible = densityAnalyticsEligible(scan)
   const rejected = densityIsRejected(scan)
   const diagnostic = scan.display.servedFitterGrade === 'diagnostic'
+    || scan.display.servedFitterGrade === 'diagnostic_candidate'
     || scan.display.servedFitterName === 'tv_pchip'
+    || scan.display.servedFitterName === 'constrained_svi'
     || scan.display.smileStatus === 'degraded'
     || scan.display.smileStatus === 'research'
   const source = formatForwardSource(scan.selection.forwardSource)
@@ -190,6 +193,7 @@ function buildLegend(
 }
 
 export function servedFitterCaption(scan: Pick<IvSignalScan, 'display'>): string {
+  if (scan.display.servedFitterName === 'constrained_svi') return SERVED_CONSTRAINED_SMILE_CAPTION
   if (scan.display.servedFitterName === 'tv_pchip') return SERVED_PCHIP_CAPTION
   return `Served ${scan.display.servedFitterGrade} interpolant: ${scan.display.servedFitterName}`
 }

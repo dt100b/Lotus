@@ -24,8 +24,15 @@ Deprecated adapter: `GET /api/v1/iv-signal-scan` (directional fields retired).
 | `analytics` | object | Descriptive metrics |
 | `validation` | object | Status + arb + reasons |
 | `model_status` | enum | `accepted` `degraded` `rejected` `research` |
-| `fitter_name` | string | `tv_pchip` or `svi_raw` |
-| `fitter_grade` | enum | `production` `diagnostic` `research` |
+| `fitter_name` | string | `constrained_svi`, `tv_pchip`, or `svi_raw` |
+| `fitter_grade` | enum | `production` `diagnostic` `diagnostic_candidate` `research` |
+| `selection_reason` | string | Why the served candidate was chosen or rejected |
+| `fit_converged` | bool | Optimizer / multi-start produced a finite smile |
+| `fit_residual_summary` | object | RMS, weighted RMS, max residual, residual budget |
+| `served_call_monotone` | bool? | Uniform-`K` Black-76 monotone on the density grid |
+| `served_call_convex` | bool? | Uniform-`K` Black-76 convex on the density grid |
+| `served_density_grid` | int? | Serving-grid size used for the call-curve gates |
+| `selected_model_status` | string | `selected` `explicit` `rejected` `not_evaluated` |
 | `display` | object | Explicit customer-facing state. Frontends must not infer this from nulls. |
 | `feed` | object | Ticker transport health |
 | `freshness` | object | Snapshot age vs threshold |
@@ -48,8 +55,22 @@ Deprecated adapter: `GET /api/v1/iv-signal-scan` (directional fields retired).
 | `metric_eligibility` | list | Per-metric `{metric, available, reason_code, reason}` |
 
 A smile can be `degraded` while density is `rejected`. That combination
-yields `surface_display_status = rejected`. A diagnostic fitter cannot
-produce `ready`.
+yields `surface_display_status = rejected`. A diagnostic fitter or
+`diagnostic_candidate` cannot produce `ready`.
+
+`fitter_grade = diagnostic_candidate` means the served model passed
+the current serving gates on this book and is still provisional. It
+is not a production promotion. Customer copy is “Market-implied
+distribution — diagnostic fit” / “Served constrained smile —
+diagnostic candidate.” It must not say arbitrage-free or
+production-grade.
+
+Residuals are in total variance unless a field is named `*_iv`.
+A smooth constrained fit is *supposed* to differ from individual
+mark IVs; `fit_residual_summary` records how far, and
+`residual_budget_ok` says whether that distance is still consistent
+with quote quality. `candidate_comparison` is developer/snapshot
+only and never changes customer `density_status` for a research row.
 
 ### Metric eligibility
 

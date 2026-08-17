@@ -504,7 +504,7 @@ class OptionsSurfaceSmile(BaseModel):
     synthetic: list[OptionsSurfaceSmilePoint]
     fit: list[OptionsSurfaceSmilePoint]
     fitter_name: str
-    fitter_grade: Literal["production", "diagnostic", "research"]
+    fitter_grade: Literal["production", "diagnostic", "diagnostic_candidate", "research"]
     status: Literal["accepted", "degraded", "rejected", "research"]
     residual_rms: float | None = None
     optimizer_status: str
@@ -599,16 +599,27 @@ class OptionsSurfaceDisplayState(BaseModel):
     failed_checks: list[str]
     metric_eligibility: list[OptionsSurfaceMetricEligibility]
     served_fitter_name: str = "tv_pchip"
-    served_fitter_grade: Literal["production", "diagnostic", "research"] = "diagnostic"
+    served_fitter_grade: Literal["production", "diagnostic", "diagnostic_candidate", "research"] = "diagnostic"
     research_fitter_name: str | None = None
     research_failed_checks: list[str] = Field(default_factory=list)
     research_human_reason: str | None = None
     customer_warning_scope: Literal["served", "research", "none"] = "none"
 
 
+class OptionsSurfaceResidualSummary(BaseModel):
+    rms: float | None = None
+    weighted_rms: float | None = None
+    max_abs: float | None = None
+    max_abs_k: float | None = None
+    max_abs_iv: float | None = None
+    weighted_iv_rms: float | None = None
+    residual_budget: float | None = None
+    residual_budget_ok: bool | None = None
+
+
 class OptionsSurfaceResearchCandidate(BaseModel):
     fitter_name: str
-    fitter_grade: Literal["production", "diagnostic", "research"]
+    fitter_grade: Literal["production", "diagnostic", "diagnostic_candidate", "research"]
     status: Literal["accepted", "degraded", "rejected", "research"]
     call_monotone: bool
     call_convex: bool
@@ -659,9 +670,16 @@ class OptionsSurfaceResponse(BaseModel):
     validation: OptionsSurfaceValidation
     model_status: Literal["accepted", "degraded", "rejected", "research"]
     fitter_name: str
-    fitter_grade: Literal["production", "diagnostic", "research"]
+    fitter_grade: Literal["production", "diagnostic", "diagnostic_candidate", "research"]
     display: OptionsSurfaceDisplayState
     research: OptionsSurfaceResearchCandidate | None = None
+    selection_reason: str | None = None
+    fit_residual_summary: OptionsSurfaceResidualSummary | None = None
+    fit_converged: bool | None = None
+    served_call_monotone: bool | None = None
+    served_call_convex: bool | None = None
+    served_density_grid: int | None = None
+    selected_model_status: str | None = None
     feed: IvSignalFeedHealth
     freshness: IvSignalFreshness
     warnings: list[str]

@@ -86,20 +86,38 @@ weight.
 - Forward delta from Black-76. 25-delta strikes are **roots of the
   model delta equation**, not a normal-quantile shortcut.
 
-Two candidate fitters:
+Three candidate fitters:
 
 | Name | Space | Grade | Role |
 | --- | --- | --- | --- |
-| `tv_pchip` | interpolating PCHIP in `(k, w)` | `diagnostic` | Served baseline. Exact at accepted knots. Does not invent wings. |
-| `svi_raw` | Gatheral raw SVI in `w(k)` | `research` | Compared, not served. Convergence is not no-arbitrage. |
+| `constrained_svi` | constrained raw SVI in `w(k)` | `diagnostic_candidate` | Served when it passes serving gates and the residual budget. Not production-promoted. |
+| `tv_pchip` | interpolating PCHIP in `(k, w)` | `diagnostic` | Diagnostic baseline only. Exact at accepted knots. Never selected for density serving. |
+| `svi_raw` | unconstrained Gatheral raw SVI | `research` | Compared, not served. Convergence is not no-arbitrage. |
 
-`tv_pchip` is **not production-ready**. Promotion requires clean
-butterfly and calendar reports on frozen live-style fixtures, plus a
-documented residual budget. Until then every served surface is at best
-`degraded` even when the density validates.
+`constrained_svi` fits a consensus smile. It is allowed — and expected
+— to miss individual noisy mark IVs. Residuals are reported against a
+documented bid/ask-IV budget. A passing constrained fit is **not**
+labelled arbitrage-free or production-grade.
+
+`tv_pchip` remains available as the exact interpolant benchmark. It
+follows noisy live marks too closely, so its Black-76 call curve is
+often non-convex. That is expected PCHIP behaviour and is not a reason
+to loosen gates. There is no silent PCHIP fallback.
+
+A diagnostic candidate cannot produce `surface_display_status = ready`
+even when `density_status` is `accepted`. Promotion to `production`
+requires a later, frozen-snapshot decision.
 
 No IV clipping. `w ≤ 0` is a diagnostic failure. Queries outside
-`[k_min, k_max]` return `extrapolated` / unavailable.
+`[k_min, k_max]` return `extrapolated` / unavailable. No invented
+wings are served.
+
+Selection, in order: the candidate must converge and meet coverage
+floors; it must pass call monotone/convex on the uniform-`K` serving
+grid plus the existing density gates; it must meet the residual
+budget. If more than one serving-eligible model exists, prefer the
+simpler documented candidate. In this pass only `constrained_svi` is
+serving-eligible. If it fails, the surface stays rejected.
 
 ## 7. Cross-expiry interpolation
 

@@ -12,7 +12,7 @@ export type MetricEligibility = {
 }
 
 export type WarningScope = 'served' | 'research' | 'none'
-export type FitterGrade = 'production' | 'diagnostic' | 'research'
+export type FitterGrade = 'production' | 'diagnostic' | 'diagnostic_candidate' | 'research'
 
 export type SurfaceDisplayState = {
   quoteStatus: QuoteStatus
@@ -56,6 +56,8 @@ export const DIAGNOSTIC_SMILE_CAPTION =
 export const DIAGNOSTIC_MOVE_LABEL = 'Diagnostic smile-implied 1σ move'
 
 export const SERVED_PCHIP_CAPTION = 'Served diagnostic interpolant: tv_pchip'
+
+export const SERVED_CONSTRAINED_SMILE_CAPTION = 'Served constrained smile — diagnostic candidate'
 
 export const RESEARCH_CONVEXITY_NOTICE =
   'Research SVI candidate failed convexity diagnostics; it is not used for the displayed surface.'

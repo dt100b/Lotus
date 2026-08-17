@@ -1,6 +1,6 @@
 # Options Surface Implementation Report
 
-Date: 2026-08-16
+Date: 2026-08-17 (constrained-smile pass; original rebuild 2026-08-16)
 
 ## 1. What was built
 
@@ -29,7 +29,8 @@ Deribit WS ticker cache          Deribit REST future book
                          ▼
               normalization.otm     (same F_T)
                          ▼
-              surface.smile         (tv_pchip diagnostic / svi_raw research)
+              surface.smile         (constrained_svi diagnostic candidate;
+                                     tv_pchip diagnostic; svi_raw research)
                          ▼
               distribution.black76 + B–L + validate
                          ▼
@@ -91,8 +92,10 @@ Deribit WS ticker cache          Deribit REST future book
 | Quote reason codes | **Replaced** silent drop counts |
 | LONG/SHORT votes, outlook hysteresis, 0DTE directional gate | **Retired** from API/UI |
 | Prototype sliders / synthetic-backtest hooks | **Isolated**; not in the production path |
-| `tv_pchip` production promotion | **Deferred** — still `diagnostic` |
-| Constrained SVI/SSVI | **Deferred** — `svi_raw` is `research` |
+| `tv_pchip` production promotion | **Deferred** — diagnostic baseline only |
+| Constrained SVI serving candidate | **Added** — `constrained_svi`, grade `diagnostic_candidate` |
+| Constrained SVI/SSVI production promotion | **Deferred** |
+| Full SSVI surface / wing extrapolation | **Deferred** |
 | Futures on the option WebSocket | **Deferred** — REST book-summary |
 | ETH | **Deferred** — interfaces are currency-generic |
 | True historical evaluation | **Deferred** — not a backtest |
@@ -103,7 +106,7 @@ Deribit WS ticker cache          Deribit REST future book
 .\.venv\Scripts\python.exe -m pytest project/tests/options_surface project/tests/test_iv_signal_scanner.py -q
 ```
 
-Result: **69 passed** (2026-08-16 display-state pass).
+Result: **93 passed** (2026-08-17 constrained-smile pass, including harness).
 
 ```
 .\frontend\node_modules\.bin\tsc -p frontend\tsconfig.app.json --noEmit
@@ -119,10 +122,13 @@ production-ready.
 
 ## 6. Known limitations
 
-- Served fitter is **diagnostic**. Overall `model_status` is therefore
-  `degraded` even on a clean flat-vol book with a matching future.
-- SVI is research-only. A butterfly failure on a fitted SVI does not
-  block the PCHIP baseline.
+- Served fitter is **`constrained_svi` / `diagnostic_candidate`**.
+  Overall `model_status` is therefore `degraded` even on a clean
+  flat-vol book with a matching future and an accepted density.
+- `tv_pchip` is a diagnostic baseline only. It is never selected for
+  density serving, including when it happens to pass the serving grid.
+- `svi_raw` is research-only. A butterfly failure on raw SVI cannot
+  reject or contaminate a passing constrained candidate.
 - Density lives only inside the observed `k` range. Far-tail mass is a
   truncation warning, not an invented wing.
 - `r = 0` in Black-76.
@@ -164,8 +170,9 @@ Status is `degraded` only because the served fitter is diagnostic.
     "tenor_bucket": "0_2_dte"
   },
   "model_status": "degraded",
-  "fitter_name": "tv_pchip",
-  "fitter_grade": "diagnostic"
+  "fitter_name": "constrained_svi",
+  "fitter_grade": "diagnostic_candidate",
+  "selection_reason": "selected_constrained_svi_diagnostic_candidate"
 }
 ```
 
@@ -211,7 +218,7 @@ Headline percentiles are absent. The UI shows “Surface not accepted”.
 | `k = ln(K/F)`, `w = σ²T` | `surface/coordinates.py` |
 | 25Δ by solving model delta | `solve_delta_strike` + test |
 | Quality-weighted fit, distinct origins | `weights.py`, `SmilePoint.origin` |
-| Two candidate fitters | `tv_pchip` diagnostic, `svi_raw` research |
+| Three candidate fitters | `constrained_svi` diagnostic candidate (served), `tv_pchip` diagnostic, `svi_raw` research |
 | No silent IV/density clip | density validation, no `np.clip` on IV |
 | Calendar interpolation, no T extrapolation | `surface/interpolate.py` |
 | B–L fail-closed | `distribution/validate.py` |
@@ -233,9 +240,11 @@ Headline percentiles are absent. The UI shows “Surface not accepted”.
 - Every result has data/model quality (`forward.source_quality`,
   `model_status`, `fitter_grade`).
 - Invalid densities fail closed.
-- Validation suite: 69 options-surface tests; 265 passed, 1 skipped in the full backend suite.
-- Remaining research-grade component: **`tv_pchip` is diagnostic;
-  `svi_raw` is research. Neither is production-promoted.**
+- Validation suite: 64 options-surface tests in isolation; 93 with
+  the scanner adapter; 289 passed, 1 skipped in the full backend suite.
+- Remaining research-grade component: **`constrained_svi` is a
+  `diagnostic_candidate`. It is not production-promoted. `tv_pchip`
+  is diagnostic-only. `svi_raw` is research.**
 
 ## 10. Live rejection follow-up (2026-08-16)
 
@@ -304,17 +313,90 @@ Live API was restarted on :8000. A subsequent fetch of
 snapshot remains the rejected-density artifact. No browser MCP was
 available; rejected UX is covered by fixtures and adapter tests.
 
-### Still deferred
+### Still deferred (as of the 2026-08-16 UX pass)
 
 - PCHIP production promotion
-- Constrained SVI/SSVI
+- Constrained SVI/SSVI production promotion (candidate now exists)
 - Futures on the option WebSocket
 - ETH
 - True historical evaluation
 - No validation-threshold loosening
-- Browser click-through of the exact rejected-density screenshot
-  state: no browser MCP in this session. The rejected payload is
-  covered by fixtures + API adapter tests. After API restart the
-  live Aug 21 book had moved to `density_status=accepted` /
-  `surface_display_status=degraded` (smile still not convex). The
-  frozen 23:00 UTC snapshot remains the rejected artifact.
+
+## 11. Constrained smile calibration (2026-08-17)
+
+### Fitted model
+
+Served candidate: **`constrained_svi`**, raw Gatheral SVI in
+\(w(k)=a+b[\rho(k-m)+\sqrt{(k-m)^2+\sigma^2}]\).
+
+Grade: `diagnostic_candidate`. This is **not** a production
+promotion.
+
+### Constraints and validation
+
+- Parameter bounds, Lee moment \(b(1+|\rho|)\le 4-\varepsilon\),
+  \(w>0\), Gatheral \(g(k)\ge -10^{-8}\) on a log-\(k\) constraint
+  grid.
+- Huber residual in total variance with existing quality weights,
+  plus small curvature / ridge regularisers.
+- Deterministic multi-start (Zeliade inner grid, flat ATM, near-ATM
+  slope, nested SSVI, no RNG).
+- Serving decision is the existing 401-point **uniform-\(K\)**
+  Black-76 call curve inside `extract_density`. Call monotone /
+  convex tolerances are unchanged. Mass, moment, CDF, digital, and
+  grid-convergence thresholds are unchanged.
+- Residual budget in IV points versus bid/ask half-spread and ATM
+  IV. Crossing the budget rejects density serving.
+- No clipping of \(w\), IV, \(C(K)\), \(q(K)\), or the CDF. No
+  density renormalization. No Gaussian headline smoothing. No
+  silent PCHIP fallback.
+
+### Fixture results
+
+| Fixture | `tv_pchip` | `svi_raw` | `constrained_svi` |
+| --- | --- | --- | --- |
+| Flat vol | accepted (exact) | accepted | accepted; served |
+| Known valid SVI | accepted | accepted | accepted; served |
+| Noisy known SVI | accepted (exact, tracks noise) | accepted | accepted; served; residual > 0 |
+| Outlier / kink | often non-convex, rejected | may pass | valid consensus or reject; never a non-convex served call curve |
+| Sparse 3-strike | fail closed | fail closed | fail closed |
+| Frozen Aug. 21 2026 23:00Z | **still non-convex** (`min_butterfly ≈ -0.725` at \(K≈56179\)) | serving-grid pass (research only) | **selected**; density **accepted**; mass \(0.987\); CDF monotone; residual budget ok; `surface_display_status=degraded` |
+
+The frozen Aug. 21 snapshot is now a **valid diagnostic-candidate
+distribution** under `constrained_svi`. PCHIP continues to
+demonstrate the known interpolant failure. Thresholds were not
+tuned to force this one book through.
+
+### Promotion status
+
+**Not ready for promotion beyond `diagnostic_candidate`.** One
+liquid weekly fixture plus synthetics is not a production corpus.
+SSVI surface calibration, wing extrapolation, and an explicit
+PCHIP fallback policy remain deferred.
+
+### Tests run
+
+```
+.\.venv\Scripts\python.exe -m pytest project/tests/options_surface -q
+.\.venv\Scripts\python.exe -m pytest project/tests/options_surface project/tests/test_iv_signal_scanner.py -q
+.\.venv\Scripts\python.exe -m pytest project/tests -q
+.\frontend\node_modules\.bin\tsc -p frontend\tsconfig.app.json --noEmit
+node frontend\scripts\check-options-surface-display.mjs
+node frontend\scripts\check-options-surface-serving.mjs
+.\.venv\Scripts\python.exe -m project.scripts.run_smile_calibration_harness
+```
+
+64 / 93 / 289 passed (1 skipped); tsc clean; display and serving
+copy checks passed.
+
+### Files added or updated in this pass
+
+- `docs/constrained_smile_calibration_plan.md`
+- `project/options_surface/surface/svi.py`
+- `project/options_surface/surface/constrained_svi.py`
+- `project/options_surface/surface/selection.py`
+- `project/options_surface/surface/harness.py`
+- `project/scripts/run_smile_calibration_harness.py`
+- `project/tests/options_surface/test_constrained_svi.py`
+- Orchestrator, display, API adapter/schemas, diagnostics, frontend
+  captions, methodology / dictionary / validation / this report.

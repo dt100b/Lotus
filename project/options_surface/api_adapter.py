@@ -36,6 +36,7 @@ from project.api.schemas import (
     OptionsSurfaceMetricEligibility,
     OptionsSurfaceQuoteSummary,
     OptionsSurfaceResearchCandidate,
+    OptionsSurfaceResidualSummary,
     OptionsSurfaceResponse,
     OptionsSurfaceSmile,
     OptionsSurfaceSmilePoint,
@@ -172,6 +173,13 @@ def to_options_surface_response(
         fitter_grade=result.fitter_grade.value,
         display=_display_schema(result),
         research=_research_schema(result),
+        selection_reason=result.selection_reason,
+        fit_residual_summary=_residual_schema(result.fit_residual_summary),
+        fit_converged=result.fit_converged,
+        served_call_monotone=result.served_call_monotone,
+        served_call_convex=result.served_call_convex,
+        served_density_grid=result.served_density_grid,
+        selected_model_status=result.selected_model_status,
         feed=feed,
         freshness=freshness,
         warnings=list(result.warnings),
@@ -583,6 +591,21 @@ def _display_schema(result: OptionsSurfaceResult) -> OptionsSurfaceDisplayState:
         customer_warning_scope=state.customer_warning_scope
         if state.customer_warning_scope in {"served", "research", "none"}
         else "none",
+    )
+
+
+def _residual_schema(summary) -> OptionsSurfaceResidualSummary | None:
+    if summary is None:
+        return None
+    return OptionsSurfaceResidualSummary(
+        rms=summary.rms,
+        weighted_rms=summary.weighted_rms,
+        max_abs=summary.max_abs,
+        max_abs_k=summary.max_abs_k,
+        max_abs_iv=summary.max_abs_iv,
+        weighted_iv_rms=summary.weighted_iv_rms,
+        residual_budget=summary.residual_budget,
+        residual_budget_ok=summary.residual_budget_ok,
     )
 
 

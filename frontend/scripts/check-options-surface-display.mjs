@@ -21,6 +21,7 @@ const mustInclude = [
   [display, 'Market-implied distribution — diagnostic fit'],
   [display, 'Diagnostic smile-implied 1σ move'],
   [display, 'Served diagnostic interpolant: tv_pchip'],
+  [display, 'Served constrained smile — diagnostic candidate'],
   [display, 'Research SVI candidate failed convexity diagnostics'],
   [display, 'Distribution unavailable: fitted call prices were not convex'],
   [outlook, 'DIAGNOSTIC_MOVE_LABEL'],
