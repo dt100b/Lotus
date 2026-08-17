@@ -44,6 +44,7 @@ def test_rejected_density_has_no_probability_headlines() -> None:
     eligible = eligibility_map(result.display)
     assert eligible["median"].available is False
     assert eligible["mode"].available is False
+    assert eligible["mode"].reason_code in {"density_rejected", "density_not_built", "mode_not_served"}
     assert eligible["central_range_50"].available is False
     assert eligible["central_range_90"].available is False
     assert eligible["tail_probabilities"].available is False
@@ -261,3 +262,24 @@ def test_forward_unavailable_is_unavailable_display() -> None:
     )
     assert state.surface_display_status is SurfaceDisplayStatus.UNAVAILABLE
     assert eligibility_map(state)["forward"].available is False
+
+
+def test_customer_mode_is_not_sourced_from_median() -> None:
+    result = build_options_surface(
+        flat_vol_chain(forward=FORWARD),
+        expiry=EXPIRY,
+        as_of_utc=AS_OF,
+        index_usd=INDEX,
+        futures=(listed_future(mid=FORWARD),),
+    )
+    eligible = eligibility_map(result.display)
+    assert eligible["mode"].available is False
+    assert eligible["mode"].reason_code == "mode_not_served"
+    if result.density is not None and result.display.density_status.value in {
+        "accepted",
+        "degraded",
+    }:
+        assert "p50" in result.density.quantiles
+        # The median remains available; it must not be aliased as a mode.
+        assert eligible["median"].available is True
+        assert result.density.quantiles["p50"] != getattr(result.density, "mode", None)

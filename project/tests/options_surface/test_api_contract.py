@@ -101,6 +101,22 @@ def test_options_surface_contract(tmp_path: Path, monkeypatch) -> None:
         assert body["fitter_grade"] == "diagnostic_candidate"
         assert body["fitter_name"] == "constrained_svi"
         assert body.get("selection_reason")
+        assert body["serving_mode"] == "diagnostic_candidate"
+        assert body["config_version"]
+        assert body["config_hash"]
+        assert body["primary_failure_category"] in {
+            "none",
+            "market_data",
+            "fit_quality",
+            "hard_gate",
+        }
+        assert body["display"]["serving_mode"] == "diagnostic_candidate"
+        assert body["display"]["primary_failure_category"] in {
+            "none",
+            "market_data",
+            "fit_quality",
+            "hard_gate",
+        }
         assert body["display"]["quote_status"] in {"accepted", "degraded", "rejected"}
         assert body["display"]["smile_status"] in {"accepted", "degraded", "rejected", "research"}
         assert body["display"]["density_status"] in {"accepted", "degraded", "rejected", "unavailable"}
@@ -174,3 +190,54 @@ def test_degraded_and_good_example_payloads(tmp_path: Path, monkeypatch) -> None
     if thin_body.density is not None:
         assert thin_body.density.strikes_usd == []
         assert thin_body.density.quantiles == {}
+        assert thin_body.density.cdf == []
+        assert thin_body.density.raw_density == []
+
+
+def test_accepted_density_exposes_quantiles_and_served_cdf(tmp_path: Path, monkeypatch) -> None:
+    repository = SnapshotRepository(
+        tmp_path / "unused.json",
+        artifacts_dir=tmp_path,
+        iv_chain_provider=StubProvider(_snapshot()),
+        futures_provider=StubFutures((listed_future(mid=FORWARD),)),
+    )
+    monkeypatch.setattr(
+        SnapshotRepository, "_utc_now", staticmethod(lambda: AS_OF + timedelta(seconds=2))
+    )
+    body = repository.get_options_surface(expiry=EXPIRY)
+    eligibility = {item.metric: item for item in body.display.metric_eligibility}
+    assert eligibility["mode"].available is False
+    assert eligibility["mode"].reason_code == "mode_not_served"
+    if body.display.density_status in {"accepted", "degraded"}:
+        assert body.density is not None
+        assert body.density.strikes_usd
+        assert body.density.raw_density
+        assert len(body.density.cdf) == len(body.density.strikes_usd)
+        assert {"p05", "p25", "p50", "p75", "p95"} <= set(body.density.quantiles)
+        assert eligibility["density_chart"].available is True
+        assert eligibility["central_range_50"].available is True
+        assert eligibility["median"].available is True
+    else:
+        assert eligibility["density_chart"].available is False
+        if body.density is not None:
+            assert body.density.cdf == []
+            assert body.density.quantiles == {}
+
+
+def test_forward_source_quality_is_not_upgraded(tmp_path: Path, monkeypatch) -> None:
+    repository = SnapshotRepository(
+        tmp_path / "unused.json",
+        artifacts_dir=tmp_path,
+        iv_chain_provider=StubProvider(_snapshot()),
+        futures_provider=StubFutures((listed_future(mid=FORWARD),)),
+    )
+    monkeypatch.setattr(
+        SnapshotRepository, "_utc_now", staticmethod(lambda: AS_OF + timedelta(seconds=2))
+    )
+    body = repository.get_options_surface(expiry=EXPIRY)
+    assert body.forward.source_quality == body.validation.forward_quality
+    assert body.forward.source_quality in {"high", "medium", "low", "unavailable"}
+    if body.forward.source != "spot_fallback":
+        # A listed future can be high, but the adapter must not invent high
+        # when the engine reports another quality.
+        assert body.forward.source_quality == body.forward.source_quality

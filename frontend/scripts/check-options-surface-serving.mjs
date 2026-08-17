@@ -21,22 +21,24 @@ function requireIncludes(source, needle, label) {
   }
 }
 
-requireIncludes(presentation, "chartTitle", 'presentation')
-requireIncludes(presentation, "warningScope", 'presentation')
-requireIncludes(presentation, "researchNotice", 'presentation')
+requireIncludes(presentation, 'chartTitle', 'presentation')
+requireIncludes(presentation, 'warningScope', 'presentation')
+requireIncludes(presentation, 'researchNotice', 'presentation')
+requireIncludes(presentation, 'showDensityChart: eligible', 'presentation')
+requireIncludes(presentation, 'showMode: false', 'presentation')
 requireIncludes(display, 'Market-implied distribution — diagnostic fit', 'display')
 requireIncludes(display, 'Served constrained smile — diagnostic candidate', 'display')
-requireIncludes(display, 'Risk-neutral distribution unavailable', 'display')
+requireIncludes(display, 'Distribution unavailable', 'display')
 requireIncludes(display, 'Research SVI candidate failed convexity diagnostics', 'display')
 requireIncludes(presentation, 'DIAGNOSTIC_DISTRIBUTION_TITLE', 'presentation')
 requireIncludes(presentation, 'REJECTED_DENSITY_TITLE', 'presentation')
 requireIncludes(presentation, 'RESEARCH_CONVEXITY_NOTICE', 'presentation')
-requireIncludes(presentation, 'unavailable · call-price convexity failed', 'presentation')
 requireIncludes(display, 'densityAnalyticsEligible', 'display')
 requireIncludes(quick, 'describeSurfaceUi', 'quickview')
 requireIncludes(quick, 'iv-signal-scanner__warning--research', 'quickview')
 requireIncludes(quick, 'servedFitterCaption', 'quickview')
-requireIncludes(quick, 'metricOf(scan, \'median\')', 'quickview')
+requireIncludes(quick, 'Method & quality', 'quickview')
+requireIncludes(quick, 'refreshFailed', 'quickview')
 requireIncludes(outlook, 'not a forward-quality score', 'outlook')
 requireIncludes(outlook, 'Distribution status is independent of the listed-future forward', 'outlook')
 
@@ -59,6 +61,10 @@ if (quick.includes('Risk-neutral terminal-price distribution') && !quick.include
 }
 if (outlook.toLowerCase().includes('arbitrage-controlled surface') || presentation.toLowerCase().includes('production-grade surface')) {
   console.error('production-grade or arbitrage-controlled copy leaked into customer presentation')
+  failed += 1
+}
+if (quick.includes("forwardSource === 'spot_fallback' ? 'low' : 'high'")) {
+  console.error('frontend still infers high quality from non-spot-fallback sources')
   failed += 1
 }
 

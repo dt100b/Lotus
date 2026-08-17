@@ -134,7 +134,8 @@ def test_research_svi_convexity_does_not_reject_passing_served_density() -> None
     assert state.customer_warning_scope == "research"
     eligible = eligibility_map(state)
     assert eligible["median"].available is True
-    assert eligible["mode"].available is True
+    assert eligible["mode"].available is False
+    assert eligible["mode"].reason_code == "mode_not_served"
     assert eligible["central_range_50"].available is True
 
 
