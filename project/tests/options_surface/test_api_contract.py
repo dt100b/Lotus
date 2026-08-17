@@ -98,7 +98,9 @@ def test_options_surface_contract(tmp_path: Path, monkeypatch) -> None:
         assert body["forward"]["forward_usd"] == FORWARD
         assert body["model_status"] in {"accepted", "degraded", "rejected", "research"}
         assert body["validation"]["summary"]
-        assert body["fitter_grade"] == "diagnostic"
+        assert body["fitter_grade"] == "diagnostic_candidate"
+        assert body["fitter_name"] == "constrained_svi"
+        assert body.get("selection_reason")
         assert body["display"]["quote_status"] in {"accepted", "degraded", "rejected"}
         assert body["display"]["smile_status"] in {"accepted", "degraded", "rejected", "research"}
         assert body["display"]["density_status"] in {"accepted", "degraded", "rejected", "unavailable"}

@@ -10,6 +10,7 @@ import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.optimize import least_squares
 
+from project.options_surface.distribution.black76 import black76_call, black76_forward_delta
 from project.options_surface.types import (
     FitterGrade,
     ModelStatus,
@@ -68,6 +69,35 @@ class FittedSmile:
         if total_var < 0:
             return None, QueryStatus.UNAVAILABLE
         return math.sqrt(total_var / self.time_to_expiry_years), status
+
+    def call_price(self, strike_usd: float, *, rate: float = 0.0) -> float | None:
+        if strike_usd <= 0 or self.forward_usd <= 0:
+            return None
+        iv, _status = self.iv(math.log(float(strike_usd) / self.forward_usd))
+        if iv is None:
+            return None
+        return black76_call(
+            forward_usd=self.forward_usd,
+            strike_usd=float(strike_usd),
+            time_to_expiry_years=self.time_to_expiry_years,
+            rate=rate,
+            sigma=iv,
+        )
+
+    def delta(self, strike_usd: float, option_type: str, *, rate: float = 0.0) -> float | None:
+        if strike_usd <= 0 or self.forward_usd <= 0:
+            return None
+        iv, _status = self.iv(math.log(float(strike_usd) / self.forward_usd))
+        if iv is None:
+            return None
+        return black76_forward_delta(
+            forward_usd=self.forward_usd,
+            strike_usd=float(strike_usd),
+            time_to_expiry_years=self.time_to_expiry_years,
+            rate=rate,
+            sigma=iv,
+            side=option_type,
+        )
 
 
 class TotalVariancePchipFitter:

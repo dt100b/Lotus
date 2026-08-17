@@ -17,6 +17,7 @@ from project.options_surface.market_data.ticker_adapter import quotes_from_scann
 from project.options_surface.normalization.otm import select_otm_observations
 from project.options_surface.normalization.quotes import classify_quotes
 from project.options_surface.service import build_options_surface
+from project.options_surface.surface.constrained_svi import ConstrainedSviFitter
 from project.options_surface.surface.fitters import RawSviFitter, TotalVariancePchipFitter
 from project.options_surface.surface.smile import calibrate_smile, solve_delta_strike
 from project.options_surface.timeutil import as_utc, hours_to_expiry, require_positive_year_fraction
@@ -230,6 +231,15 @@ def extra_diagnostics(
         expiry_utc=result.expiry_utc,
         fitter=RawSviFitter(),
     )
+    constrained, constrained_fit = calibrate_smile(
+        observed=observed,
+        synthetic=synthetic,
+        forward=result.forward,
+        time_to_expiry_years=result.time_to_expiry_years,
+        as_of_utc=result.as_of_utc,
+        expiry_utc=result.expiry_utc,
+        fitter=ConstrainedSviFitter(),
+    )
     density = result.density
     density_detail = _density_detail(result)
     ui = ui_provenance(result)
@@ -252,6 +262,7 @@ def extra_diagnostics(
         },
         "pchip": _smile_pack(pchip, pchip_fit),
         "svi_raw": _smile_pack(svi, svi_fit),
+        "constrained_svi": _smile_pack(constrained, constrained_fit),
         "density": density_detail,
         "ui_provenance": ui,
         "display": to_public_dict(result.display) if result.display else None,

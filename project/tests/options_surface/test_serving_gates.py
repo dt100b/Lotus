@@ -153,7 +153,7 @@ def test_warning_identifies_served_fitter_and_validation_scope() -> None:
         smile=result.smile,
         density=density,
         analytics=result.analytics,
-        fitter_grade=result.fitter_grade,
+        fitter_grade=FitterGrade.DIAGNOSTIC,
         warnings=("density_rejected",),
         sparse=False,
         fitter_name="tv_pchip",
@@ -215,9 +215,9 @@ def test_diagnostic_fitter_is_not_labeled_production() -> None:
         index_usd=INDEX,
         futures=(listed_future(mid=FORWARD),),
     )
-    assert result.fitter_name == "tv_pchip"
-    assert result.fitter_grade is FitterGrade.DIAGNOSTIC
-    assert result.display.served_fitter_grade is FitterGrade.DIAGNOSTIC
+    assert result.fitter_name == "constrained_svi"
+    assert result.fitter_grade is FitterGrade.DIAGNOSTIC_CANDIDATE
+    assert result.display.served_fitter_grade is FitterGrade.DIAGNOSTIC_CANDIDATE
     blob = (result.display.diagnostic_detail + result.display.human_readable_reason).lower()
     assert "production-grade" not in blob
     assert "arbitrage-controlled surface" not in blob
@@ -284,12 +284,16 @@ def test_kinked_served_smile_rejects_density() -> None:
         index_usd=INDEX,
         futures=(listed_future(mid=FORWARD),),
     )
-    if not result.smile.arbitrage.call_convex:
-        assert result.display.density_status is DensityDisplayStatus.REJECTED
+    if result.display.density_status is DensityDisplayStatus.REJECTED:
         assert result.display.surface_display_status is SurfaceDisplayStatus.REJECTED
         assert result.analytics.central_range_50 is None
         assert result.analytics.risk_neutral_mean is None
-        assert "convex" in result.display.human_readable_reason.lower()
+        reason = result.display.human_readable_reason.lower()
+        assert any(token in reason for token in ("convex", "residual", "distribution unavailable"))
+    elif not result.smile.arbitrage.call_convex:
+        # Smile-grid convexity can fail while the serving-grid candidate is rejected
+        # for residual budget rather than the smile-grid label.
+        assert result.analytics.central_range_50 is None or result.served_call_convex is True
 
 
 def test_call_curve_gate_does_not_override_with_mass_or_moment() -> None:

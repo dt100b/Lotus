@@ -228,6 +228,9 @@ def _with_notes(fitted: FittedSmile, notes: tuple[str, ...], status: ModelStatus
         k_max=fitted.diagnostics.k_max,
         extrapolated=fitted.diagnostics.extrapolated,
         notes=notes,
+        max_abs_residual=fitted.diagnostics.max_abs_residual,
+        fit_converged=fitted.diagnostics.fit_converged,
+        failure_reasons=fitted.diagnostics.failure_reasons,
     )
     return FittedSmile(
         fitter_name=fitted.fitter_name,

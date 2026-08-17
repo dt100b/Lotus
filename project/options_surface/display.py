@@ -77,6 +77,10 @@ CUSTOMER_REASONS: Mapping[str, str] = {
         "Distribution unavailable: fitted call prices were not monotone "
         "decreasing across the observed strike range."
     ),
+    "residual_budget_exceeded": (
+        "Distribution unavailable: the constrained smile residual exceeded "
+        "the documented quote-quality budget."
+    ),
 }
 
 RESEARCH_CONVEXITY_REASON = (
@@ -88,7 +92,9 @@ RESEARCH_MONOTONE_REASON = (
     "it is not used for the displayed surface."
 )
 SERVED_PCHIP_CAPTION = "Served diagnostic interpolant: tv_pchip"
+SERVED_CONSTRAINED_SMILE_CAPTION = "Served constrained smile — diagnostic candidate"
 DIAGNOSTIC_ANALYTICS_CAPTION = "Market-implied analytics — diagnostic fit"
+DIAGNOSTIC_DISTRIBUTION_CAPTION = "Market-implied distribution — diagnostic fit"
 
 FAILED_CHECK_LABELS: Mapping[str, str] = {
     "cdf_not_monotone": "Density CDF was not monotone",
@@ -100,6 +106,7 @@ FAILED_CHECK_LABELS: Mapping[str, str] = {
     "insufficient_grid": "Strike grid too coarse to validate a density",
     "call_not_convex_in_strike": "Call-price convexity failed",
     "call_not_decreasing_in_strike": "Call prices were not decreasing in strike",
+    "residual_budget_exceeded": "Fit residual exceeded the quote-quality budget",
     "insufficient_or_sparse_observations": "Insufficient two-sided wing quotes",
     "forward_unavailable": "No accepted options-implied forward",
 }
@@ -417,6 +424,7 @@ def _human_reason(
             "digital_atm",
             "insufficient_grid",
             "insufficient_wing_coverage",
+            "residual_budget_exceeded",
             "density_rejected",
             "insufficient_or_sparse_observations",
             "sparse_quotes",
@@ -430,6 +438,10 @@ def _human_reason(
         if density_status is DensityDisplayStatus.REJECTED:
             return CUSTOMER_REASONS["density_rejected"]
         return CUSTOMER_REASONS["density_not_built"]
+    if fitter_grade in {FitterGrade.DIAGNOSTIC_CANDIDATE, FitterGrade.DIAGNOSTIC, FitterGrade.RESEARCH}:
+        if density_status in {DensityDisplayStatus.ACCEPTED, DensityDisplayStatus.DEGRADED}:
+            return DIAGNOSTIC_DISTRIBUTION_CAPTION
+        return DIAGNOSTIC_ANALYTICS_CAPTION
     if fitter_grade is not FitterGrade.PRODUCTION:
         return DIAGNOSTIC_ANALYTICS_CAPTION
     if codes:

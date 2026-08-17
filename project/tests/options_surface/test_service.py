@@ -101,6 +101,7 @@ def test_baseline_fitter_is_diagnostic() -> None:
         index_usd=INDEX,
         futures=(listed_future(mid=FORWARD),),
     )
-    assert result.fitter_name == "tv_pchip"
-    assert result.fitter_grade.value == "diagnostic"
-    assert result.model_status is not ModelStatus.ACCEPTED or result.fitter_grade.value == "production"
+    assert result.fitter_name == "constrained_svi"
+    assert result.fitter_grade.value == "diagnostic_candidate"
+    assert result.model_status is not ModelStatus.ACCEPTED
+    assert result.display.surface_display_status.value != "ready"

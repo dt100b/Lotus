@@ -14,7 +14,10 @@ from project.options_surface.normalization.quotes import classify_quotes
 from project.options_surface.surface.fitters import (
     RawSviFitter,
     SmileFitter,
-    TotalVariancePchipFitter,
+)
+from project.options_surface.surface.selection import (
+    attach_density_status,
+    select_serving_candidate,
 )
 from project.options_surface.surface.smile import calibrate_smile
 from project.options_surface.timeutil import (
@@ -26,6 +29,7 @@ from project.options_surface.timeutil import (
 )
 from project.options_surface.types import (
     DensityResult,
+    DensityValidation,
     FitterGrade,
     ForwardEstimate,
     ModelStatus,
@@ -33,10 +37,10 @@ from project.options_surface.types import (
     NativeOptionQuote,
     OptionsSurfaceResult,
     QuoteQualitySummary,
-    RejectionReason,
     ResearchFitterReport,
     SourceQuality,
     SurfaceAnalytics,
+    ValidationGate,
     ValidationReport,
 )
 from project.options_surface.analytics.metrics import compute_analytics
@@ -119,18 +123,7 @@ def build_options_surface(
     all_obs = tuple(observations) + tuple(extra_rejects)
     observed = selected["observed"]
     synthetic = selected["synthetic"]
-    engine = fitter or TotalVariancePchipFitter()
-    smile, fitted = calibrate_smile(
-        observed=observed,
-        synthetic=synthetic,
-        forward=forward,
-        time_to_expiry_years=tau,
-        as_of_utc=as_of,
-        expiry_utc=expiry_utc,
-        fitter=engine,
-        rate=rate,
-    )
-
+    train = list(observed) + list(synthetic)
     min_strikes, min_side, _gap = tenor_coverage_floors(tau)
     sparse = (
         len(observed) < min_strikes
@@ -142,7 +135,40 @@ def build_options_surface(
     if sparse:
         warnings.append("insufficient_or_sparse_observations")
 
+    engine, selection_reason, comparison, constrained_result = select_serving_candidate(
+        train,
+        time_to_expiry_years=tau,
+        forward_usd=float(forward.forward_usd),
+        sparse=sparse,
+        serving_fitter=fitter,
+    )
+    smile, fitted = calibrate_smile(
+        observed=observed,
+        synthetic=synthetic,
+        forward=forward,
+        time_to_expiry_years=tau,
+        as_of_utc=as_of,
+        expiry_utc=expiry_utc,
+        fitter=engine,
+        rate=rate,
+    )
+    residual_summary = None if constrained_result is None else constrained_result.residual
+    fit_converged = bool(fitted.diagnostics.fit_converged)
+    if constrained_result is not None and engine.name == "constrained_svi":
+        residual_summary = constrained_result.residual
+        fit_converged = constrained_result.optimizer.converged
+    served_call_monotone = smile.arbitrage.call_monotone
+    served_call_convex = smile.arbitrage.call_convex
+    served_density_grid = None
+    if constrained_result is not None and engine.name == "constrained_svi":
+        served_call_monotone = constrained_result.served_call_monotone
+        served_call_convex = constrained_result.served_call_convex
+        served_density_grid = constrained_result.served_density_grid
+
     density: DensityResult | None = None
+    residual_budget_ok = True
+    if constrained_result is not None and engine.name == "constrained_svi":
+        residual_budget_ok = constrained_result.residual_budget_ok is not False
     if (
         fitted.knot_k
         and smile.diagnostics.status is not ModelStatus.REJECTED
@@ -167,6 +193,9 @@ def build_options_surface(
             k_min=fitted.k_min,
             k_max=fitted.k_max,
         )
+        if engine.name == "constrained_svi" and not residual_budget_ok:
+            density = _reject_density_residual_budget(density)
+            warnings.append("residual_budget_exceeded")
         if density.status is ModelStatus.REJECTED:
             warnings.append("density_rejected")
     elif sparse:
@@ -233,6 +262,15 @@ def build_options_surface(
             f"opposite_side_fallback:{selected['opposite_side_fallbacks']}"
         )
 
+    density_status = density.status if density is not None else ModelStatus.REJECTED
+    comparison = attach_density_status(
+        comparison,
+        served_name=engine.name,
+        density_status=density_status,
+    )
+    selected_model_status = "selected" if any(row.selected for row in comparison if row.fitter_name == engine.name) else (
+        "explicit" if fitter is not None else "rejected"
+    )
     return OptionsSurfaceResult(
         schema_version=SCHEMA_VERSION,
         as_of_utc=as_of,
@@ -255,6 +293,14 @@ def build_options_surface(
         rejected_observations=tuple(item for item in all_obs if not item.accepted),
         accepted_observations=tuple(item for item in all_obs if item.accepted),
         research=research,
+        selection_reason=selection_reason,
+        fit_residual_summary=residual_summary,
+        fit_converged=fit_converged,
+        served_call_monotone=served_call_monotone,
+        served_call_convex=served_call_convex,
+        served_density_grid=served_density_grid,
+        selected_model_status=selected_model_status,
+        candidate_comparison=comparison,
     )
 
 
@@ -308,6 +354,7 @@ def _combine_status(
         or density_status is ModelStatus.DEGRADED
         or forward_quality in {SourceQuality.LOW, SourceQuality.UNAVAILABLE}
         or fitter_grade is FitterGrade.DIAGNOSTIC
+        or fitter_grade is FitterGrade.DIAGNOSTIC_CANDIDATE
     ):
         return ModelStatus.DEGRADED
     return ModelStatus.ACCEPTED
@@ -376,6 +423,62 @@ def _research_candidate(
         violations=arb.violations,
         worst_convexity_strike=arb.worst_convexity_strike,
         notes=research_smile.diagnostics.notes,
+    )
+
+
+def _reject_density_residual_budget(density: DensityResult) -> DensityResult:
+    """Residual budget is a selection gate, not a substitute for convexity."""
+    validation = density.validation
+    gates = list(validation.failed_gates)
+    notes = list(validation.notes)
+    if not any(gate.code == "residual_budget_exceeded" for gate in gates):
+        gates.append(
+            ValidationGate(
+                code="residual_budget_exceeded",
+                criterion="weighted_iv_rms",
+                measured=None,
+                threshold=None,
+                comparison="gt",
+                location=None,
+                severity="reject",
+                message="Constrained smile residual exceeded the documented quote-quality budget",
+            )
+        )
+    if "residual_budget_exceeded" not in notes:
+        notes.append("residual_budget_exceeded")
+    if "density_rejected" not in notes:
+        notes.append("density_rejected")
+    rejected = DensityValidation(
+        status=ModelStatus.REJECTED,
+        method=validation.method,
+        mass=validation.mass,
+        raw_negative_mass=validation.raw_negative_mass,
+        nonnegative=validation.nonnegative,
+        cdf_monotone=validation.cdf_monotone,
+        cdf_start=validation.cdf_start,
+        cdf_end=validation.cdf_end,
+        forward_moment=validation.forward_moment,
+        forward_moment_error=validation.forward_moment_error,
+        edge_mass=validation.edge_mass,
+        truncation_warning=validation.truncation_warning,
+        grid_points=validation.grid_points,
+        grid_converged=validation.grid_converged,
+        digital_atm_error=validation.digital_atm_error,
+        notes=tuple(notes),
+        failed_gates=tuple(gates),
+    )
+    return DensityResult(
+        as_of_utc=density.as_of_utc,
+        expiry_utc=density.expiry_utc,
+        forward_usd=density.forward_usd,
+        status=ModelStatus.REJECTED,
+        strikes_usd=density.strikes_usd,
+        raw_density=density.raw_density,
+        cdf=density.cdf,
+        quantiles={},
+        mean=None,
+        validation=rejected,
+        display_smooth=density.display_smooth,
     )
 
 
@@ -550,4 +653,12 @@ def _rejected_result(
         display=display,
         rejected_observations=tuple(item for item in observations if not item.accepted),
         accepted_observations=tuple(item for item in observations if item.accepted),
+        selection_reason="forward_unavailable",
+        fit_residual_summary=None,
+        fit_converged=False,
+        served_call_monotone=None,
+        served_call_convex=None,
+        served_density_grid=None,
+        selected_model_status="rejected",
+        candidate_comparison=(),
     )

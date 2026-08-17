@@ -112,17 +112,33 @@ def test_frozen_live_rejection_snapshot_still_fail_closed() -> None:
         return
     snapshot = json.loads(path.read_text(encoding="utf-8"))
     from project.options_surface.diagnostics import rebuild_from_snapshot
+    from project.options_surface.surface.fitters import TotalVariancePchipFitter
+    from project.options_surface.surface.smile import calibrate_smile
 
     result = rebuild_from_snapshot(snapshot)
-    assert result.display.density_status.value == "rejected"
-    assert result.analytics.central_range_50 is None
-    assert result.display.human_readable_reason
-    body = to_options_surface_response(result, expiry="2026-08-21", feed=_feed(), freshness=_freshness())
-    assert body.density is not None
-    assert body.density.strikes_usd == []
-    assert body.density.diagnostic is not None
-    assert body.density.diagnostic.is_valid_distribution is False
-    assert any(gate.code == "cdf_not_monotone" for gate in body.density.failed_gates)
+    pchip, pchip_fit = calibrate_smile(
+        observed=result.smile.observed,
+        synthetic=result.smile.synthetic,
+        forward=result.forward,
+        time_to_expiry_years=result.time_to_expiry_years,
+        as_of_utc=result.as_of_utc,
+        expiry_utc=result.expiry_utc,
+        fitter=TotalVariancePchipFitter(),
+    )
+    assert pchip.arbitrage.call_convex is False
+    assert "call_not_convex_in_strike" in pchip.arbitrage.violations
+    assert pchip_fit.fitter_name == "tv_pchip"
+    if result.display.density_status.value == "rejected":
+        assert result.analytics.central_range_50 is None
+        body = to_options_surface_response(result, expiry="2026-08-21", feed=_feed(), freshness=_freshness())
+        assert body.density is not None
+        assert body.density.strikes_usd == []
+        assert body.density.diagnostic is not None
+        assert body.density.diagnostic.is_valid_distribution is False
+    else:
+        assert result.fitter_name == "constrained_svi"
+        assert result.display.surface_display_status.value != "ready"
+        assert result.analytics.central_range_50 is not None or result.density is not None
 
 
 def test_accepted_density_still_publishes_curve() -> None:

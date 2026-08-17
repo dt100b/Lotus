@@ -91,6 +91,7 @@ class SurfaceDisplayStatus(str, Enum):
 class FitterGrade(str, Enum):
     PRODUCTION = "production"
     DIAGNOSTIC = "diagnostic"
+    DIAGNOSTIC_CANDIDATE = "diagnostic_candidate"
     RESEARCH = "research"
 
 
@@ -248,6 +249,71 @@ class SmileFitDiagnostics:
     k_max: float | None
     extrapolated: bool
     notes: tuple[str, ...]
+    max_abs_residual: float | None = None
+    fit_converged: bool | None = None
+    failure_reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResidualSummary:
+    rms: float | None
+    weighted_rms: float | None
+    max_abs: float | None
+    max_abs_k: float | None
+    max_abs_iv: float | None
+    weighted_iv_rms: float | None
+    huber_loss: float | None
+    residual_budget: float | None
+    residual_budget_ok: bool | None
+    high_weight_max_abs_iv: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OptimizerDiagnostics:
+    converged: bool
+    status: str
+    n_starts: int
+    selected_start: int | None
+    nfev: int | None
+    message: str
+    start_notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PointResidual:
+    strike_usd: float
+    log_moneyness: float
+    weight: float
+    observed_w: float
+    fitted_w: float | None
+    residual_w: float | None
+    observed_iv: float
+    fitted_iv: float | None
+    residual_iv: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateComparison:
+    """Per-candidate diagnostic. Research rows cannot change customer status."""
+
+    fitter_name: str
+    fitter_grade: FitterGrade
+    status: ModelStatus
+    converged: bool
+    residual_rms: float | None
+    weighted_residual_rms: float | None
+    max_abs_residual: float | None
+    k_min: float | None
+    k_max: float | None
+    call_monotone: bool | None
+    call_convex: bool | None
+    min_butterfly: float | None
+    density_status: ModelStatus | None
+    residual_budget_ok: bool | None
+    selected: bool
+    reason_codes: tuple[str, ...]
+    notes: tuple[str, ...] = ()
+    eligible_for_density: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -465,3 +531,11 @@ class OptionsSurfaceResult:
     rejected_observations: tuple[QuoteObservation, ...] = field(default_factory=tuple)
     accepted_observations: tuple[QuoteObservation, ...] = field(default_factory=tuple)
     research: ResearchFitterReport | None = None
+    selection_reason: str = "not_evaluated"
+    fit_residual_summary: ResidualSummary | None = None
+    fit_converged: bool = False
+    served_call_monotone: bool | None = None
+    served_call_convex: bool | None = None
+    served_density_grid: int | None = None
+    selected_model_status: str = "not_evaluated"
+    candidate_comparison: tuple[CandidateComparison, ...] = ()
