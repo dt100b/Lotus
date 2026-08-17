@@ -83,7 +83,8 @@ only and never changes customer `density_status` for a research row.
 | `implied_move_1sd` | yes, as diagnostic smile-implied move | ATM IV valid |
 | `rr_25` / `bf_25` | yes, same gate | both 25Δ roots solve inside observed `k` |
 | `density_chart` | no | density `accepted` only |
-| `median` / `mode` | no | density `accepted` only |
+| `median` | no | density `accepted` only. Risk-neutral p50. Not rendered as mode |
+| `mode` | no | not served. The backend does not produce a validated density argmax; `p50` must not be mapped to mode |
 | `central_range_50` / `central_range_90` | no | density `accepted` only |
 | `tail_probabilities` / `digital_probabilities` | no | density `accepted` only |
 
@@ -140,6 +141,7 @@ converted on ingest.
 | `status` | `accepted` / `degraded` / `rejected` |
 | `method` | `breeden_litzenberger_black76` |
 | `raw_density` | Unclipped `q(K)` |
+| `cdf` | Unclipped served CDF on the same strike grid. Empty when rejected. Frontends must not reconstruct or renormalize it |
 | `quantiles` | Present only when status ≠ `rejected` |
 | `raw_negative_mass` | ∫ max(−q, 0) dK |
 | `mass` | ∫ q dK (raw) |
@@ -178,6 +180,28 @@ Rejected densities omit headline percentiles and tail probabilities.
 
 ## Persistence
 
+Live API latest-pointer (served result, schema `options_surface.v1`):
+
 Append-only JSONL: `project/runtime/dashboard_build/options_surface/snapshots.jsonl`
 
 Latest pointer: `latest_BTC_YYYY-MM-DD.json`
+
+Validation corpus (replayable capture, schema `options_surface_capture.v1`):
+
+```
+project/runtime/options_surface_snapshots/
+  YYYY/MM/captures-YYYY-MM-DD.jsonl
+  records/<snapshot_id>.json
+```
+
+The corpus record stores market inputs, normalization (including
+weight components), all candidate fits, serving mode / config hash,
+and the serving decision. Replay must use `market_inputs`, not the
+embedded `served_result`. Legacy `options_surface.v1` lines are
+identified and not mixed into capture totals.
+
+| Additive field | Meaning |
+| --- | --- |
+| `serving_mode` | `diagnostic_candidate` `shadow_compare` `disabled` |
+| `config_version` / `config_hash` | Versioned serving configuration marker |
+| `primary_failure_category` | `none` `market_data` `fit_quality` `hard_gate` |
