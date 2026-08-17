@@ -1,6 +1,6 @@
-import type { IvSignalScan } from '@/api/ivSignalScanner'
-import type { SurfaceDisplayState } from '@/data/optionsSurfaceDisplay'
-import { DIAGNOSTIC_DENSITY_LABEL } from '@/data/optionsSurfaceDisplay'
+import type { IvSignalScan } from '../api/ivSignalScanner'
+import type { SurfaceDisplayState } from './optionsSurfaceDisplay'
+import { DIAGNOSTIC_DENSITY_LABEL } from './optionsSurfaceDisplay'
 
 const idle = { signal: 'NO_TRADE' as const, pUp: 0, pDown: 0, difference: 0 }
 
@@ -35,6 +35,11 @@ const baseDisplay = (overrides: Partial<SurfaceDisplayState> = {}): SurfaceDispl
   researchFailedChecks: ['Research SVI candidate failed convexity diagnostics; it is not used for the displayed surface.'],
   researchHumanReason: 'Research SVI candidate failed convexity diagnostics; it is not used for the displayed surface.',
   customerWarningScope: 'served',
+  servingMode: 'diagnostic_candidate',
+  configVersion: 'surface_serving.v1',
+  configHash: 'fixture',
+  primaryFailureCategory: 'hard_gate',
+  residualBudgetOk: null,
   ...overrides,
 })
 
@@ -51,6 +56,7 @@ function scanFixture(overrides: Partial<IvSignalScan> = {}): IvSignalScan {
     smile: {
       points: [
         { strike: 55000, iv: 0.52, ivPercent: 52, logMoneyness: -0.13, delta: -0.12, optionSide: 'put', classification: 'preferred', source: 'put_otm_mark_iv', synthetic: false, bidIv: 0.48, askIv: 0.56, markIv: 0.52 },
+        { strike: 62885, iv: 0.27, ivPercent: 27, logMoneyness: 0, delta: 0.5, optionSide: 'merged', classification: 'synthetic', source: 'synthetic_atm', synthetic: true, bidIv: null, askIv: null, markIv: 0.27 },
         { strike: 68000, iv: 0.28, ivPercent: 28, logMoneyness: 0.08, delta: 0.12, optionSide: 'call', classification: 'preferred', source: 'call_otm_mark_iv', synthetic: false, bidIv: 0.26, askIv: 0.30, markIv: 0.28 },
       ],
       fit: [
@@ -61,6 +67,7 @@ function scanFixture(overrides: Partial<IvSignalScan> = {}): IvSignalScan {
       metrics: { rr25: -2.2, bf25: 0.5, atmIv: 0.25, iv25Call: 0.248, iv25Put: 0.271, deltaAxisAvailable: true },
     },
     density: [],
+    servedCdf: null,
     diagnosticDensity: {
       label: DIAGNOSTIC_DENSITY_LABEL,
       isValidDistribution: false,
@@ -92,7 +99,7 @@ function scanFixture(overrides: Partial<IvSignalScan> = {}): IvSignalScan {
       rejectedZeroBidRows: 5, rejectedCrossedQuoteRows: 0, rejectedStaleQuoteRows: 0, rejectedNonOpenRows: 0,
       rejectedMissingSizeRows: 0, rejectedInvalidIvMarketRows: 15, rejectedWideSpreadRows: 0,
       rejectedLowDeltaRows: 0, rejectedLowOpenInterestRows: 0, coverageCorridor: null, deltaCutoff: null,
-      impliedForward: 62885, forwardSource: 'matching_future', forwardPairCount: 3, otmReference: 62885,
+      impliedForward: 62885, forwardSource: 'matching_future', forwardSourceQuality: 'high', forwardPairCount: 3, otmReference: 62885,
       medianSelectedIvSpreadPercentagePoints: 0, maxSelectedIvSpreadPercentagePoints: 0,
       maxQuoteAgeSeconds: 30, oldestSelectedQuoteAgeSeconds: 0,
     },
@@ -152,11 +159,12 @@ export const readyDensity = scanFixture({
       ...baseDisplay().metricEligibility,
       density_chart: { available: true, reasonCode: null, reason: null },
       median: { available: true, reasonCode: null, reason: null },
-      mode: { available: true, reasonCode: null, reason: null },
+      mode: { available: false, reasonCode: 'mode_not_served', reason: 'Unavailable — a density mode is not served; p50 is the median, not a mode.' },
       central_range_50: { available: true, reasonCode: null, reason: null },
       central_range_90: { available: true, reasonCode: null, reason: null },
     },
   }),
+  servedCdf: [0.05, 0.50, 0.95],
   rnd: {
     ...scanFixture().rnd,
     percentile05: 56000,
@@ -187,18 +195,19 @@ export const degradedDensity = scanFixture({
       ...baseDisplay().metricEligibility,
       density_chart: { available: true, reasonCode: null, reason: null },
       median: { available: true, reasonCode: null, reason: null },
-      mode: { available: true, reasonCode: null, reason: null },
+      mode: { available: false, reasonCode: 'mode_not_served', reason: 'Unavailable — a density mode is not served; p50 is the median, not a mode.' },
       central_range_50: { available: true, reasonCode: null, reason: null },
       central_range_90: { available: true, reasonCode: null, reason: null },
     },
   }),
+  servedCdf: [0.05, 0.50, 0.95],
 })
 
 const passingDensityEligibility = {
   ...baseDisplay().metricEligibility,
   density_chart: { available: true, reasonCode: null, reason: null },
   median: { available: true, reasonCode: null, reason: null },
-  mode: { available: true, reasonCode: null, reason: null },
+  mode: { available: false, reasonCode: 'mode_not_served', reason: 'Unavailable — a density mode is not served; p50 is the median, not a mode.' },
   central_range_50: { available: true, reasonCode: null, reason: null },
   central_range_90: { available: true, reasonCode: null, reason: null },
 }
@@ -224,6 +233,7 @@ export const servedPassResearchFail = scanFixture({
     customerWarningScope: 'research',
     metricEligibility: passingDensityEligibility,
   }),
+  servedCdf: [0.05, 0.50, 0.95],
   rnd: {
     ...scanFixture().rnd,
     percentile05: 56000,
@@ -276,6 +286,7 @@ export const servedPassNoResearch = scanFixture({
     customerWarningScope: 'none',
     metricEligibility: passingDensityEligibility,
   }),
+  servedCdf: [0.05, 0.50, 0.95],
   rnd: {
     ...scanFixture().rnd,
     percentile05: 56000,
@@ -296,6 +307,7 @@ export const sparseRejectedSmile = scanFixture({
     surfaceDisplayStatus: 'rejected',
     reasonCodes: ['insufficient_or_sparse_observations'],
     humanReadableReason: 'Unavailable — insufficient two-sided wing quotes',
+    primaryFailureCategory: 'market_data',
     metricEligibility: {
       ...baseDisplay().metricEligibility,
       atm_iv: { available: false, reasonCode: 'smile_unavailable', reason: 'Unavailable — no accepted smile' },
@@ -304,6 +316,57 @@ export const sparseRejectedSmile = scanFixture({
       bf_25: { available: false, reasonCode: 'rr_unsolved', reason: 'Unavailable — 25Δ roots did not solve inside observed smile coverage' },
     },
   }),
+})
+
+export const residualBudgetRejected = scanFixture({
+  display: baseDisplay({
+    quoteStatus: 'degraded',
+    smileStatus: 'degraded',
+    densityStatus: 'rejected',
+    surfaceDisplayStatus: 'rejected',
+    reasonCodes: ['residual_budget_exceeded', 'density_rejected'],
+    humanReadableReason: 'Distribution unavailable: the constrained smile residual exceeded the documented quote-quality budget.',
+    failedChecks: ['Fit residual exceeded the quote-quality budget'],
+    primaryFailureCategory: 'fit_quality',
+    residualBudgetOk: false,
+    customerWarningScope: 'served',
+  }),
+})
+
+export const mediumQualityForward = scanFixture({
+  density: [
+    { strike: 55000, raw: 0.00001, smoothed: 0.00001 },
+    { strike: 62885, raw: 0.00004, smoothed: 0.00004 },
+    { strike: 68000, raw: 0.00001, smoothed: 0.00001 },
+  ],
+  servedCdf: [0.05, 0.50, 0.95],
+  diagnosticDensity: null,
+  selection: {
+    ...scanFixture().selection,
+    forwardSource: 'inverse_put_call_parity',
+    forwardSourceQuality: 'medium',
+  },
+  display: baseDisplay({
+    quoteStatus: 'degraded',
+    smileStatus: 'accepted',
+    densityStatus: 'accepted',
+    surfaceDisplayStatus: 'degraded',
+    reasonCodes: [],
+    humanReadableReason: 'Market-implied surface is ready for this expiry.',
+    failedChecks: [],
+    researchFailedChecks: [],
+    researchHumanReason: null,
+    customerWarningScope: 'none',
+    metricEligibility: passingDensityEligibility,
+  }),
+  rnd: {
+    ...scanFixture().rnd,
+    percentile05: 56000,
+    percentile25: 60000,
+    percentile50: 62885,
+    percentile75: 65000,
+    percentile95: 69000,
+  },
 })
 
 export const unavailableForward = scanFixture({

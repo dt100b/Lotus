@@ -1,6 +1,7 @@
 import type { IvSignalScan } from '@/api/ivSignalScanner'
 import {
-  DIAGNOSTIC_MOVE_LABEL,
+  ATM_IMPLIED_MOVE_LABEL,
+  CENTRAL_RANGE_TOOLTIP,
   densityAnalyticsEligible,
   densityIsRejected,
   formatCoverage,
@@ -9,7 +10,7 @@ import {
   statusLabel,
   unavailableValue,
 } from '@/data/optionsSurfaceDisplay'
-import { describeSurfaceUi } from '@/data/optionsSurfacePresentation'
+import { describeSurfaceUi, metricCardLabel } from '@/data/optionsSurfacePresentation'
 
 export type IvOutlookTone = 'neutral' | 'caution' | 'low' | 'high'
 
@@ -27,12 +28,11 @@ export function getIvScannerSummaryReads(
   refreshFailed: boolean,
 ): IvNamedRead[] {
   return [
+    getImpliedMoveRead(scan, refreshFailed),
     getSkewRead(scan, refreshFailed),
     getWingRichness(scan, refreshFailed),
-    getFitQuality(scan, refreshFailed),
-    getImpliedMoveRead(scan),
-    getCentralRangeRead(scan, '50'),
-    getCentralRangeRead(scan, '90'),
+    getCentralRangeRead(scan, '50', refreshFailed),
+    getCentralRangeRead(scan, '90', refreshFailed),
   ]
 }
 
@@ -60,7 +60,7 @@ export function getSkewRead(
   const eligibility = metricOf(scan, 'rr_25')
   if (refreshFailed) {
     return {
-      label: '25-delta risk reversal',
+      label: metricCardLabel('rr'),
       value: 'Unavailable',
       detail: 'Live book not current',
       tone: 'low',
@@ -70,7 +70,7 @@ export function getSkewRead(
   if (!eligibility.available) {
     const missing = unavailableValue(eligibility)
     return {
-      label: '25-delta risk reversal',
+      label: metricCardLabel('rr'),
       value: missing.value,
       detail: missing.detail,
       tone: 'low',
@@ -80,7 +80,7 @@ export function getSkewRead(
   const rr = scan.smile.metrics.rr25
   if (rr == null || !Number.isFinite(rr)) {
     return {
-      label: '25-delta risk reversal',
+      label: metricCardLabel('rr'),
       value: 'Unavailable',
       detail: 'Unavailable — 25Δ roots did not solve inside observed smile coverage',
       tone: 'caution',
@@ -104,7 +104,7 @@ export function getWingRichness(
   if (refreshFailed || !eligibility.available) {
     const missing = unavailableValue(eligibility)
     return {
-      label: '25-delta butterfly',
+      label: metricCardLabel('bf'),
       value: refreshFailed ? 'Unavailable' : missing.value,
       detail: refreshFailed ? 'Live book not current' : missing.detail,
       tone: 'caution',
@@ -114,7 +114,7 @@ export function getWingRichness(
   const bf = scan.smile.metrics.bf25
   if (bf == null || !Number.isFinite(bf)) {
     return {
-      label: '25-delta butterfly',
+      label: metricCardLabel('bf'),
       value: 'Unavailable',
       detail: 'Unavailable — 25Δ roots did not solve inside observed smile coverage',
       tone: 'caution',
@@ -154,58 +154,63 @@ export function getFitQuality(
   }
 }
 
-export function getImpliedMoveRead(scan: Pick<IvSignalScan, 'rnd' | 'expiry' | 'display'>): IvNamedRead {
+export function getImpliedMoveRead(
+  scan: Pick<IvSignalScan, 'rnd' | 'expiry' | 'display'>,
+  refreshFailed = false,
+): IvNamedRead {
   const eligibility = metricOf(scan, 'implied_move_1sd')
-  if (!eligibility.available) {
+  if (refreshFailed || !eligibility.available) {
     const missing = unavailableValue(eligibility)
     return {
-      label: DIAGNOSTIC_MOVE_LABEL,
-      value: missing.value,
-      detail: missing.detail,
+      label: ATM_IMPLIED_MOVE_LABEL,
+      value: refreshFailed ? 'Unavailable' : missing.value,
+      detail: refreshFailed ? 'Live book not current' : missing.detail,
       tone: 'low',
       title: 'F × (e^{σ_ATM √T} − 1) from the fitted ATM IV. This is not a distribution range.',
     }
   }
   return {
-    label: DIAGNOSTIC_MOVE_LABEL,
+    label: ATM_IMPLIED_MOVE_LABEL,
     value: formatExpectedMovePercent(scan.rnd),
     detail: `ATM IV · to ${formatExpiryShort(scan.expiry)} · not a distribution range`,
     tone: 'neutral',
     emphasis: true,
-    title: 'F × (e^{σ_ATM √T} − 1) up and F × (1 − e^{−σ_ATM √T}) down. Market-implied from the diagnostic smile, not a density percentile.',
+    title: 'F × (e^{σ_ATM √T} − 1) up and F × (1 − e^{−σ_ATM √T}) down. Market-implied from the fitted ATM IV, not a density percentile.',
   }
 }
 
 export function getCentralRangeRead(
   scan: Pick<IvSignalScan, 'rnd' | 'display'>,
   band: '50' | '90',
+  refreshFailed = false,
 ): IvNamedRead {
   const eligibility = metricOf(scan, band === '50' ? 'central_range_50' : 'central_range_90')
-  if (!eligibility.available || densityIsRejected(scan)) {
+  const label = metricCardLabel(band === '50' ? 'range50' : 'range90')
+  if (refreshFailed || !eligibility.available || densityIsRejected(scan)) {
     const missing = unavailableValue(eligibility)
     return {
-      label: band === '50' ? 'Market-implied central range' : 'Market-implied 90% range',
-      value: missing.value,
-      detail: missing.detail,
+      label,
+      value: refreshFailed ? 'Unavailable' : missing.value,
+      detail: refreshFailed ? 'Live book not current' : missing.detail,
       tone: 'low',
-      title: 'Quantiles of the validated risk-neutral terminal-price density. Withheld when the density is rejected.',
+      title: CENTRAL_RANGE_TOOLTIP,
     }
   }
   if (band === '50') {
     return {
-      label: 'Market-implied central range',
+      label,
       value: formatCompactStrikeRange(scan.rnd.percentile25, scan.rnd.percentile75),
       detail: 'Risk-neutral 25th–75th percentile',
       tone: 'neutral',
-      title: 'Quantiles of the validated risk-neutral terminal-price density. Withheld when the density is rejected.',
+      title: CENTRAL_RANGE_TOOLTIP,
     }
   }
   return {
-    label: 'Market-implied 90% range',
+    label,
     value: formatCompactStrikeRange(scan.rnd.percentile05, scan.rnd.percentile95),
     detail: 'Risk-neutral 5th–95th percentile',
     tone: 'neutral',
-    title: 'Q-measure tail range from the Breeden–Litzenberger density. Not a statistical confidence interval.',
+    title: CENTRAL_RANGE_TOOLTIP,
   }
 }
 

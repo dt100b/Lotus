@@ -1,26 +1,29 @@
-import type { IvSignalScan } from '@/api/ivSignalScanner'
+import type { IvSignalScan } from '../api/ivSignalScanner'
 import {
+  ATM_IMPLIED_MOVE_LABEL,
+  DENSITY_CHART_SUBTITLE,
+  DENSITY_CHART_TITLE,
   DIAGNOSTIC_ANALYTICS_CAPTION,
   DIAGNOSTIC_DISTRIBUTION_TITLE,
-  DIAGNOSTIC_MOVE_LABEL,
+  LIVE_DISTRIBUTION_TITLE,
+  REJECTED_DENSITY_BODY,
   REJECTED_DENSITY_TITLE,
   RESEARCH_CONVEXITY_NOTICE,
-  SERVED_CONVEXITY_REASON,
   SERVED_CONSTRAINED_SMILE_CAPTION,
   SERVED_PCHIP_CAPTION,
   densityAnalyticsEligible,
   densityIsRejected,
   formatCoverage,
+  formatForwardQuality,
+  formatLiveForwardSource,
   metricOf,
-} from '@/data/optionsSurfaceDisplay'
-
-function formatForwardSource(source: IvSignalScan['selection']['forwardSource']): string {
-  if (source === 'matching_future') return 'listed-future forward'
-  if (source === 'inverse_put_call_parity' || source === 'parity_pairs') return 'inverse-parity forward'
-  if (source === 'venue_underlying_price' || source === 'underlying_price') return 'venue underlying'
-  if (source === 'spot_fallback') return 'spot fallback (low quality)'
-  return 'forward source unknown'
-}
+  rejectedDensityExplanation,
+} from './optionsSurfaceDisplay'
+import {
+  emptyDensityLayers,
+  liveDensityLayers,
+  type DensityLayerFlags,
+} from './optionsSurfaceDensityGeometry'
 
 function formatExpiryShort(expiry: string): string {
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expiry)
@@ -33,13 +36,6 @@ function formatExpiryShort(expiry: string): string {
   }).format(date)
 }
 
-function formatExpectedMovePercent(rnd: Pick<IvSignalScan['rnd'], 'expectedMoveUp' | 'expectedMoveDown' | 'forward'>): string {
-  const dollars = (rnd.expectedMoveUp + rnd.expectedMoveDown) / 2
-  const percent = rnd.forward > 0 ? (dollars / rnd.forward) * 100 : 0
-  if (!(dollars > 0) || !Number.isFinite(percent)) return '—'
-  return `±${percent.toFixed(1)}%`
-}
-
 export type SurfaceLegendLine = {
   dimension: 'forward' | 'smile' | 'distribution'
   label: string
@@ -48,90 +44,102 @@ export type SurfaceLegendLine = {
 
 export type SurfacePresentation = {
   chartTitle: string
+  chartSubtitle: string
   heroKicker: string
   heroTitle: string
   heroKeyPhrase: string | null
   heroDetail: string
+  forwardLine: string | null
+  showLiveFreshness: boolean
   showDensityChart: boolean
   showMedian: boolean
   showMode: boolean
   showCentralRanges: boolean
+  showCentral50: boolean
+  showCentral90: boolean
+  layers: DensityLayerFlags
   customerNotice: string | null
   researchNotice: string | null
   warningScope: 'served' | 'research' | 'none'
+  rejectedExplanation: string | null
   legend: SurfaceLegendLine[]
 }
 
 export function describeSurfaceUi(
-  scan: Pick<IvSignalScan, 'display' | 'rnd' | 'expiry' | 'selection' | 'smile'>,
+  scan: Pick<IvSignalScan, 'display' | 'rnd' | 'expiry' | 'selection' | 'smile'> & Partial<Pick<IvSignalScan, 'freshness' | 'asOf' | 'underlying'>>,
   refreshFailed = false,
 ): SurfacePresentation {
-  const eligible = densityAnalyticsEligible(scan)
-  const rejected = densityIsRejected(scan)
-  const diagnostic = scan.display.servedFitterGrade === 'diagnostic'
-    || scan.display.servedFitterGrade === 'diagnostic_candidate'
-    || scan.display.servedFitterName === 'tv_pchip'
-    || scan.display.servedFitterName === 'constrained_svi'
-    || scan.display.smileStatus === 'degraded'
-    || scan.display.smileStatus === 'research'
-  const source = formatForwardSource(scan.selection.forwardSource)
-  const forwardQuality = scan.selection.forwardSource === 'spot_fallback' ? 'low quality' : 'high quality'
+  const eligible = !refreshFailed && densityAnalyticsEligible(scan)
+  const rejected = !refreshFailed && densityIsRejected(scan)
+  const source = formatLiveForwardSource(scan.selection.forwardSource)
+  const quality = formatForwardQuality(scan.selection.forwardSourceQuality)
   const expiry = formatExpiryShort(scan.expiry)
   const scope = scan.display.customerWarningScope
   const servedConvexity = scan.display.reasonCodes.includes('call_not_convex_in_strike')
   const customerNotice = customerFacingNotice(scan, refreshFailed, rejected, servedConvexity)
   const researchNotice = researchFacingNotice(scan, rejected)
+  const showCentral50 = eligible && metricOf(scan, 'central_range_50').available
+  const showCentral90 = eligible && metricOf(scan, 'central_range_90').available
+  const showForward = Number.isFinite(scan.rnd.forward)
+  const updated = formatUpdatedAge({
+    asOf: scan.asOf ?? '',
+    freshness: scan.freshness ?? { snapshotAgeSeconds: 0, thresholdSeconds: 180, isFresh: false },
+  })
+  const forwardLine = showForward
+    ? `Forward ${formatUsd(scan.rnd.forward)} · ${source} · ${quality}`
+    : null
 
-  let chartTitle = DIAGNOSTIC_DISTRIBUTION_TITLE
-  let heroKicker = DIAGNOSTIC_DISTRIBUTION_TITLE
-  let heroTitle = `${DIAGNOSTIC_MOVE_LABEL} ${formatExpectedMovePercent(scan.rnd)}`
-  let heroKeyPhrase: string | null = source
-  let heroDetail = `To ${expiry}`
-  if (eligible) {
-    const lo = scan.rnd.percentile25
-    const hi = scan.rnd.percentile75
-    if (Number.isFinite(lo) && Number.isFinite(hi)) {
-      heroDetail = `To ${expiry} · market-implied central 50% ${formatCompact(lo)}–${formatCompact(hi)}`
-    }
-  }
+  let chartTitle = DENSITY_CHART_TITLE
+  let chartSubtitle = DENSITY_CHART_SUBTITLE
+  let heroKicker: string = scan.underlying || 'BTC'
+  let heroTitle = LIVE_DISTRIBUTION_TITLE
+  let heroKeyPhrase: string | null = null
+  let heroDetail = `${scan.underlying || 'BTC'} · ${expiry} · ${updated}`
+  let rejectedExplanation: string | null = null
+
   if (refreshFailed) {
-    chartTitle = REJECTED_DENSITY_TITLE
+    chartTitle = LIVE_DISTRIBUTION_TITLE
+    chartSubtitle = 'Live options data is delayed'
     heroKicker = 'Options-implied forward'
     heroTitle = 'Surface delayed'
-    heroKeyPhrase = null
-    heroDetail = `Expiry ${expiry} · ${source} · live book not current`
+    heroDetail = `Expiry ${expiry} · live book not current`
   } else if (rejected) {
     chartTitle = REJECTED_DENSITY_TITLE
+    chartSubtitle = REJECTED_DENSITY_BODY
     heroKicker = REJECTED_DENSITY_TITLE
     heroTitle = REJECTED_DENSITY_TITLE
-    heroKeyPhrase = null
-    heroDetail = `Expiry ${expiry} · ${source} · ${forwardQuality}`
-    if (scan.display.humanReadableReason) {
-      heroDetail = `${heroDetail} · ${scan.display.humanReadableReason}`
-    }
-  } else if (!diagnostic) {
-    chartTitle = 'Market-implied distribution'
-    heroKicker = 'Market-implied distribution'
-    heroTitle = `${formatExpectedMovePercent(scan.rnd)} implied move`
-  } else {
-    heroKicker = DIAGNOSTIC_ANALYTICS_CAPTION
-    chartTitle = DIAGNOSTIC_DISTRIBUTION_TITLE
+    rejectedExplanation = rejectedDensityExplanation(scan)
+    heroDetail = rejectedExplanation
   }
 
   return {
     chartTitle,
+    chartSubtitle,
     heroKicker,
     heroTitle,
     heroKeyPhrase,
     heroDetail,
+    forwardLine,
+    showLiveFreshness: !refreshFailed && scan.freshness?.isFresh === true && Boolean(scan.asOf),
     showDensityChart: eligible,
-    showMedian: eligible && metricOf(scan, 'median').available,
-    showMode: eligible && metricOf(scan, 'mode').available,
-    showCentralRanges: eligible && metricOf(scan, 'central_range_50').available,
+    showMedian: false,
+    showMode: false,
+    showCentralRanges: showCentral50 || showCentral90,
+    showCentral50,
+    showCentral90,
+    layers: eligible
+      ? liveDensityLayers({
+        eligible,
+        showCentral50,
+        showCentral90,
+        showForward,
+      })
+      : emptyDensityLayers(),
     customerNotice,
     researchNotice,
     warningScope: refreshFailed ? 'served' : scope,
-    legend: buildLegend(scan, eligible, rejected),
+    rejectedExplanation,
+    legend: buildLegend(scan, eligible, rejected, refreshFailed, source, quality),
   }
 }
 
@@ -141,9 +149,9 @@ function customerFacingNotice(
   rejected: boolean,
   servedConvexity: boolean,
 ): string | null {
-  if (refreshFailed) return 'Live options data is delayed. Surface quality is shown as degraded.'
+  if (refreshFailed) return 'Live options data is delayed.'
   if (rejected || servedConvexity) {
-    if (servedConvexity) return SERVED_CONVEXITY_REASON
+    if (rejected) return rejectedDensityExplanation(scan)
     return scan.display.humanReadableReason || REJECTED_DENSITY_TITLE
   }
   return null
@@ -163,30 +171,25 @@ function buildLegend(
   scan: Pick<IvSignalScan, 'display' | 'selection'>,
   eligible: boolean,
   rejected: boolean,
+  refreshFailed: boolean,
+  source: string,
+  quality: string,
 ): SurfaceLegendLine[] {
-  const source = formatForwardSource(scan.selection.forwardSource)
-  const forwardQuality = scan.selection.forwardSource === 'spot_fallback' ? 'low quality' : 'high quality'
-  const fitter = scan.display.servedFitterName || 'tv_pchip'
-  const grade = scan.display.servedFitterGrade || 'diagnostic'
-  const smileValue = fitter === 'tv_pchip'
-    ? `${fitter} · ${grade}`
-    : `${fitter} · ${grade}`
-  let distributionValue = 'available · all serving checks passed'
-  if (rejected) {
-    if (scan.display.reasonCodes.includes('call_not_convex_in_strike')) {
-      distributionValue = 'unavailable · call-price convexity failed'
-    } else if (scan.display.reasonCodes.includes('call_not_decreasing_in_strike')) {
-      distributionValue = 'unavailable · call-price monotonicity failed'
-    } else {
-      distributionValue = 'unavailable · distribution validation failed'
-    }
-  } else if (scan.display.densityStatus === 'degraded') {
-    distributionValue = eligible
-      ? 'available · diagnostic serving checks passed'
-      : 'unavailable · distribution validation failed'
+  const smileAvailable = scan.display.smileStatus !== 'rejected'
+  let distributionValue = 'Available'
+  let smileValue = smileAvailable ? 'Available' : 'Unavailable'
+  let forwardValue = `${source} · ${quality}`
+  if (refreshFailed) {
+    forwardValue = 'Delayed'
+    smileValue = 'Delayed'
+    distributionValue = 'Delayed'
+  } else if (rejected) {
+    distributionValue = 'Unavailable'
+  } else if (!eligible) {
+    distributionValue = 'Unavailable'
   }
   return [
-    { dimension: 'forward', label: 'Forward', value: `${source.replace('listed-future forward', 'listed future')} · ${forwardQuality}` },
+    { dimension: 'forward', label: 'Forward', value: forwardValue },
     { dimension: 'smile', label: 'Smile', value: smileValue },
     { dimension: 'distribution', label: 'Distribution', value: distributionValue },
   ]
@@ -195,15 +198,71 @@ function buildLegend(
 export function servedFitterCaption(scan: Pick<IvSignalScan, 'display'>): string {
   if (scan.display.servedFitterName === 'constrained_svi') return SERVED_CONSTRAINED_SMILE_CAPTION
   if (scan.display.servedFitterName === 'tv_pchip') return SERVED_PCHIP_CAPTION
-  return `Served ${scan.display.servedFitterGrade} interpolant: ${scan.display.servedFitterName}`
+  return `Served ${scan.display.servedFitterGrade} smile: ${scan.display.servedFitterName}`
 }
 
 export function coverageCaption(scan: Pick<IvSignalScan, 'selection' | 'coverage'>): string {
   return formatCoverage(scan)
 }
 
-function formatCompact(value: number): string {
-  if (!Number.isFinite(value)) return '—'
-  if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}k`
-  return `$${Math.round(value)}`
+export function methodQualityRows(
+  scan: Pick<IvSignalScan, 'display' | 'selection' | 'coverage' | 'smile'>,
+): Array<{ label: string; value: string }> {
+  const residual = scan.display.residualBudgetOk
+  const residualLabel = residual == null ? 'n/a' : residual ? 'inside budget' : 'exceeded budget'
+  const gates = scan.display.failedChecks.length
+    ? scan.display.failedChecks.join(' · ')
+    : scan.display.densityStatus === 'accepted' || scan.display.densityStatus === 'degraded'
+      ? 'all serving checks passed'
+      : 'no density served'
+  const configId = [scan.display.configVersion, scan.display.configHash].filter(Boolean).join(' / ') || 'n/a'
+  const rows = [
+    { label: 'Served smile', value: servedFitterCaption(scan) },
+    { label: 'Fitter grade', value: scan.display.servedFitterGrade || 'diagnostic' },
+    { label: 'Residual-budget result', value: residualLabel },
+    { label: 'Quote coverage', value: formatCoverage(scan) },
+    { label: 'Serving-gate summary', value: gates },
+    { label: 'Model / config', value: configId },
+    {
+      label: 'Selected candidate',
+      value: `${scan.display.servedFitterName} · ${scan.display.servedFitterGrade} · ${scan.display.servingMode}`,
+    },
+  ]
+  if (scan.display.researchHumanReason || scan.display.researchFailedChecks.length) {
+    rows.push({
+      label: 'Research comparison',
+      value: scan.display.researchHumanReason || scan.display.researchFailedChecks.join(' · '),
+    })
+  }
+  if (scan.display.diagnosticDetail) {
+    rows.push({ label: 'Developer detail', value: scan.display.diagnosticDetail })
+  }
+  return rows
 }
+
+export function metricCardLabel(kind: 'move' | 'rr' | 'bf' | 'range50' | 'range90'): string {
+  if (kind === 'move') return ATM_IMPLIED_MOVE_LABEL
+  if (kind === 'rr') return 'RR25'
+  if (kind === 'bf') return 'BF25'
+  if (kind === 'range50') return 'Central 50% range'
+  return 'Central 90% range'
+}
+
+function formatUsd(value: number): string {
+  if (!Number.isFinite(value)) return '—'
+  return `$${Math.round(value).toLocaleString('en-US')}`
+}
+
+function formatUpdatedAge(scan: Pick<IvSignalScan, 'asOf' | 'freshness'>): string {
+  const asOfMs = Date.parse(scan.asOf)
+  const ageSeconds = Number.isFinite(asOfMs)
+    ? Math.max(0, (Date.now() - asOfMs) / 1000)
+    : scan.freshness.snapshotAgeSeconds
+  if (ageSeconds < 15) return 'Updated just now'
+  if (ageSeconds < 60) return `Updated ${Math.max(1, Math.round(ageSeconds))}s ago`
+  if (ageSeconds < 3600) return `Updated ${Math.max(1, Math.round(ageSeconds / 60))}m ago`
+  if (ageSeconds < 86_400) return `Updated ${Math.max(1, Math.round(ageSeconds / 3600))}h ago`
+  return `Updated ${Math.max(1, Math.round(ageSeconds / 86_400))}d ago`
+}
+
+export { DIAGNOSTIC_DISTRIBUTION_TITLE, DIAGNOSTIC_ANALYTICS_CAPTION }

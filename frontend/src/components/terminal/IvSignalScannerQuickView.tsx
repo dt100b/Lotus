@@ -5,10 +5,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import type { IvSignalScan } from '@/api/ivSignalScanner'
-import {
-  IvSignalDensityChart,
-  type IvSignalDensityLayers,
-} from '@/components/terminal/IvSignalDensityChart'
+import { IvSignalDensityChart } from '@/components/terminal/IvSignalDensityChart'
 import { IvSignalSmileChart, type SmileAxis } from '@/components/terminal/IvSignalSmileChart'
 import { smileUnavailableCopy } from '@/data/ivSignalSmileCopy'
 import {
@@ -25,27 +22,33 @@ import {
 } from '@/data/ivScannerExpiries'
 import {
   formatExpiryLong,
-  formatExpiryShort,
-  formatForwardSource,
   getIvScannerSummaryReads,
   getSurfaceHeadline,
   type IvNamedRead,
 } from '@/data/ivSignalOutlook'
 import {
+  DENSITY_CHART_SUBTITLE,
+  DENSITY_CHART_TITLE,
   DIAGNOSTIC_DENSITY_LABEL,
-  DIAGNOSTIC_SMILE_CAPTION,
+  FAILURE_CATEGORY_LABEL,
+  LIVE_DISTRIBUTION_TITLE,
   REJECTED_DENSITY_BODY,
   REJECTED_DENSITY_TITLE,
-  densityAnalyticsEligible,
+  SMILE_CHART_SUBTITLE,
+  SMILE_CHART_TITLE,
+  DIAGNOSTIC_SMILE_CAPTION,
   densityIsRejected,
   formatCoverage,
-  metricOf,
-  smileIsDiagnostic,
+  formatForwardQuality,
+  formatLiveForwardSource,
+  rejectedDensityExplanation,
   statusLabel,
 } from '@/data/optionsSurfaceDisplay'
 import {
   describeSurfaceUi,
+  methodQualityRows,
   servedFitterCaption,
+  type SurfacePresentation,
   type SurfaceLegendLine,
 } from '@/data/optionsSurfacePresentation'
 import { useIvSignalScan } from '@/hooks/useIvSignalScan'
@@ -56,13 +59,6 @@ type IvSignalScannerQuickViewProps = {
   expiries: string[]
   asOf: string
   enabled?: boolean
-}
-
-const DEFAULT_DENSITY_LAYERS: IvSignalDensityLayers = {
-  forward: true,
-  band: true,
-  wings: true,
-  sigma: true,
 }
 
 export function IvSignalScannerQuickView({
@@ -150,14 +146,14 @@ function ScannerResult({
   const ranges = reads.slice(3)
   const headline = getSurfaceHeadline(scan, refreshFailed)
   const ui = describeSurfaceUi(scan, refreshFailed)
-  const notice = ui.customerNotice
-  const researchNotice = ui.researchNotice
+  const notice = refreshFailed || densityIsRejected(scan) ? ui.customerNotice : null
   const updatedLabel = formatUpdatedLabel(scan, refreshFailed)
 
   return (
     <div className="iv-signal-scanner__result">
       <SurfaceHero
         headline={headline}
+        ui={ui}
         expiryOptions={expiryOptions}
         selectedExpiry={selectedExpiry}
         onExpiryChange={onExpiryChange}
@@ -165,20 +161,20 @@ function ScannerResult({
 
       <SurfaceStatusLegend lines={ui.legend} />
 
-      <RejectedOrReadyDensity scan={scan} title={ui.chartTitle} />
+      <RejectedOrReadyDensity scan={scan} ui={ui} refreshFailed={refreshFailed} />
 
-      <section className="iv-signal-chart-panel" aria-label="Implied volatility smile">
+      <section className="iv-signal-chart-panel" aria-label={SMILE_CHART_TITLE}>
         <header className="iv-signal-chart-panel__head">
           <div>
-            <h3 title="Accepted mark IVs versus the fitted total-variance smile. Extrapolated wings are not shown as observations.">
-              {smileIsDiagnostic(scan) ? 'Diagnostic volatility smile' : 'Implied volatility smile'}
+            <h3 title={SMILE_CHART_SUBTITLE}>
+              {SMILE_CHART_TITLE}
             </h3>
             <span
               className="iv-signal-smile-metrics"
               title="25-delta risk reversal and butterfly from numerically solved model deltas. Both require in-coverage 25Δ roots."
             >
-              {smileIsDiagnostic(scan) ? `${DIAGNOSTIC_SMILE_CAPTION} · ` : ''}
-              {formatSmileMetrics(scan)}
+              {SMILE_CHART_SUBTITLE}
+              {formatSmileMetrics(scan) ? ` · ${formatSmileMetrics(scan)}` : ''}
             </span>
           </div>
           {scan.smile.metrics.deltaAxisAvailable ? (
@@ -220,6 +216,8 @@ function ScannerResult({
 
       <SurfaceBrief interpretive={interpretive} ranges={ranges} />
 
+      <MethodQualityDisclosure scan={scan} researchNotice={ui.researchNotice} />
+
       {diagnosticsEnabled ? (
         <ScannerDiagnostics
           scan={scan}
@@ -231,16 +229,6 @@ function ScannerResult({
       <footer className="iv-signal-scanner__foot">
         <span>{updatedLabel}</span>
       </footer>
-
-      {researchNotice && ui.warningScope === 'research' ? (
-        <div className="iv-signal-scanner__warning iv-signal-scanner__warning--research" role="note">
-          <AlertTriangle aria-hidden />
-          <span>
-            <strong>Research diagnostics. </strong>
-            {researchNotice}
-          </span>
-        </div>
-      ) : null}
 
       {notice && ui.warningScope !== 'research' ? (
         <div
@@ -259,44 +247,45 @@ function ScannerResult({
   )
 }
 
-function RejectedOrReadyDensity({ scan, title }: { scan: IvSignalScan; title: string }) {
+function RejectedOrReadyDensity({
+  scan,
+  ui,
+  refreshFailed,
+}: {
+  scan: IvSignalScan
+  ui: SurfacePresentation
+  refreshFailed: boolean
+}) {
   const [showDiagnostic, setShowDiagnostic] = useState(false)
-  const rejected = !densityAnalyticsEligible(scan)
-  if (!rejected) {
-    const medianOk = metricOf(scan, 'median').available
-    const modeOk = metricOf(scan, 'mode').available
+  if (refreshFailed) {
     return (
-      <section className="iv-signal-chart-panel" aria-label={title}>
+      <section className="iv-signal-chart-panel" aria-label={LIVE_DISTRIBUTION_TITLE}>
         <header className="iv-signal-chart-panel__head">
           <div>
-            <h3 title="Risk-neutral terminal-price density from Black-76 calls. Q-measure, not a physical forecast. Diagnostic fit is not a production-grade surface.">
-              {title}
-            </h3>
-            <span>
-              {formatExpiryLabel(scan.expiry)} · {formatTenorShort(scan.timeToExpiryYears)} · {servedFitterCaption(scan)}
-            </span>
-          </div>
-          <div className="iv-surface-inline-stats" aria-label="Distribution statistics">
-            <span>
-              <em title="Options-implied forward used for OTM, smile, and density. Independent of smile or density status.">Fwd</em>
-              <strong>{formatStrike(scan.rnd.forward)}</strong>
-            </span>
-            {medianOk ? (
-              <span>
-                <em>Med</em>
-                <strong>{formatStrike(scan.rnd.percentile50)}</strong>
-              </span>
-            ) : null}
-            {modeOk ? (
-              <span>
-                <em>Mode</em>
-                <strong>{formatStrike(scan.markers.peakStrike)}</strong>
-              </span>
-            ) : null}
+            <h3>{LIVE_DISTRIBUTION_TITLE}</h3>
+            <span>Live options data is delayed</span>
           </div>
         </header>
+        <div className="iv-signal-density-empty" role="status">
+          <p>The current book is not available. Prior density, ranges, and hover values are withheld.</p>
+        </div>
+      </section>
+    )
+  }
+  if (ui.showDensityChart) {
+    return (
+      <section className="iv-signal-chart-panel" aria-label={DENSITY_CHART_TITLE}>
+        <header className="iv-signal-chart-panel__head">
+          <div>
+            <h3 title={DENSITY_CHART_SUBTITLE}>
+              {DENSITY_CHART_TITLE}
+            </h3>
+            <span>{DENSITY_CHART_SUBTITLE}</span>
+          </div>
+          <DensityChartLegend />
+        </header>
         <div className="iv-signal-chart-panel__chart">
-          <IvSignalDensityChart scan={scan} layers={DEFAULT_DENSITY_LAYERS} />
+          <IvSignalDensityChart scan={scan} layers={ui.layers} />
         </div>
       </section>
     )
@@ -309,7 +298,7 @@ function RejectedOrReadyDensity({ scan, title }: { scan: IvSignalScan; title: st
           <h3 title="The density is withheld because it failed validation. This is not a usable probability distribution.">
             {REJECTED_DENSITY_TITLE}
           </h3>
-          <span>Selected expiry {formatExpiryLabel(scan.expiry)} · {formatTenorShort(scan.timeToExpiryYears)}</span>
+          <span>{rejectedDensityExplanation(scan)}</span>
         </div>
         <div className="iv-surface-inline-stats" aria-label="Selected forward">
           <span>
@@ -318,18 +307,24 @@ function RejectedOrReadyDensity({ scan, title }: { scan: IvSignalScan; title: st
           </span>
         </div>
       </header>
-      <div className="iv-signal-density-empty">
+      <div className="iv-signal-density-empty" role="status" aria-label="Distribution unavailable">
+        <p>{rejectedDensityExplanation(scan)}</p>
         <p>{REJECTED_DENSITY_BODY}</p>
         <dl className="iv-signal-density-empty__facts">
           <div>
             <dt>Options-implied forward</dt>
             <dd>
-              {formatStrike(scan.rnd.forward)} · {formatForwardSource(scan.selection.forwardSource)} · quality {scan.selection.forwardSource === 'spot_fallback' ? 'low' : 'high'}
+              {formatStrike(scan.rnd.forward)} · {formatLiveForwardSource(scan.selection.forwardSource)} · {formatForwardQuality(scan.selection.forwardSourceQuality)}
             </dd>
           </div>
           <div>
             <dt>Failed serving checks</dt>
-            <dd>{scan.display.humanReadableReason || (scan.display.failedChecks.length ? scan.display.failedChecks.join(' · ') : 'Distribution validation failed')}</dd>
+            <dd>
+              {scan.display.primaryFailureCategory
+                ? `${FAILURE_CATEGORY_LABEL[scan.display.primaryFailureCategory]} · `
+                : ''}
+              {scan.display.humanReadableReason || (scan.display.failedChecks.length ? scan.display.failedChecks.join(' · ') : 'Distribution validation failed')}
+            </dd>
           </div>
           <div>
             <dt>Quote coverage</dt>
@@ -356,7 +351,67 @@ function RejectedOrReadyDensity({ scan, title }: { scan: IvSignalScan; title: st
       {showDiagnostic && scan.diagnosticDensity ? (
         <div className="iv-signal-chart-panel__chart iv-signal-chart-panel__chart--diagnostic">
           <p className="iv-signal-diagnostic-banner" role="note">{DIAGNOSTIC_DENSITY_LABEL}</p>
-          <IvSignalDensityChart scan={scan} layers={{ forward: true, band: false, wings: false, sigma: false }} mode="diagnostic" />
+          <IvSignalDensityChart
+            scan={scan}
+            layers={{
+              forward: true,
+              central50: false,
+              central90: false,
+              wings: false,
+              sigma: false,
+              median: false,
+              mode: false,
+              quantileHairlines: false,
+            }}
+            mode="diagnostic"
+          />
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function MethodQualityDisclosure({
+  scan,
+  researchNotice,
+}: {
+  scan: IvSignalScan
+  researchNotice: string | null
+}) {
+  const [open, setOpen] = useState(false)
+  const rows = methodQualityRows(scan)
+  return (
+    <section className={cn('iv-signal-legacy', open && 'iv-signal-legacy--open')} aria-label="Method and quality">
+      <button
+        type="button"
+        className="iv-signal-legacy__toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>Method & quality</span>
+        <em>Served smile, residual budget, coverage, and serving gates</em>
+        <ChevronDown aria-hidden />
+      </button>
+      {open ? (
+        <div className="iv-signal-details">
+          {rows.map((row) => (
+            <DetailRow key={row.label} label={row.label} value={row.value} />
+          ))}
+          {scan.display.primaryFailureCategory && scan.display.primaryFailureCategory !== 'none' ? (
+            <DetailRow
+              label="Primary failure category"
+              value={FAILURE_CATEGORY_LABEL[scan.display.primaryFailureCategory]}
+            />
+          ) : null}
+          {researchNotice ? (
+            <div className="iv-signal-scanner__warning iv-signal-scanner__warning--research" role="note">
+              <AlertTriangle aria-hidden />
+              <span>
+                <strong>Research diagnostics. </strong>
+                {researchNotice}
+              </span>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -386,7 +441,7 @@ function ScannerDiagnostics({
       </button>
       {open ? (
         <div className="iv-signal-details">
-          <DetailRow label="Forward source" value={`${scan.selection.forwardSource} · quality ${scan.selection.forwardSource === 'spot_fallback' ? 'low' : 'high'} · ${scan.selection.forwardPairCount} parity pairs`} />
+          <DetailRow label="Forward source" value={`${scan.selection.forwardSource} · ${formatForwardQuality(scan.selection.forwardSourceQuality)} · ${scan.selection.forwardPairCount} parity pairs`} />
           <DetailRow label="Served fitter" value={`${scan.display.servedFitterName} · ${scan.display.servedFitterGrade}`} />
           <DetailRow label="Quote / smile / density" value={`${scan.display.quoteStatus} · ${scan.display.smileStatus} · ${scan.display.densityStatus}`} />
           <DetailRow label="Quote coverage" value={formatCoverage(scan)} />
@@ -414,11 +469,13 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 function SurfaceHero({
   headline,
+  ui,
   expiryOptions,
   selectedExpiry,
   onExpiryChange,
 }: {
   headline: ReturnType<typeof getSurfaceHeadline>
+  ui: SurfacePresentation
   expiryOptions: IvScannerExpiryOption[]
   selectedExpiry: string
   onExpiryChange: (expiry: string) => void
@@ -453,7 +510,14 @@ function SurfaceHero({
         <rect width="100%" height="100%" filter={`url(#${grainId}-grain)`} />
       </svg>
       <div className="iv-surface-hero__rail">
-        <span className="iv-surface-hero__kicker">{headline.kicker}</span>
+        <span className="iv-surface-hero__kicker">
+          {ui.showLiveFreshness ? (
+            <span className="iv-surface-hero__live" title="Current data is within the existing freshness threshold">
+              Live
+            </span>
+          ) : null}
+          {headline.kicker}
+        </span>
         <ExpirySelect
           options={expiryOptions}
           value={selectedExpiry}
@@ -468,6 +532,9 @@ function SurfaceHero({
           ) : null}
         </strong>
         <em className="iv-surface-hero__detail">{headline.detail}</em>
+        {ui.forwardLine ? (
+          <em className="iv-surface-hero__forward">{ui.forwardLine}</em>
+        ) : null}
       </div>
       <div className="iv-surface-hero__dissolve" aria-hidden />
     </header>
@@ -602,7 +669,7 @@ function ScannerRefreshing({
       <section className="iv-signal-chart-panel">
         <header className="iv-signal-chart-panel__head">
           <div>
-            <h3>{REJECTED_DENSITY_TITLE}</h3>
+            <h3>{LIVE_DISTRIBUTION_TITLE}</h3>
             <span>Loading selected expiry</span>
           </div>
         </header>
@@ -625,12 +692,6 @@ function formatStrike(value: number) {
   return Number.isFinite(value) ? `$${Math.round(value).toLocaleString('en-US')}` : '—'
 }
 
-function formatTenorShort(years: number) {
-  const hours = Math.max(0, years * 365 * 24)
-  if (hours < 48) return `${hours.toFixed(hours < 10 ? 1 : 0)}H`
-  return `${(hours / 24).toFixed(hours < 240 ? 1 : 0)}D`
-}
-
 function formatUpdatedLabel(scan: IvSignalScan, refreshFailed: boolean) {
   if (refreshFailed) return 'Update delayed'
   const asOfMs = Date.parse(scan.asOf)
@@ -644,10 +705,15 @@ function formatUpdatedLabel(scan: IvSignalScan, refreshFailed: boolean) {
   return `Updated ${Math.max(1, Math.round(ageSeconds / 86_400))}d ago`
 }
 
-function formatExpiryLabel(expiry: string) {
-  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expiry)
-  if (!iso) return expiry
-  return formatExpiryShort(expiry)
+function DensityChartLegend() {
+  return (
+    <ul className="iv-signal-density-legend" aria-label="Density chart legend">
+      <li className="iv-signal-density-legend__density">Density</li>
+      <li className="iv-signal-density-legend__forward">Forward</li>
+      <li className="iv-signal-density-legend__band50">Central 50%</li>
+      <li className="iv-signal-density-legend__band90">Central 90%</li>
+    </ul>
+  )
 }
 
 function formatSmileMetrics(scan: IvSignalScan) {

@@ -10,6 +10,7 @@ import {
 } from '@/data/ivScannerChartLayout'
 import {
   deltaTicks,
+  isSyntheticSmileMark,
   logMoneynessTicks,
   projectSmileX,
   projectSmileY,
@@ -17,6 +18,7 @@ import {
   type SmileAxis,
 } from '@/data/ivSignalSmileGeometry'
 import { smileUnavailableCopy } from '@/data/ivSignalSmileCopy'
+import { SYNTHETIC_ATM_TOOLTIP } from '@/data/optionsSurfaceDisplay'
 import { useContainerSize } from '@/hooks/useContainerSize'
 import { cn } from '@/lib/utils'
 
@@ -92,7 +94,7 @@ export const IvSignalSmileChart = memo(function IvSignalSmileChart({
         viewBox={`0 0 ${width} ${height}`}
         className="iv-signal-smile__svg"
         role="img"
-        aria-label={`${scan.display?.smileStatus === 'accepted' ? 'Implied volatility smile' : 'Diagnostic volatility smile'} for ${scan.expiry}`}
+        aria-label={`Implied volatility smile for ${scan.expiry}. Observed option IVs and fitted market smile.`}
         onPointerMove={(event) => {
           const rect = event.currentTarget.getBoundingClientRect()
           if (!(rect.width > 0) || geometry.points.length === 0) return
@@ -140,18 +142,33 @@ export const IvSignalSmileChart = memo(function IvSignalSmileChart({
           />
           <path d={geometry.linePath} className="iv-signal-smile__fit" vectorEffect="non-scaling-stroke" />
           {geometry.points.map((point, index) => (
-            <circle
-              key={`${point.strike}-${point.classification}`}
-              cx={point.x}
-              cy={point.y}
-              r="2.3"
-              className={cn(
-                'iv-signal-smile__dot',
-                `iv-signal-smile__dot--${point.optionSide}`,
-                point.classification === 'fallback' && 'iv-signal-smile__dot--fallback',
-                activeIndex === index && 'iv-signal-smile__dot--active',
-              )}
-            />
+            isSyntheticSmileMark(point) ? (
+              <rect
+                key={`${point.strike}-${point.classification}`}
+                x={point.x - 2.4}
+                y={point.y - 2.4}
+                width={4.8}
+                height={4.8}
+                transform={`rotate(45 ${point.x} ${point.y})`}
+                className={cn(
+                  'iv-signal-smile__dot iv-signal-smile__dot--synthetic',
+                  activeIndex === index && 'iv-signal-smile__dot--active',
+                )}
+              />
+            ) : (
+              <circle
+                key={`${point.strike}-${point.classification}`}
+                cx={point.x}
+                cy={point.y}
+                r="2.3"
+                className={cn(
+                  'iv-signal-smile__dot',
+                  `iv-signal-smile__dot--${point.optionSide}`,
+                  point.classification === 'fallback' && 'iv-signal-smile__dot--fallback',
+                  activeIndex === index && 'iv-signal-smile__dot--active',
+                )}
+              />
+            )
           ))}
           {activePoint ? (
             <g className="iv-signal-smile__tooltip" pointerEvents="none">
@@ -328,14 +345,10 @@ function buildSmileGeometry(
     points: accepted.map((point) => {
       const xValue = smileAxisValue(point, axis)
       const ownIv = normalizeIvPercent(point.ivPercent, point.iv)
-      const atmLike = point.synthetic
-        || point.optionSide === 'merged'
-        || Math.abs(xValue) < 0.02
-      const fitIv = atmLike ? interpolateFitIv(fit, axis, 0) : null
       return {
         ...point,
         x: toX(xValue),
-        y: toY(fitIv ?? ownIv),
+        y: toY(ownIv),
       }
     }),
     ticks,
@@ -349,31 +362,6 @@ function normalizeIvPercent(ivPercent: number, iv: number): number {
   return ivPercent
 }
 
-function interpolateFitIv(
-  fit: Array<{ delta: number | null; logMoneyness: number; ivPercent: number }>,
-  axis: SmileAxis,
-  target: number,
-): number | null {
-  const ordered = fit
-    .map((point) => ({ x: smileAxisValue(point, axis), y: point.ivPercent }))
-    .filter((point) => Number.isFinite(point.x) && point.y >= 3)
-    .sort((left, right) => left.x - right.x)
-  if (ordered.length < 2) return null
-  if (target <= ordered[0]!.x) return ordered[0]!.y
-  const last = ordered[ordered.length - 1]!
-  if (target >= last.x) return last.y
-  for (let index = 1; index < ordered.length; index += 1) {
-    const previous = ordered[index - 1]!
-    const current = ordered[index]!
-    if (target > current.x) continue
-    const span = current.x - previous.x
-    if (!(span > 0)) return current.y
-    const weight = (target - previous.x) / span
-    return previous.y + weight * (current.y - previous.y)
-  }
-  return last.y
-}
-
 function formatAxisTick(value: number, axis: SmileAxis): string {
   if (Math.abs(value) < 1e-9) return 'ATM'
   if (axis === 'delta') {
@@ -385,6 +373,12 @@ function formatAxisTick(value: number, axis: SmileAxis): string {
 }
 
 function tooltipLines(point: IvSignalSmilePoint, axis: SmileAxis): string[] {
+  if (isSyntheticSmileMark(point)) {
+    return [
+      `${formatStrike(point.strike)} · ${formatIv(point.ivPercent)}`,
+      SYNTHETIC_ATM_TOOLTIP,
+    ]
+  }
   const lines = [
     `${formatSide(point.optionSide)} · ${formatStrike(point.strike)}`,
     `${axis === 'delta' ? formatDelta(point.delta) : formatMoneyness(point.logMoneyness)} · ${formatIv(point.ivPercent)}`,
@@ -394,6 +388,10 @@ function tooltipLines(point: IvSignalSmilePoint, axis: SmileAxis): string[] {
   }
   lines.push(formatClassification(point))
   return lines
+}
+
+export function isSyntheticMark(point: Pick<IvSignalSmilePoint, 'synthetic' | 'classification' | 'optionSide'>): boolean {
+  return isSyntheticSmileMark(point)
 }
 
 function formatStrike(value: number): string {
