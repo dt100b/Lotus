@@ -24,6 +24,9 @@ reconstruct historical option quotes missed during downtime.
 Use the same checkout and `project/runtime/dashboard_build` directory for the
 collectors and API. The default ATM and skew cadence is 600 seconds on UTC
 boundaries; the GEX worker normally runs every 60 seconds.
+The GEX refresher also starts fallback ATM/skew threads. Dedicated collector
+services own the same OS leases, preventing duplicate writers and allowing
+collection to continue independently if the GEX process stops.
 
 | Process | Entry point | Persistent output |
 | --- | --- | --- |

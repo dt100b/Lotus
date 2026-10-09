@@ -1,12 +1,14 @@
 [Unit]
 Description=Lotus Phase 6 live GEX refresher
-Documentation=file:project/docs/phase6_live_ops.md
+Documentation=file:/opt/lotus/project/docs/phase6_live_ops.md
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-# Adjust User/WorkingDirectory/EnvironmentFile for the host install.
+# Adjust User/WorkingDirectory for the host install.
+User=lotus
 WorkingDirectory=/opt/lotus
 Environment=PYTHONUNBUFFERED=1
 # Optional: EnvironmentFile=/opt/lotus/.env

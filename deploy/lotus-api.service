@@ -1,0 +1,21 @@
+[Unit]
+Description=Lotus dashboard API
+Documentation=file:/opt/lotus/docs/google_cloud_setup.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=lotus
+WorkingDirectory=/opt/lotus
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/lotus/.venv/bin/python -m uvicorn project.api.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=15
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

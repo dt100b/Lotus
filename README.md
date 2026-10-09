@@ -18,8 +18,10 @@ This is **not** open-interest GEX. Inventory comes from cumulative taker flow, n
 ## Quick start (live desk)
 
 For continuous ATM IV and skew collection on an always-on host, see
-[Continuous worker hosting](docs/continuous_worker_hosting.md). These collectors
-run independently of the GEX refresher and must also be started.
+[Continuous worker hosting](docs/continuous_worker_hosting.md). For independent
+supervision, start the dedicated collectors alongside the GEX refresher.
+For a Google Cloud VM, use the [Google Cloud setup guide](docs/google_cloud_setup.md)
+and its Ubuntu installer.
 
 From the **repo root**, use two terminals after install and a history-backed DB (see [Historical backfill](#historical-backfill)).
 
