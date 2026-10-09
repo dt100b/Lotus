@@ -40,11 +40,17 @@ import {
 } from 'lightweight-charts'
 import { getGexChartTitle } from '@/components/terminal/gexModes'
 import { GexHoverCard, type GexHoverSide } from '@/components/terminal/GexHoverCard'
+import { GexStrikeLadderChart } from '@/components/terminal/GexStrikeLadderChart'
 import {
   magnitudeBarColor,
   readGexSeriesColors,
   type GexSeriesColors,
 } from '@/data/gexChartColors'
+import {
+  defaultGexStrikeSettings,
+  type GexStrikeMetric,
+  type GexStrikeSettings,
+} from '@/data/gexStrikeSettings'
 import { formatAxisMillions, formatMillions, formatStrike } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
 
@@ -54,7 +60,7 @@ import { cn } from '@/lib/utils'
  * Profile remains routable here for restore; split/abs are normalize-only.
  *
  * Strike (mode id `net`):
- *   LWC HistogramSeries — strike on X, Net GEX on Y (theme + magnitude color).
+ *   Virtualized DOM strike ladder — strike on Y, Net GEX on X.
  * Profile (archived from tabs):
  *   LWC BaselineSeries with light display-only MA smooth — strike on X, Net GEX on Y.
  */
@@ -72,6 +78,13 @@ type GexSourceRow = {
   callGammaExposureUsd?: number
   putGammaExposureUsd?: number
   netGammaExposureUsd?: number
+  deltaExposureUsd?: number
+  callDeltaExposureUsd?: number
+  putDeltaExposureUsd?: number
+  netDeltaExposureUsd?: number
+  openInterest?: number
+  callOpenInterest?: number
+  putOpenInterest?: number
 }
 
 export type GexColorPalette = 'production' | 'include_otc'
@@ -88,6 +101,10 @@ export type GexProfileChartProps = {
   titleOverride?: string
   minHeight?: number
   colorPalette?: GexColorPalette
+  strikeSettings?: GexStrikeSettings
+  strikeSettingsOpen?: boolean
+  onStrikeSettingsChange?: (settings: GexStrikeSettings) => void
+  strikeSeriesKey?: string
 }
 
 type ChartDatum = {
@@ -97,6 +114,9 @@ type ChartDatum = {
   putGexUsd: number
   grossGexUsd: number
   displayGexUsd: number
+  positiveGexUsd: number
+  negativeGexUsd: number
+  openInterest: number
 }
 
 type HoverState = {
@@ -181,29 +201,38 @@ export const GexProfileChart = memo(function GexProfileChart({
   titleOverride,
   minHeight = defaultChartHeight,
   colorPalette = 'production',
+  strikeSettings = defaultGexStrikeSettings,
+  strikeSettingsOpen = false,
+  onStrikeSettingsChange,
+  strikeSeriesKey = 'default',
 }: GexProfileChartProps) {
   const chartMode = normalizeRenderMode(mode)
-  const chartTitle = titleOverride ?? getGexChartTitle(chartMode)
+  const chartTitle = titleOverride
+    ?? (chartMode === 'net' && strikeSettings.metric === 'delta'
+      ? 'DEX Strike'
+      : getGexChartTitle(chartMode))
   const useOtcPalette = colorPalette === 'include_otc'
   const resolvedHeader = header ?? null
 
   const data = useMemo(
-    () => prepareChartData(snapshot, chartMode),
-    [snapshot, chartMode],
+    () => prepareChartData(snapshot, strikeSettings.metric),
+    [snapshot, strikeSettings.metric],
   )
 
   if (chartMode === 'net') {
     return (
-      <NetStrikeLwcChart
+      <GexStrikeLadderChart
         data={data}
         spot={snapshot.spot}
-        dataWindowPct={dataWindowPct}
-        onDataWindowPctChange={onDataWindowPctChange}
         title={chartTitle}
         header={resolvedHeader}
         titleAccessory={titleAccessory}
         minHeight={minHeight}
         useOtcPalette={useOtcPalette}
+        settings={strikeSettings}
+        settingsOpen={strikeSettingsOpen}
+        onSettingsChange={onStrikeSettingsChange}
+        seriesKey={strikeSeriesKey}
       />
     )
   }
@@ -248,7 +277,8 @@ class StrikeHorzScaleBehavior implements IHorzScaleBehavior<number> {
     this._options = options
   }
 
-  preprocessData(_data: DataItem<number> | DataItem<number>[]): void {
+  preprocessData(data: DataItem<number> | DataItem<number>[]): void {
+    void data
     // no-op — strikes need no preprocessing
   }
 
@@ -258,8 +288,9 @@ class StrikeHorzScaleBehavior implements IHorzScaleBehavior<number> {
   }
 
   createConverterToInternalObj(
-    _data: SeriesDataItemTypeMap<number>[SeriesType][],
+    data: SeriesDataItemTypeMap<number>[SeriesType][],
   ): HorzScaleItemConverterToInternalObj<number> {
+    void data
     return (price: number) => price as unknown as InternalHorzScaleItem
   }
 
@@ -281,8 +312,9 @@ class StrikeHorzScaleBehavior implements IHorzScaleBehavior<number> {
 
   formatTickmark(
     item: TickMark,
-    _localizationOptions: LocalizationOptions<number>,
+    localizationOptions: LocalizationOptions<number>,
   ): string {
+    void localizationOptions
     return formatStrikeTick(item.time as unknown as number)
   }
 
@@ -420,10 +452,11 @@ function buildGexChartOptions(width: number, height: number, colors: GexSeriesCo
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * STRIKE — LWC vertical histogram (strike X, Net GEX Y)
+ * LEGACY STRIKE — LWC vertical histogram (strike X, Net GEX Y)
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-function NetStrikeLwcChart({
+/** Archived native-orientation renderer kept as a short-term rollback path. */
+export function NetStrikeLwcChart({
   data,
   spot,
   dataWindowPct,
@@ -1672,7 +1705,7 @@ function extendStrikesWithAxisAnchors(dataStrikes: number[], spot?: number): num
   lo = Math.max(5_000, lo)
 
   const span = Math.max(dataMax - lo, 1)
-  let step = 5_000
+  let step: number
   if (span > 200_000) step = 25_000
   else if (span > 100_000) step = 10_000
   else if (span > 50_000) step = 5_000
@@ -2118,34 +2151,31 @@ function formatStrikeTick(strike: number): string {
   return formatStrike(rounded)
 }
 
-function prepareChartData(
-  snapshot: GexSnapshot,
-  mode: 'net' | 'profile',
-): ChartDatum[] {
-  const sourceRows = snapshot.gammaBars
-  const visibleRows = mode === 'profile' ? sourceRows : getReadableStrikeRows(sourceRows)
-  return visibleRows
-    .map((row) => toChartDatum(row))
+function prepareChartData(snapshot: GexSnapshot, metric: GexStrikeMetric = 'gamma'): ChartDatum[] {
+  // The virtualized strike ladder consumes the complete API surface. Density
+  // is handled by its scroll viewport instead of dropping rows up front.
+  return snapshot.gammaBars
+    .map((row) => toChartDatum(row, metric))
     .sort((a, b) => a.strike - b.strike)
-}
-
-function getReadableStrikeRows(rows: GexSourceRow[]) {
-  if (rows.length <= 48) return rows
-  const halfStrikeRows = rows.filter((row) => row.strike % 500 === 0)
-  if (halfStrikeRows.length >= 16) return halfStrikeRows
-  const quarter = rows.filter((row) => row.strike % 250 === 0)
-  return quarter.length > 0 ? quarter : rows
 }
 
 function normalizeWindowPct(value: number) {
   return Number.isFinite(value) && value > 0 ? value : 18
 }
 
-function toChartDatum(row: GexSourceRow): ChartDatum {
-  const call = row.callGammaExposureUsd ?? 0
-  const put = row.putGammaExposureUsd ?? 0
-  const net = row.netGammaExposureUsd ?? row.gammaExposureUsd ?? call + put
+function toChartDatum(row: GexSourceRow, metric: GexStrikeMetric): ChartDatum {
+  const call = metric === 'delta'
+    ? row.callDeltaExposureUsd ?? 0
+    : row.callGammaExposureUsd ?? 0
+  const put = metric === 'delta'
+    ? row.putDeltaExposureUsd ?? 0
+    : row.putGammaExposureUsd ?? 0
+  const net = metric === 'delta'
+    ? row.netDeltaExposureUsd ?? row.deltaExposureUsd ?? call + put
+    : row.netGammaExposureUsd ?? row.gammaExposureUsd ?? call + put
   const gross = Math.abs(call) + Math.abs(put)
+  const positiveGexUsd = Math.max(call, 0) + Math.max(put, 0)
+  const negativeGexUsd = Math.min(call, 0) + Math.min(put, 0)
   return {
     strike: row.strike,
     netGexUsd: net,
@@ -2153,6 +2183,10 @@ function toChartDatum(row: GexSourceRow): ChartDatum {
     putGexUsd: put,
     grossGexUsd: gross,
     displayGexUsd: net,
+    positiveGexUsd: positiveGexUsd || (net > 0 ? net : 0),
+    negativeGexUsd: negativeGexUsd || (net < 0 ? net : 0),
+    openInterest: row.openInterest
+      ?? (row.callOpenInterest ?? 0) + (row.putOpenInterest ?? 0),
   }
 }
 

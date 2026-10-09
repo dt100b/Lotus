@@ -6,7 +6,11 @@
  * WS:    wss://api.hyperliquid.xyz/ws            { method: "subscribe", subscription: { type: "candle", ... } }
  */
 
-export type CandleInterval = '5m' | '15m' | '30m' | '1h'
+/**
+ * HL-supported intervals used by the desk chart.
+ * API also has 3m/2h/8h/12h/3d/1w/1M — omitted for a compact strip.
+ */
+export type CandleInterval = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d'
 
 export type OhlcCandle = {
   /** Candle open time (ms, UTC). */
@@ -20,20 +24,45 @@ export type OhlcCandle = {
   isClosed: boolean
 }
 
-export const candleIntervals: readonly CandleInterval[] = ['5m', '15m', '30m', '1h'] as const
+export const candleIntervals: readonly CandleInterval[] = [
+  '1m',
+  '5m',
+  '15m',
+  '30m',
+  '1h',
+  '4h',
+  '1d',
+] as const
 
 export const candleIntervalMs: Record<CandleInterval, number> = {
+  '1m': 60_000,
   '5m': 5 * 60_000,
   '15m': 15 * 60_000,
   '30m': 30 * 60_000,
   '1h': 60 * 60_000,
+  '4h': 4 * 60 * 60_000,
+  '1d': 24 * 60 * 60_000,
 }
 
 export const candleIntervalLabels: Record<CandleInterval, string> = {
+  '1m': '1m',
   '5m': '5m',
   '15m': '15m',
   '30m': '30m',
   '1h': '1h',
+  '4h': '4h',
+  '1d': '1D',
+}
+
+/**
+ * Hyperliquid returns at most ~5000 candles per snapshot request and does not
+ * expose older bars beyond that window. Request the full available depth.
+ */
+export const HL_MAX_CANDLES = 5_000
+
+/** Wall-clock span covering the full HL-available history for an interval. */
+export function maxHistoryMsForInterval(interval: CandleInterval): number {
+  return HL_MAX_CANDLES * candleIntervalMs[interval]
 }
 
 const HL_INFO_URL = 'https://api.hyperliquid.xyz/info'
@@ -62,12 +91,15 @@ export function floorToInterval(ms: number, interval: CandleInterval): number {
   return Math.floor(ms / step) * step
 }
 
-/** HL soft-caps ~5k rows; stay under and chunk long ranges (e.g. 30d × 5m). */
+/** Stay under HL’s ~5k soft-cap per request; page older windows if needed. */
 const maxCandlesPerRequest = 4_500
 
 /**
- * Fetch historical OHLC candles for [startMs, endMs].
- * Hyperliquid returns at most ~5000 candles per request; we chunk if needed.
+ * Fetch historical OHLC for [startMs, endMs].
+ * HL exposes at most ~5000 most-recent candles per interval; we still page in
+ * case a range is wider (empty older pages are fine). Prefer
+ * {@link maxHistoryMsForInterval} as the lookback so one request usually
+ * returns the full available book.
  */
 export async function fetchCandleSnapshot(
   interval: CandleInterval,
@@ -80,10 +112,13 @@ export async function fetchCandleSnapshot(
   if (!(end > start)) return []
 
   const step = candleIntervalMs[interval]
+  // Clamp to HL’s available depth so we don’t spam empty older windows.
+  const maxSpan = maxHistoryMsForInterval(interval)
+  const clampedStart = Math.max(start, end - maxSpan - step)
   const maxSpanMs = maxCandlesPerRequest * step
   const chunks: OhlcCandle[] = []
 
-  for (let cursor = start; cursor < end; cursor += maxSpanMs) {
+  for (let cursor = clampedStart; cursor < end; cursor += maxSpanMs) {
     if (signal?.aborted) break
     const chunkEnd = Math.min(end, cursor + maxSpanMs)
     const part = await fetchCandleSnapshotChunk(interval, cursor, chunkEnd, signal)
@@ -379,9 +414,11 @@ export function trimCandlesToWindow(
   candles: OhlcCandle[],
   windowStartMs: number,
   windowEndMs: number,
+  interval: CandleInterval = '1h',
 ): OhlcCandle[] {
   if (candles.length === 0) return candles
-  const lo = windowStartMs - candleIntervalMs['1h']
-  const hi = windowEndMs + candleIntervalMs['1h']
+  const pad = candleIntervalMs[interval]
+  const lo = windowStartMs - pad
+  const hi = windowEndMs + pad
   return candles.filter((c) => c.t >= lo && c.t <= hi)
 }

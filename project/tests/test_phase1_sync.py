@@ -253,6 +253,47 @@ def test_sync_instruments_merges_history_expired_catalog(tmp_path):
     store.close()
 
 
+def test_live_sync_can_skip_expired_catalog_and_cursor_persistence(tmp_path):
+    trades = [
+        {
+            "instrument_name": "BTC-30JUN26-100000-C",
+            "trade_id": "live-1",
+            "trade_seq": 1,
+            "timestamp": 1001,
+            "direction": "buy",
+            "kind": "option",
+        }
+    ]
+    client = FakeClient(trades)
+    settings = Settings().with_overrides(
+        db_path=tmp_path / "phase1.sqlite3",
+        chunk_size_ms=100,
+    )
+    store = RawStore(settings.db_path)
+    store.ensure_schema()
+    service = Phase1SyncService(client, store, settings)
+
+    service.sync_instruments(include_expired=False)
+    assert client.instrument_calls == 1
+
+    run_id = store.start_run(1001, 1002)
+    summary = service.backfill_trades(
+        1001,
+        1002,
+        run_id,
+        "live_no_cursor_test",
+        persist_cursors=False,
+    )
+    cursor_count = store.conn.execute(
+        "SELECT COUNT(*) FROM backfill_cursors WHERE job_name = ?",
+        ("live_no_cursor_test",),
+    ).fetchone()[0]
+    assert summary["cursor_persistence"] is False
+    assert cursor_count == 0
+    assert store.count_trades() == 1
+    store.close()
+
+
 def test_phase1_timestamp_advance_pagination_without_continuation(tmp_path):
     trades = [
         {

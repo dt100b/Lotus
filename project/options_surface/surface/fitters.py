@@ -53,6 +53,13 @@ class FittedSmile:
     def total_variance(self, k: float) -> tuple[float | None, QueryStatus]:
         if k < self.k_min - 1e-12 or k > self.k_max + 1e-12:
             return None, QueryStatus.EXTRAPOLATED
+        # PCHIP with extrapolate=False returns NaN one ulp outside a knot.
+        # Strike round-trips, log(F·exp(k)), land there and used to blank a
+        # 25-delta solve on a smile that actually covers that delta.
+        if k < self.k_min:
+            k = self.k_min
+        elif k > self.k_max:
+            k = self.k_max
         value = float(self._evaluate_w(float(k)))  # type: ignore[operator]
         if not math.isfinite(value):
             return None, QueryStatus.UNAVAILABLE

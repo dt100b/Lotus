@@ -13,7 +13,8 @@ def _maybe_decimal(value: Any) -> Optional[Decimal]:
     if value is None or value == "":
         return None
     try:
-        return Decimal(str(value))
+        parsed = Decimal(str(value))
+        return parsed if parsed.is_finite() else None
     except (InvalidOperation, ValueError, TypeError):
         return None
 
@@ -66,6 +67,8 @@ def _exclusion_reasons(
     is_combo: bool,
     *,
     missing_instrument_metadata: bool,
+    taker_side: str,
+    amount: Decimal,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
 
@@ -88,6 +91,12 @@ def _exclusion_reasons(
 
     if is_block:
         reasons.append("block")
+
+    if taker_side not in {"buy", "sell"}:
+        reasons.append("unknown_taker_side")
+
+    if not amount.is_finite() or amount <= 0:
+        reasons.append("invalid_amount")
 
     return tuple(dict.fromkeys(reasons))
 
@@ -148,17 +157,22 @@ def normalize_trade(
             self.expiry_ts_ms = e
             self.strike = s
 
+    taker_side = _normalize_taker_side(raw.get("direction") or raw.get("side"))
+    parsed_amount = _maybe_decimal(raw.get("amount"))
+    amount = parsed_amount if parsed_amount is not None else Decimal("0")
+    parsed_price = _maybe_decimal(raw.get("price"))
+    price = parsed_price if parsed_price is not None else Decimal("0")
+
     exclusion_reasons = _exclusion_reasons(
         _SyntheticInstrument(underlying, instrument_kind, option_type, expiry_ts_ms, strike),
         is_block=is_block,
         is_combo=is_combo,
         missing_instrument_metadata=missing_instrument_metadata,
+        taker_side=taker_side,
+        amount=amount,
     )
 
     trade_id = _maybe_str(raw.get("trade_id")) or _maybe_str(raw.get("trade_seq")) or f"ts:{raw.get('timestamp')}"
-    amount = _maybe_decimal(raw.get("amount")) or Decimal("0")
-    price = _maybe_decimal(raw.get("price")) or Decimal("0")
-
     excluded_from_v1_derived = bool(exclusion_reasons)
     _assert_unresolved_invariants(
         missing_instrument_metadata=missing_instrument_metadata,
@@ -181,7 +195,7 @@ def normalize_trade(
         option_type=option_type,
         expiry_ts_ms=expiry_ts_ms,
         strike=strike,
-        taker_side=_normalize_taker_side(raw.get("direction") or raw.get("side")),
+        taker_side=taker_side,
         amount=amount,
         price=price,
         index_price=_maybe_decimal(raw.get("index_price")),

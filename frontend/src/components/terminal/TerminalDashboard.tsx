@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type SetStateAction } from 'react'
 import type { PanelFillOption } from '@/components/terminal/EmptyPanelSlot'
 import { defaultHeatmapDataWindowPct } from '@/components/terminal/gexModes'
 import {
-  addBlankPanel,
+  addWorkspaceRow,
   createDefaultWorkspace,
   maxWorkspacePanels,
   removePanel,
+  resizeWorkspace,
   updateCell,
   type WorkspaceLayout,
 } from '@/components/terminal/paneModel'
 import { PaneWorkspace } from '@/components/terminal/PaneWorkspace'
 import { PerfHud } from '@/components/terminal/PerfHud'
-import { SidePanels } from '@/components/terminal/SidePanels'
+import { RegimeRail } from '@/components/terminal/RegimeRail'
 import { TopBar, type ConnectionStatus } from '@/components/terminal/TopBar'
 import { WorkspacePaneCell } from '@/components/terminal/WorkspacePaneCell'
 import { buildExpirySelectOptions } from '@/api/deribitExpiries'
@@ -25,7 +26,15 @@ export function TerminalDashboard() {
   const setExpiry = useTerminalStore((state) => state.setExpiry)
   const dataMode = getTerminalDataMode()
 
-  const [workspace, setWorkspace] = useState<WorkspaceLayout>(() => createDefaultWorkspace())
+  const [workspaces, setWorkspaces] = useState<WorkspaceLayout[]>(() => [createDefaultWorkspace()])
+  const [activePage, setActivePage] = useState(0)
+  const workspace = workspaces[activePage] ?? workspaces[0]!
+  const setWorkspace = useCallback((updater: SetStateAction<WorkspaceLayout>) => {
+    setWorkspaces((previous) => previous.map((page, index) => {
+      if (index !== activePage) return page
+      return typeof updater === 'function' ? updater(page) : updater
+    }))
+  }, [activePage])
 
   // Always keep ALL warm so expiry filters can fall back without a blank desk.
   const { data: allExpirySnapshot } = useTerminalSnapshot('ALL')
@@ -94,40 +103,37 @@ export function TerminalDashboard() {
     return 'live'
   }, [isError, isFetching, isPlaceholderData, snapshot, statusClockMs])
 
-  const handleAddPanel = useCallback(() => {
-    setWorkspace((prev) => addBlankPanel(prev))
-  }, [])
+  const handleAddPage = useCallback(() => {
+    setWorkspaces((previous) => [...previous, createDefaultWorkspace()])
+    setActivePage(workspaces.length)
+  }, [workspaces.length])
 
   /**
    * Close / remove a panel slot and reflow to the optimal grid.
-   * Blank panels only appear via Add Panel (right-click to fill).
+   * Blank panels appear through the View menu (right-click to fill).
    */
   const removeCell = useCallback((row: number, col: number) => {
     setWorkspace((prev) => removePanel(prev, row, col))
-  }, [])
+  }, [setWorkspace])
 
   const fillCell = useCallback((row: number, col: number, option: PanelFillOption) => {
-    if (option.kind === 'table') {
-      setWorkspace((prev) => updateCell(prev, row, col, { open: true, kind: 'table' }))
-      return
-    }
     const mode = option.mode
     setWorkspace((prev) =>
       updateCell(prev, row, col, {
         open: true,
         kind: 'chart',
         mode,
-        dataWindowMode: 'percent',
+        dataWindowMode: mode === 'net' ? 'full' : 'percent',
         dataWindowPct: mode === 'heatmap' ? defaultHeatmapDataWindowPct : 25,
       }),
     )
-  }, [])
+  }, [setWorkspace])
 
   const patchCell = useCallback(
     (row: number, col: number, patch: Parameters<typeof updateCell>[3]) => {
       setWorkspace((prev) => updateCell(prev, row, col, patch))
     },
-    [],
+    [setWorkspace],
   )
 
   if (isPending && !snapshot) {
@@ -164,8 +170,17 @@ export function TerminalDashboard() {
       <TopBar
         connectionStatus={connectionStatus}
         asOfUtc={snapshot.asOfUtc}
-        onAddPanel={handleAddPanel}
-        addPanelDisabled={workspace.cells.length >= maxWorkspacePanels}
+        snapshot={allExpirySnapshot ?? snapshot}
+        workspaceRows={workspace.rows}
+        workspaceCols={workspace.cols}
+        panelCount={workspace.cells.length}
+        maxPanelCount={maxWorkspacePanels}
+        pageCount={workspaces.length}
+        activePage={activePage}
+        onLayoutSelect={(rows, cols) => setWorkspace((previous) => resizeWorkspace(previous, rows, cols))}
+        onAddRow={(cols) => setWorkspace((previous) => addWorkspaceRow(previous, cols))}
+        onAddPage={handleAddPage}
+        onSelectPage={setActivePage}
       />
       {softError ? (
         <div
@@ -176,7 +191,7 @@ export function TerminalDashboard() {
         </div>
       ) : null}
       <div
-        className={`terminal-desk-body grid min-h-0 flex-1 overflow-hidden gap-x-3 gap-y-2 px-3 pb-3 pt-2 lg:grid-cols-[minmax(0,1fr)_406px] ${isPlaceholderData ? 'opacity-[0.97]' : ''}`}
+        className={`terminal-desk-body grid min-h-0 flex-1 overflow-hidden gap-x-3 gap-y-2 px-3 pb-3 pt-2 lg:grid-cols-[minmax(0,1fr)_420px] ${isPlaceholderData ? 'opacity-[0.97]' : ''}`}
       >
         <PaneWorkspace
           layout={workspace}
@@ -204,7 +219,7 @@ export function TerminalDashboard() {
             />
           )}
         />
-        <SidePanels
+        <RegimeRail
           snapshot={snapshot}
           allExpirySnapshot={allExpirySnapshot ?? snapshot}
         />

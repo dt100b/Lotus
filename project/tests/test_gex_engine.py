@@ -133,6 +133,12 @@ def test_phase5_snapshot_payload_carries_open_interest_and_iv() -> None:
     assert row["call_mark_iv"] == 0.62
     assert row["put_mark_iv"] == 0.7
     assert row["mark_iv"] == pytest.approx(((0.62 * 150) + (0.7 * 90)) / 240)
+    # Forward projection consumes signed taker-flow positions directly instead
+    # of reconstructing them from a potentially tiny wing gamma.
+    assert row["call_position_units"] == 2.0
+    assert row["put_position_units"] == -1.0
+    assert row["call_flow_iv"] == 0.62
+    assert row["put_flow_iv"] == 0.7
 
 
 def test_put_gex_sign_follows_dealer_inventory_not_option_type() -> None:

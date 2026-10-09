@@ -17,6 +17,10 @@ This is **not** open-interest GEX. Inventory comes from cumulative taker flow, n
 
 ## Quick start (live desk)
 
+For continuous ATM IV and skew collection on an always-on host, see
+[Continuous worker hosting](docs/continuous_worker_hosting.md). These collectors
+run independently of the GEX refresher and must also be started.
+
 From the **repo root**, use two terminals after install and a history-backed DB (see [Historical backfill](#historical-backfill)).
 
 **Terminal 1 — live refresher** (appends recent trades, rematerializes snapshot):
@@ -27,8 +31,8 @@ python project/scripts/refresh_dashboard_live.py `
   --artifacts-dir project/runtime/dashboard_build `
   --snapshot-path project/greeks/data/latest_gex_snapshot.json `
   --job-name btc_options_live_phase6 `
-  --lookback-minutes 180 `
-  --interval-seconds 120
+  --lookback-minutes 30 `
+  --interval-seconds 60
 ```
 
 **Terminal 2 — API + dashboard:**
@@ -42,6 +46,30 @@ Open:
 ```text
 http://127.0.0.1:8000/dashboard
 ```
+
+### Options Surface corpus (calibration evidence, not a backtest)
+
+One-shot capture of the current book:
+
+```powershell
+python -m project.scripts.capture_options_surface --underlying BTC --expiry 2026-08-21
+python -m project.scripts.capture_options_surface --underlying BTC --curated-expiries
+```
+
+Repeatable collector (disabled unless `LOTUS_SURFACE_COLLECT_ENABLED=true`):
+
+```powershell
+python -m project.scripts.collect_options_surface --once --enable
+```
+
+Analyze stored snapshots:
+
+```powershell
+python -m project.scripts.analyze_options_surface_corpus --input project/runtime/options_surface_snapshots
+```
+
+Windows wrapper: `deploy/windows/Run-LotusSurfaceCorpus.ps1`.
+Constrained SVI remains a diagnostic candidate.
 
 Health check:
 
@@ -61,7 +89,7 @@ python -m uvicorn project.api.main:app --host 127.0.0.1 --port 8001
 
 ## Fresh setup
 
-**Requirements:** Python 3.11+, Node.js 20+ (for the Vite terminal), network access to Deribit public APIs.
+**Requirements:** Python 3.11+, Node.js 20.19+ or 22.12+ (for the Vite terminal), network access to Deribit public APIs.
 
 ```powershell
 # Python
@@ -75,7 +103,7 @@ Copy-Item .env.example .env
 
 # Frontend production build (served at /dashboard)
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 ```
@@ -162,12 +190,12 @@ python project/scripts/refresh_dashboard_live.py --once `
   --db-path project/data/phase1_history.sqlite3 `
   --artifacts-dir project/runtime/dashboard_build `
   --snapshot-path project/greeks/data/latest_gex_snapshot.json `
-  --lookback-minutes 180
+  --lookback-minutes 30
 ```
 
 Behavior:
 
-- Appends trades for a rolling window (default **180** minutes), self-healing from the DB max trade time after short outages (capped by main-host retention ~20h).
+- Appends trades for a rolling window (default **30** minutes), self-healing from the DB max trade time after short outages (capped by main-host retention ~20h).
 - Rematerializes `project/greeks/data/latest_gex_snapshot.json` for the API.
 - Default **`--materialize-mode auto`** uses an inventory checkpoint so deep history is not fully replayed every cycle.
 - Force a full YTD replay after methodology changes or checkpoint issues:
@@ -297,6 +325,7 @@ Large and local-only artifacts are ignored (see `.gitignore`):
 
 - `project/data/*.sqlite3` (history and prototype DBs)
 - `project/runtime/` (build artifacts, checkpoints)
+- `runtime/` (local audit captures and screenshots; existing frozen diagnostics stay tracked)
 - `.env`, `.venv/`, `frontend/node_modules/`, `*.zip`
 
 Rebuild data with the backfill and refresh scripts above.

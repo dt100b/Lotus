@@ -13,8 +13,22 @@ The first command is the new engine suite. The second also runs the
 legacy scanner unit tests (isolated prototype math) plus the migrated
 API adapter tests.
 
-Last run (2026-08-17 constrained-smile pass): **64 passed** in this
-directory; see the fail-closed section for the combined counts.
+Corpus capture / analyzer (offline fixtures, no live Deribit):
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest project/tests/options_surface/test_corpus_capture.py project/tests/options_surface/test_corpus_expiries.py project/tests/options_surface/test_corpus_collector.py project/tests/options_surface/test_corpus_analyzer.py project/tests/options_surface/test_shadow_modes.py -q
+```
+
+One-shot capture and analysis (live market; not a unit test):
+
+```powershell
+.\.venv\Scripts\python.exe -m project.scripts.capture_options_surface --underlying BTC --curated-expiries --dry-run
+.\.venv\Scripts\python.exe -m project.scripts.analyze_options_surface_corpus --input project/runtime/options_surface_snapshots
+```
+
+Last run (2026-08-16 validation-corpus pass): **79 passed** in
+`project/tests/options_surface`; **108 passed** with
+`test_iv_signal_scanner.py`; full backend **304 passed, 1 skipped**.
 
 ## Mandatory numerical gates
 
@@ -37,6 +51,11 @@ directory; see the fail-closed section for the combined counts.
 | 15 | Constrained SVI recovery / robustness | `test_constrained_svi.py` |
 | 16 | No silent PCHIP fallback | `test_no_silent_pchip_fallback` |
 | 17 | Aug. 21 frozen honesty (PCHIP still fails) | `test_frozen_aug21_pchip_failure_and_constrained_honesty` |
+| 18 | Capture round-trip / replay | `test_corpus_capture.py` |
+| 19 | Partial-write and schema isolation | `test_partial_jsonl_line_is_skipped`, `test_legacy_schema_is_identified_not_mixed` |
+| 20 | Curated expiry selection | `test_corpus_expiries.py` |
+| 21 | Capture isolation and analyzer / rubric export | `test_corpus_collector.py`, `test_corpus_analyzer.py` |
+| 22 | Shadow modes, no PCHIP restore | `test_shadow_modes.py` |
 
 Rejected densities emit no headline percentiles
 (`test_rejected_density_has_no_headline_quantiles`,
@@ -80,9 +99,9 @@ It **does**:
 - mark maturity/`k` queries outside the observed range as
   `extrapolated` / unavailable
 
-Last run (2026-08-17 constrained-smile pass): **64 passed** in
-`project/tests/options_surface`; **93 passed** with the scanner
-adapter; full backend **289 passed, 1 skipped**.
+Last run (2026-08-16 validation-corpus pass): **79 passed** in
+`project/tests/options_surface`; **108 passed** with the scanner
+adapter; full backend **304 passed, 1 skipped**.
 
 Frontend:
 

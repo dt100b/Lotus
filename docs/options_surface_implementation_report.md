@@ -389,6 +389,10 @@ node frontend\scripts\check-options-surface-serving.mjs
 64 / 93 / 289 passed (1 skipped); tsc clean; display and serving
 copy checks passed.
 
+Validation-corpus follow-up (2026-08-16): **108 / 108 / 304**
+passed (1 skipped); tsc clean; display and serving copy checks
+passed. `constrained_svi` remains `diagnostic_candidate`.
+
 ### Files added or updated in this pass
 
 - `docs/constrained_smile_calibration_plan.md`
@@ -400,3 +404,23 @@ copy checks passed.
 - `project/tests/options_surface/test_constrained_svi.py`
 - Orchestrator, display, API adapter/schemas, diagnostics, frontend
   captions, methodology / dictionary / validation / this report.
+
+## 12. Validation corpus (2026-08-16)
+
+This pass adds the historical snapshot-capture, collection,
+analyzer, shadow-mode, and promotion-rubric framework. It does
+**not** promote `constrained_svi`.
+
+- Plan: `docs/surface_validation_corpus_plan.md`
+- Rubric: `docs/constrained_svi_promotion_rubric.md`
+- Capture schema: `options_surface_capture.v1`
+- Default store: `project/runtime/options_surface_snapshots/`
+- CLI: `python -m project.scripts.capture_options_surface`
+- Collector: `python -m project.scripts.collect_options_surface`
+  (disabled unless `LOTUS_SURFACE_COLLECT_ENABLED=true`)
+- Analyzer: `python -m project.scripts.analyze_options_surface_corpus`
+- Serving modes: `diagnostic_candidate` / `shadow_compare` /
+  `disabled`. Disabled does not restore PCHIP serving.
+
+`constrained_svi` remains `diagnostic_candidate`. A filled corpus
+is required before any later grade change.

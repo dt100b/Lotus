@@ -3,12 +3,9 @@ import { gexModeLabels, gexModes, type GexModeOption } from '@/components/termin
 import type { PaneDragHandleProps } from '@/components/terminal/PaneWorkspace'
 import { cn } from '@/lib/utils'
 
-export type PanelFillOption =
-  | { kind: 'table'; label: string }
-  | { kind: 'chart'; mode: GexModeOption; label: string }
+export type PanelFillOption = { kind: 'chart'; mode: GexModeOption; label: string }
 
 const panelFillOptions: PanelFillOption[] = [
-  { kind: 'table', label: 'Table' },
   ...gexModes.map((mode) => ({
     kind: 'chart' as const,
     mode,
@@ -69,7 +66,8 @@ export function EmptyPanelSlot({ onFill, onRemove, dragHandleProps, className }:
         event.preventDefault()
         event.stopPropagation()
         const menuW = 108
-        const menuH = onRemove ? 176 : 156
+        // Strike + Price + 0DTE γ (+ optional Remove)
+        const menuH = onRemove ? 178 : 158
         setMenu({
           x: Math.min(event.clientX, window.innerWidth - menuW - 6),
           y: Math.min(event.clientY, window.innerHeight - menuH - 6),
@@ -106,12 +104,10 @@ export function EmptyPanelSlot({ onFill, onRemove, dragHandleProps, className }:
         >
           <div className="empty-pane-menu__heading">Add view</div>
           <div className="empty-pane-menu__rule" />
-          {panelFillOptions.map((option, index) => {
-            const key = option.kind === 'table' ? 'table' : option.mode
-            const showDivider = index === 1
+          {panelFillOptions.map((option) => {
+            const key = option.mode
             return (
               <div key={key}>
-                {showDivider ? <div className="empty-pane-menu__rule empty-pane-menu__rule--soft" /> : null}
                 <button
                   type="button"
                   role="menuitem"

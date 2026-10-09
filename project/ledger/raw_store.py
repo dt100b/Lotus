@@ -94,6 +94,9 @@ class RawStore:
 
             CREATE INDEX IF NOT EXISTS idx_raw_trades_instrument_seq
               ON raw_trades(instrument_name, trade_seq);
+
+            CREATE INDEX IF NOT EXISTS idx_raw_trades_ingested_timestamp
+              ON raw_trades(ingested_at_ms, timestamp_ms);
             """
         )
         self.conn.commit()

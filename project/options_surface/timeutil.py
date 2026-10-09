@@ -95,6 +95,44 @@ def tenor_bucket(time_to_expiry_years: float | None) -> str:
     return "15_plus_dte"
 
 
+ANALYSIS_TENOR_BUCKETS = (
+    "0_2_dte",
+    "3_7_dte",
+    "8_14_dte",
+    "15_30_dte",
+    "31_90_dte",
+    "gt_90_dte",
+)
+
+
+def analysis_tenor_bucket(time_to_expiry_years: float | None) -> str:
+    """Descriptive corpus buckets. Does not change serving coverage floors."""
+    days = (
+        float(time_to_expiry_years) * 365.0
+        if time_to_expiry_years is not None and time_to_expiry_years > 0
+        else 0.0
+    )
+    if days <= 2.0:
+        return "0_2_dte"
+    if days <= 7.0:
+        return "3_7_dte"
+    if days <= 14.0:
+        return "8_14_dte"
+    if days <= 30.0:
+        return "15_30_dte"
+    if days <= 90.0:
+        return "31_90_dte"
+    return "gt_90_dte"
+
+
+def days_to_expiry(as_of_utc: datetime, expiry_utc: datetime) -> float:
+    return max((as_utc(expiry_utc) - as_utc(as_of_utc)) / timedelta(days=1), 0.0)
+
+
+def seconds_to_expiry(as_of_utc: datetime, expiry_utc: datetime) -> float:
+    return max((as_utc(expiry_utc) - as_utc(as_of_utc)).total_seconds(), 0.0)
+
+
 def tenor_coverage_floors(time_to_expiry_years: float | None) -> tuple[int, int, float]:
     """Return (min_strikes, min_side_strikes, max_center_log_gap)."""
     label = tenor_bucket(time_to_expiry_years)

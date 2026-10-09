@@ -7,10 +7,14 @@ All series values are **percent** annualized vol (e.g. 37.2), matching
 
 Sources
 -------
-- DVOL: Deribit ``public/get_volatility_index_data`` (BTC, candle close)
-- RV: Hyperliquid BTC 1h closes — rolling 7d (168 × 1h returns) sample stdev
-  annualized with ``sqrt(24 * 365)``, same definition as Regime RV Trend long window
-- spread_t = DVOL_t − RV_t on DVOL timestamps (as-of aligned)
+- DVOL: Deribit ``public/get_volatility_index_data`` (BTC, candle close) — ~30d IV index
+- Primary RV: Deribit BTC-PERPETUAL 1h high/low — rolling **30d** Parkinson
+  (720 bars) annualized with ``sqrt(24 * 365)``
+- RV1 / RV7: the same Parkinson estimator on 24 / 168 hourly bars
+- spread_t = DVOL_t − Parkinson RV30_t on DVOL timestamps (as-of aligned)
+
+The close-to-close helper remains for tests that still want it. The assembled
+payload uses Parkinson only.
 
 Resilience is the caller's job (cache last good / empty payload). This module is
 pure series math + payload shaping.
@@ -21,30 +25,53 @@ from __future__ import annotations
 import math
 from typing import Any, Mapping, Sequence
 
+from vol_surface.parkinson import rolling_parkinson_series
+
 VOL_COMPARE_VERSION = "vol_compare.v1"
 VOL_COMPARE_PAYLOAD_KEY = "vol_compare"
 
-# Default chart window; 30d optional when caller fetches a longer DVOL range.
-DEFAULT_WINDOW = "7d"
+# Default chart window: 365d history for DVOL / IV–RV / VRP series.
+# RV definition stays matched ~30d (RV30); only the plotted range is longer.
+DEFAULT_WINDOW = "365d"
 WINDOW_MS: dict[str, int] = {
     "7d": 7 * 86_400_000,
     "30d": 30 * 86_400_000,
+    "90d": 90 * 86_400_000,
+    "180d": 180 * 86_400_000,
+    "365d": 365 * 86_400_000,
 }
 
-# Matches repository._compute_rv_trend_from_closes long window.
-RV_LOOKBACK_RETURNS = 168  # 7 × 24 hourly bars
+# Primary: 30d Parkinson RV matched to DVOL maturity (~30d index).
+# 720 hourly bars ≈ 30 × 24 hours.
+RV30_LOOKBACK_RETURNS = 720
+# Short / weekly RV history — not used for primary spread / IV rich-cheap chip.
+RV1_LOOKBACK_RETURNS = 24  # 1 × 24 hourly bars
+RV7_LOOKBACK_RETURNS = 168  # 7 × 24 hourly bars
+# Backward-compatible alias (historical name pointed at 7d).
+RV_LOOKBACK_RETURNS = RV30_LOOKBACK_RETURNS
 PERIODS_PER_YEAR = 24.0 * 365.0
 UNITS = "percent"
+RV_ESTIMATOR = "parkinson"
 
 DVOL_SOURCE = (
     "deribit public/get_volatility_index_data "
-    "currency=BTC resolution=3600 close (percent)"
+    "currency=BTC resolution=3600 close (percent) · ~30d IV index (DVOL)"
 )
-RV_SOURCE = (
-    "hyperliquid BTC 1h closes; rolling 7d annualized sample stdev "
-    f"* sqrt({int(PERIODS_PER_YEAR)}) * 100 (percent)"
+RV30_SOURCE = (
+    "deribit BTC-PERPETUAL 1h high-low; Parkinson RV 30d (720 bars) "
+    f"* sqrt({int(PERIODS_PER_YEAR)}) * 100 (percent) · primary matched-tenor series"
 )
-SPREAD_DEFINITION = "DVOL − RV (percent points)"
+RV7_SOURCE = (
+    "deribit BTC-PERPETUAL 1h high-low; Parkinson RV 7d (168 bars) "
+    f"* sqrt({int(PERIODS_PER_YEAR)}) * 100 (percent) · secondary overlay only"
+)
+RV1_SOURCE = (
+    "deribit BTC-PERPETUAL 1h high-low; Parkinson RV 24h (24 bars) "
+    f"* sqrt({int(PERIODS_PER_YEAR)}) * 100 (percent) · RV trend short leg"
+)
+# Legacy alias used by older callers / meta fallbacks.
+RV_SOURCE = RV30_SOURCE
+SPREAD_DEFINITION = "DVOL − Parkinson RV30 (percent points) · matched ~30d tenors"
 
 
 def empty_vol_compare_payload(
@@ -74,15 +101,26 @@ def build_vol_compare_payload(
     resolution_s: int = 3600,
     error: str | None = None,
     dvol_source: str = DVOL_SOURCE,
-    rv_source: str = RV_SOURCE,
+    rv_source: str = RV30_SOURCE,
+    rv1_series: Sequence[Mapping[str, Any]] | None = None,
+    rv1_source: str = RV1_SOURCE,
+    rv7_series: Sequence[Mapping[str, Any]] | None = None,
+    rv7_source: str = RV7_SOURCE,
 ) -> dict[str, Any]:
-    """Shape for ``flow_regime.vol_compare`` (or terminal sibling)."""
+    """Shape for ``flow_regime.vol_compare`` (or terminal sibling).
+
+    Primary ``rv_series`` / ``spread_series`` are DVOL vs **RV30**.
+    Optional ``rv1_series`` / ``rv7_series`` power the 24H / 7D trend view only.
+    """
     dvol = _clean_series(dvol_series)
     rv = _clean_series(rv_series)
     spread = _clean_series(spread_series)
+    rv1 = _clean_series(rv1_series) if rv1_series is not None else []
+    rv7 = _clean_series(rv7_series) if rv7_series is not None else []
     payload: dict[str, Any] = {
         "version": VOL_COMPARE_VERSION,
         "dvol_series": dvol,
+        # Primary matched-tenor series (RV30).
         "rv_series": rv,
         "spread_series": spread,
         "meta": {
@@ -92,16 +130,36 @@ def build_vol_compare_payload(
             "units": UNITS,
             "dvol_source": dvol_source,
             "rv_source": rv_source,
+            "rv30_source": RV30_SOURCE,
+            "rv1_source": rv1_source,
+            "rv7_source": rv7_source,
             "spread_definition": SPREAD_DEFINITION,
-            "rv_lookback_returns": RV_LOOKBACK_RETURNS,
+            "primary_pair": "DVOL (30d) vs Parkinson RV30",
+            "rv_estimator": RV_ESTIMATOR,
+            "rv_timestamp": "completed_bar_close",
+            "rv_coverage": "unique_contiguous_hourly_windows",
+            "rv_lookback_returns": RV30_LOOKBACK_RETURNS,
+            "rv30_lookback_returns": RV30_LOOKBACK_RETURNS,
+            "rv1_lookback_returns": RV1_LOOKBACK_RETURNS,
+            "rv7_lookback_returns": RV7_LOOKBACK_RETURNS,
             "resolution_s": int(resolution_s),
             "show_rv_default": True,
             "show_spread_default": True,
             "dvol_point_count": len(dvol),
             "rv_point_count": len(rv),
+            "rv1_point_count": len(rv1),
+            "rv7_point_count": len(rv7),
             "spread_point_count": len(spread),
+            # Display title for Regime chart header.
+            "chart_title": "IV vs RV",
+            "history_window": window if window in WINDOW_MS else DEFAULT_WINDOW,
         },
     }
+    if rv1_series is not None:
+        payload["rv1_series"] = rv1
+    # Optional secondary 7d RV overlay (does not drive IV rich/cheap).
+    if rv7_series is not None:
+        payload["rv7_series"] = rv7
     if error:
         payload["meta"]["error"] = str(error)[:240]
         payload["error"] = str(error)[:240]
@@ -141,12 +199,13 @@ def parse_dvol_candles(raw_rows: Sequence[Any]) -> list[dict[str, float | int]]:
 def rolling_rv_series_from_closes(
     candles: Sequence[tuple[int, float]],
     *,
-    lookback_returns: int = RV_LOOKBACK_RETURNS,
+    lookback_returns: int = RV30_LOOKBACK_RETURNS,
 ) -> list[dict[str, float | int]]:
     """Annualized rolling RV (%) at each candle timestamp with enough history.
 
     ``candles``: ``(ts_ms, close)`` sorted ascending, 1h bars preferred.
     Annualization matches Regime RV Trend: sample stdev × √(24×365) × 100.
+    Default lookback is **720** returns (RV30); pass 168 for RV7 overlay.
     """
     cleaned: list[tuple[int, float]] = []
     for ts_ms, close in candles:
@@ -233,29 +292,54 @@ def compute_spread_series(
 def assemble_vol_compare(
     *,
     dvol_raw_candles: Sequence[Any],
-    hl_candles: Sequence[tuple[int, float]],
+    hl_candles: Sequence[object],
+    rv30_candles: Sequence[object] | None = None,
     as_of_ms: int,
     window: str = DEFAULT_WINDOW,
     window_start_ms: int | None = None,
+    include_rv7: bool = True,
+    include_rv1: bool = True,
 ) -> dict[str, Any]:
-    """End-to-end pure assembly from raw DVOL candles + HL (ts, close) pairs."""
+    """End-to-end assembly from raw DVOL candles and OHLC bars.
+
+    Primary pair: DVOL vs Parkinson RV30 (720 hourly high-low bars).
+    ``rv30_candles`` can provide a deeper matched-venue history while
+    ``hl_candles`` powers the 24H / 7D view. RV30 falls back to ``hl_candles``
+    when no separate series is supplied. Each candle must carry a high and a
+    low; a close-only pair cannot be turned into a Parkinson estimate.
+    """
     dvol_all = parse_dvol_candles(dvol_raw_candles)
     if window_start_ms is not None:
         dvol = [p for p in dvol_all if int(p["ts_ms"]) >= int(window_start_ms)]
     else:
         dvol = dvol_all
 
-    rv_full = rolling_rv_series_from_closes(hl_candles)
     target_ts = [int(p["ts_ms"]) for p in dvol]
-    rv_aligned = align_series_asof(target_ts, rv_full)
-    spread = compute_spread_series(dvol, rv_aligned)
+
+    # Primary: matched 30d Parkinson RV.
+    rv30_input = rv30_candles if rv30_candles is not None else hl_candles
+    rv30_full = rolling_parkinson_series(rv30_input, lookback_bars=RV30_LOOKBACK_RETURNS, as_of_ms=as_of_ms)
+    rv30_aligned = align_series_asof(target_ts, rv30_full)
+    spread = compute_spread_series(dvol, rv30_aligned)
+
+    rv1_aligned: list[dict[str, float | int]] | None = None
+    if include_rv1:
+        rv1_full = rolling_parkinson_series(hl_candles, lookback_bars=RV1_LOOKBACK_RETURNS, as_of_ms=as_of_ms)
+        rv1_aligned = align_series_asof(target_ts, rv1_full)
+
+    rv7_aligned: list[dict[str, float | int]] | None = None
+    if include_rv7:
+        rv7_full = rolling_parkinson_series(hl_candles, lookback_bars=RV7_LOOKBACK_RETURNS, as_of_ms=as_of_ms)
+        rv7_aligned = align_series_asof(target_ts, rv7_full)
 
     return build_vol_compare_payload(
         dvol_series=dvol,
-        rv_series=rv_aligned,
+        rv_series=rv30_aligned,
         spread_series=spread,
         as_of_ms=as_of_ms,
         window=window if window in WINDOW_MS else DEFAULT_WINDOW,
+        rv1_series=rv1_aligned,
+        rv7_series=rv7_aligned,
     )
 
 

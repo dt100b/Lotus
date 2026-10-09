@@ -330,3 +330,63 @@ def _from_venue_underlying(
         fallback_reason=None,
         validation_flags=(),
     )
+
+
+def collect_forward_candidates(
+    observations: Sequence[QuoteObservation],
+    *,
+    as_of_utc: datetime,
+    expiry_utc: datetime,
+    expiry_date: str,
+    underlying: str,
+    index_usd: float,
+    futures: Sequence[NativeFutureQuote] = (),
+) -> dict[str, object]:
+    """All hierarchy candidates. Selection policy is unchanged."""
+    flags: list[str] = []
+    future_estimate = _from_matching_future(
+        futures,
+        expiry_date=expiry_date,
+        underlying=underlying,
+        as_of_utc=as_of_utc,
+        expiry_utc=expiry_utc,
+        flags=flags,
+    )
+    parity_estimate = _from_inverse_parity(
+        observations,
+        index_usd=index_usd,
+        as_of_utc=as_of_utc,
+        expiry_utc=expiry_utc,
+        underlying=underlying,
+        flags=flags,
+    )
+    venue_estimate = _from_venue_underlying(
+        observations,
+        as_of_utc=as_of_utc,
+        expiry_utc=expiry_utc,
+        underlying=underlying,
+        flags=flags,
+    )
+    spot = None
+    if math.isfinite(float(index_usd)) and index_usd > 0:
+        spot = ForwardEstimate(
+            as_of_utc=as_of_utc,
+            expiry_utc=expiry_utc,
+            underlying=underlying,
+            forward_usd=float(index_usd),
+            source=ForwardSource.SPOT_FALLBACK,
+            source_quality=SourceQuality.LOW,
+            supporting_instruments=(),
+            parity_pair_count=0,
+            parity_dispersion=None,
+            futures_option_difference=None,
+            fallback_reason="spot_candidate_only",
+            validation_flags=(),
+        )
+    return {
+        "matching_future": future_estimate,
+        "inverse_put_call_parity": parity_estimate,
+        "venue_underlying_price": venue_estimate,
+        "spot_fallback": spot,
+        "validation_flags": tuple(flags),
+    }

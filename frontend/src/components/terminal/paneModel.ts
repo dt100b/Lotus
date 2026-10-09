@@ -1,9 +1,14 @@
-import { defaultHeatmapDataWindowPct, normalizeExposureMode } from '@/components/terminal/gexModes'
+import {
+  defaultForwardDataWindowPct,
+  defaultHeatmapDataWindowPct,
+  normalizeExposureMode,
+} from '@/components/terminal/gexModes'
 import type { GexExpiry } from '@/api/mockGexData'
+import type { ForwardExpiryScope, ForwardGreekMetric } from '@/api/gexForwardSurface'
 import type { DataWindowMode, ExposureMode } from '@/store/terminalStore'
 
-/** Match GammaHeatmapChart default visible window (~48h of 15m) without importing the chart. */
-const defaultHeatmapTimeWindowHours = 48
+/** Match GammaHeatmapChart default visible window (~72h of 30m) without importing the chart. */
+const defaultHeatmapTimeWindowHours = 72
 
 /** Hard cap so the desk stays usable. */
 export const maxWorkspacePanels = 16
@@ -15,6 +20,10 @@ export type PaneCellState = {
   kind: PaneKind
   mode: ExposureMode
   expiry: GexExpiry
+  /** Forward panes always select one semantic expiry cliff, never ALL. */
+  forwardExpiryScope: ForwardExpiryScope
+  /** Greek surface selected in this pane. */
+  forwardMetric: ForwardGreekMetric
   dataWindowMode: DataWindowMode
   dataWindowPct: number
   timeWindowHours: number
@@ -46,14 +55,32 @@ export const minTrackPct = 14
 
 const defaultAutoDataWindowPct = 25
 
-/** Default starter desk (1×1): full-pane Hyperliquid price chart (heatmap mode). */
+/** Default desk: GEX strike | 0DTE Gamma surface | 0DTE Delta surface. */
 export function createDefaultWorkspace(): WorkspaceLayout {
   return buildWorkspaceFromCells([
-    cell({ kind: 'chart', mode: 'heatmap', dataWindowPct: defaultHeatmapDataWindowPct }),
+    cell({
+      kind: 'chart',
+      mode: 'net',
+      expiry: 'ALL',
+    }),
+    cell({
+      kind: 'chart',
+      mode: 'forward',
+      forwardExpiryScope: '0dte',
+      forwardMetric: 'gamma',
+      dataWindowPct: defaultForwardDataWindowPct,
+    }),
+    cell({
+      kind: 'chart',
+      mode: 'forward',
+      forwardExpiryScope: '0dte',
+      forwardMetric: 'delta',
+      dataWindowPct: defaultForwardDataWindowPct,
+    }),
   ])
 }
 
-/** Blank slot — right-click to pick a chart/table mode. */
+/** Blank slot — right-click to pick a chart mode. */
 export function createBlankCell(): PaneCellState {
   return cell({
     open: false,
@@ -176,6 +203,25 @@ export function resizeWorkspace(prev: WorkspaceLayout, rows: number, cols: numbe
 export function addBlankPanel(layout: WorkspaceLayout): WorkspaceLayout {
   if (layout.cells.length >= maxWorkspacePanels) return layout
   return buildWorkspaceFromCells([...layout.cells, createBlankCell()])
+}
+
+/** Append a deliberately sized row without disturbing the rows above it. */
+export function addWorkspaceRow(layout: WorkspaceLayout, requestedCols: number): WorkspaceLayout {
+  const cols = Math.max(1, Math.min(4, Math.round(requestedCols)))
+  const available = maxWorkspacePanels - layout.cells.length
+  const nextCols = Math.min(cols, available)
+  if (nextCols <= 0) return layout
+
+  return {
+    rows: layout.rows + 1,
+    cols: Math.max(layout.cols, nextCols),
+    rowHeights: equalTracks(layout.rows + 1),
+    colWidthsByRow: [...layout.colWidthsByRow.map((row) => [...row]), equalTracks(nextCols)],
+    cells: [
+      ...layout.cells.map((panel) => ({ ...panel })),
+      ...Array.from({ length: nextCols }, () => createBlankCell()),
+    ],
+  }
 }
 
 /** Remove a panel slot and reflow. Never drops below one panel. */
@@ -447,10 +493,16 @@ function cell(partial: Partial<PaneCellState> = {}): PaneCellState {
     kind: partial.kind ?? 'chart',
     mode,
     expiry: partial.expiry ?? 'ALL',
-    dataWindowMode: partial.dataWindowMode ?? 'percent',
+    forwardExpiryScope: partial.forwardExpiryScope ?? '0dte',
+    forwardMetric: partial.forwardMetric ?? 'gamma',
+    dataWindowMode: partial.dataWindowMode ?? (mode === 'net' ? 'full' : 'percent'),
     dataWindowPct:
       partial.dataWindowPct
-      ?? (mode === 'heatmap' ? defaultHeatmapDataWindowPct : defaultAutoDataWindowPct),
+      ?? (mode === 'heatmap'
+        ? defaultHeatmapDataWindowPct
+        : mode === 'forward'
+          ? defaultForwardDataWindowPct
+          : defaultAutoDataWindowPct),
     timeWindowHours: partial.timeWindowHours ?? defaultHeatmapTimeWindowHours,
   }
 }
@@ -459,18 +511,23 @@ function defaultSeedForIndex(index: number, rows: number, cols: number): Partial
   const seeds: Array<Partial<PaneCellState>> = [
     { kind: 'chart', mode: 'net' },
     { kind: 'chart', mode: 'heatmap', dataWindowPct: defaultHeatmapDataWindowPct },
-    { kind: 'table', mode: 'net' },
+    { kind: 'chart', mode: 'forward', dataWindowPct: defaultForwardDataWindowPct },
     { kind: 'chart', mode: 'net' },
     { kind: 'chart', mode: 'heatmap', dataWindowPct: defaultHeatmapDataWindowPct },
-    { kind: 'chart', mode: 'net' },
+    { kind: 'chart', mode: 'forward', dataWindowPct: defaultForwardDataWindowPct },
   ]
   if (index < seeds.length) return seeds[index]!
-  const modes: ExposureMode[] = ['net', 'heatmap']
+  const modes: ExposureMode[] = ['net', 'heatmap', 'forward']
   const mode = modes[index % modes.length]!
   return {
     kind: 'chart',
     mode,
-    dataWindowPct: mode === 'heatmap' ? defaultHeatmapDataWindowPct : defaultAutoDataWindowPct,
+    dataWindowPct:
+      mode === 'heatmap'
+        ? defaultHeatmapDataWindowPct
+        : mode === 'forward'
+          ? defaultForwardDataWindowPct
+          : defaultAutoDataWindowPct,
     open: index < rows * cols,
   }
 }

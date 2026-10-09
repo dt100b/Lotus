@@ -12,12 +12,15 @@ import type {
   MarketSource,
   RankingRow,
   Skew25d,
+  SkewTenor,
   TerminalSnapshot,
   VolCompare,
   VolSeriesPoint,
+  VolSurface,
 } from '@/data/mockTerminal'
 import type { GexExpiry } from '@/api/mockGexData'
 import { parseDeribitExpiry } from '@/api/deribitExpiries'
+import { isScheduledCaptureValid, isAtmCurveCurrent, isSurfaceCurrent } from '@/lib/surfaceInspection'
 
 type BackendTerminalSnapshot = {
   as_of_utc: string
@@ -37,9 +40,15 @@ type BackendTerminalSnapshot = {
   total_put_gex_usd: number
   max_positive_gamma_strike: number
   max_negative_gamma_strike: number
-  /** Legacy alias of gamma_flip (null when no mass-valid cross). */
+  /** Legacy alias of hvl / gamma_flip (null when no mass-valid cross). */
   zero_gamma?: number | null
-  /** Real cumulative zero-cross Flip only; null when status is no_cross. */
+  /** HVL aliases: real cumulative zero-cross only; null when status is no_cross. */
+  hvl?: number | null
+  hvl_status?: 'ok' | 'no_cross'
+  hvl_note?: string | null
+  hvl_expiry?: string | null
+  hvl_by_expiry?: Record<string, { level?: number | null; status?: string; note?: string | null }>
+  hvl_book?: { level?: number | null; status?: string; note?: string | null }
   gamma_flip?: number | null
   gamma_flip_status?: 'ok' | 'no_cross'
   /** Locked empty-state copy when status is no_cross; null when ok. */
@@ -52,7 +61,16 @@ type BackendTerminalSnapshot = {
     put_call_oi_ratio: number | null
     dvol: number | null
     rv_ratio?: number | null
-    rv_trend?: 'Expanding' | 'Neutral' | 'Compressing' | null
+    /** 5-way RV momentum; legacy Neutral/Compressing still accepted. */
+    rv_trend?:
+      | 'Accelerating'
+      | 'Expanding'
+      | 'Stable'
+      | 'Contracting'
+      | 'Collapsing'
+      | 'Neutral'
+      | 'Compressing'
+      | null
     rv_short?: number | null
     rv_long?: number | null
   }
@@ -79,12 +97,17 @@ type BackendTerminalSnapshot = {
   vol_compare?: BackendVolCompare
 }
 
-type BackendVolSeriesPoint = { ts_ms?: number; value?: number }
+type BackendVolSeriesPoint = { ts_ms?: number; value?: number; gap_before?: boolean }
 
 type BackendVolCompare = {
   version?: string
   dvol_series?: BackendVolSeriesPoint[]
+  /** Primary RV30 series. */
   rv_series?: BackendVolSeriesPoint[]
+  /** Rolling 24h RV for the RV-trend view. */
+  rv1_series?: BackendVolSeriesPoint[]
+  /** Optional secondary RV7 overlay. */
+  rv7_series?: BackendVolSeriesPoint[]
   spread_series?: BackendVolSeriesPoint[]
   error?: string | null
   meta?: {
@@ -93,14 +116,35 @@ type BackendVolCompare = {
     units?: string
     dvol_source?: string
     rv_source?: string
+    rv30_source?: string
+    rv1_source?: string
+    rv7_source?: string
     spread_definition?: string
+    primary_pair?: string
+    chart_title?: string
     show_rv_default?: boolean
     show_spread_default?: boolean
     dvol_point_count?: number
     rv_point_count?: number
+    rv1_point_count?: number
+    rv7_point_count?: number
     spread_point_count?: number
     error?: string
   }
+}
+
+type BackendTermAtm = {
+  status?: string
+  method?: string | null
+  atm_iv?: number | null
+  dte_days?: number | null
+  target_days?: number | null
+  expiry_ts_ms?: number | null
+  lower_expiry_ts_ms?: number | null
+  lower_dte_days?: number | null
+  upper_expiry_ts_ms?: number | null
+  upper_dte_days?: number | null
+  interpolation_weight?: number | null
 }
 
 type BackendSkew25d = {
@@ -112,14 +156,12 @@ type BackendSkew25d = {
     '3m'?: number | null
     '6m'?: number | null
   }
-  /** Nearest-expiry front ATM (decimal vol) for term-structure chip. */
-  front?: {
-    status?: string
-    atm_iv?: number | null
-    dte_days?: number | null
-    expiry_ts_ms?: number | null
-  } | null
+  /** Exact constant-maturity ATM curve (decimal vol). */
+  term?: Partial<Record<'1d' | SkewTenor, BackendTermAtm>>
+  /** Backward-compatible alias for term.1d. */
+  front?: BackendTermAtm | null
   series?: BackendVolSeriesPoint[]
+  series_by_tenor?: Partial<Record<SkewTenor, BackendVolSeriesPoint[]>>
   meta?: {
     as_of_ms?: number
     chart_tenor?: string | null
@@ -128,16 +170,7 @@ type BackendSkew25d = {
     front_definition?: string
     primary_tenor_preference?: string[]
     /** Per-tenor detail from pipeline.skew_25d (includes atm_iv as decimal). */
-    detail?: Record<
-      string,
-      {
-        status?: string
-        atm_iv?: number | null
-        value?: number | null
-        dte_days?: number | null
-        expiry_ts_ms?: number | null
-      }
-    >
+    detail?: Record<string, BackendTermAtm & { value?: number | null }>
   }
   error?: string | null
 }
@@ -161,6 +194,60 @@ type BackendFlowRegime = {
   }
   vol_compare?: BackendVolCompare
   skew_25d?: BackendSkew25d
+  vol_surface?: BackendVolSurface
+  atm_term_curve?: BackendVolSurface
+  skew_surface?: BackendVolSurface
+}
+
+type BackendVolSurfaceTenor = {
+  atm_bid_iv_percent?: number | null
+  atm_ask_iv_percent?: number | null
+  atm_mid_iv_percent?: number | null
+  midpoint_validation_reasons?: string[]
+  tenor?: string
+  status?: string | null
+  atm_iv_percent?: number | null
+  skew_25_normalized?: number | null
+  skew_10_normalized?: number | null
+  tail_gap_vol_points?: number | null
+  rr_25_vol_points?: number | null
+  metric_reasons?: Record<string,string[]>
+  calendar_ok?: boolean | null
+  validation_reasons?: string[]
+  method?: string | null
+  lower_expiry_ts_ms?: number | null
+  upper_expiry_ts_ms?: number | null
+  lower_dte_days?: number | null
+  upper_dte_days?: number | null
+}
+
+type BackendVolSurface = {
+  refresh_status?: { state?: string }
+  capture_validated?: boolean
+  next_capture_ms?: number
+  capture_due_ms?: number
+  lookbacks?: Array<{ days: number; as_of_ms: number; term_structure: BackendVolSurfaceTenor[] }>
+  version?: string
+  as_of_ms?: number
+  valid_until_ms?: number
+  history?: Record<string, Record<string, BackendVolSeriesPoint[]>>
+  term_structure?: BackendVolSurfaceTenor[]
+  listed_expiries?: Array<{
+    expiry_ts_ms?: number
+    dte_days?: number
+    status?: string | null
+    atm_iv_percent?: number | null
+    forward_usd?: number | null
+    lower_strike?: number | null
+    upper_strike?: number | null
+    validation_reasons?: string[]
+  }>
+  atm_vs_rv?: {
+    atm_iv_percent?: number | null
+    rv_percent?: number | null
+    spread_percent?: number | null
+    rv_estimator?: string | null
+  }
 }
 
 type BackendGammaBar = {
@@ -169,6 +256,13 @@ type BackendGammaBar = {
   call_gamma_exposure_usd?: number
   put_gamma_exposure_usd?: number
   net_gamma_exposure_usd?: number
+  delta_exposure_usd?: number
+  call_delta_exposure_usd?: number
+  put_delta_exposure_usd?: number
+  net_delta_exposure_usd?: number
+  open_interest?: number
+  call_open_interest?: number
+  put_open_interest?: number
 }
 
 type BackendMarketSource = {
@@ -361,20 +455,30 @@ function toTerminalSnapshot(snapshot: BackendTerminalSnapshot): TerminalSnapshot
     maxPositiveGammaStrike: snapshot.max_positive_gamma_strike,
     maxNegativeGammaStrike: snapshot.max_negative_gamma_strike,
     ...(() => {
-      const status = snapshot.gamma_flip_status
-        ?? (snapshot.gamma_flip != null || snapshot.zero_gamma != null ? 'ok' : 'no_cross')
+      const status = snapshot.hvl_status
+        ?? snapshot.gamma_flip_status
+        ?? (snapshot.hvl != null || snapshot.gamma_flip != null || snapshot.zero_gamma != null
+          ? 'ok'
+          : 'no_cross')
       const level =
         status === 'no_cross'
           ? null
-          : finiteOrNull(snapshot.gamma_flip ?? snapshot.zero_gamma)
+          : finiteOrNull(snapshot.hvl ?? snapshot.gamma_flip ?? snapshot.zero_gamma)
       return {
         zeroGamma: level,
         gammaFlip: level,
         gammaFlipStatus: status as 'ok' | 'no_cross',
         gammaFlipNote:
           status === 'no_cross'
-            ? (snapshot.gamma_flip_note
-              ?? referenceMetrics.find((m) => m.label.includes('Gamma Flip') || m.label === 'Flip')?.note
+            ? (snapshot.hvl_note
+              ?? snapshot.gamma_flip_note
+              ?? referenceMetrics.find((m) =>
+                m.label === 'HVL'
+                || m.label.includes('Zero Gamma')
+                || m.label.includes('Gamma Flip')
+                || m.label === 'Flip'
+                || m.label === 'ZG'
+              )?.note
               ?? null)
             : null,
       }
@@ -411,6 +515,13 @@ function toGammaBar(row: BackendGammaBar): GammaBar {
     callGammaExposureUsd: row.call_gamma_exposure_usd,
     putGammaExposureUsd: row.put_gamma_exposure_usd,
     netGammaExposureUsd: row.net_gamma_exposure_usd,
+    deltaExposureUsd: row.delta_exposure_usd,
+    callDeltaExposureUsd: row.call_delta_exposure_usd,
+    putDeltaExposureUsd: row.put_delta_exposure_usd,
+    netDeltaExposureUsd: row.net_delta_exposure_usd,
+    openInterest: row.open_interest,
+    callOpenInterest: row.call_open_interest,
+    putOpenInterest: row.put_open_interest,
   }
 }
 
@@ -438,7 +549,9 @@ const EMPTY_VOL_COMPARE: VolCompare = {
   spreadSeries: [],
   meta: {
     units: 'percent',
-    window: '7d',
+    window: '365d',
+    chartTitle: 'IV vs RV',
+    primaryPair: 'DVOL (30d) vs RV30',
     showRvDefault: true,
     showSpreadDefault: true,
   },
@@ -448,10 +561,11 @@ function toVolSeries(raw?: BackendVolSeriesPoint[] | null): VolSeriesPoint[] {
   if (!raw?.length) return []
   return raw
     .map((p) => {
+      if (p.value == null) return null
       const tsMs = Number(p.ts_ms)
       const value = Number(p.value)
       if (!Number.isFinite(tsMs) || tsMs <= 0 || !Number.isFinite(value)) return null
-      return { tsMs, value }
+      return { tsMs, value, ...(p.gap_before ? {gapBefore:true} : {}) }
     })
     .filter((p): p is VolSeriesPoint => p !== null)
 }
@@ -460,24 +574,35 @@ function toVolCompare(raw?: BackendVolCompare | null): VolCompare {
   if (!raw) return EMPTY_VOL_COMPARE
   const dvolSeries = toVolSeries(raw.dvol_series)
   const rvSeries = toVolSeries(raw.rv_series)
+  const rv1Series = toVolSeries(raw.rv1_series)
+  const rv7Series = toVolSeries(raw.rv7_series)
   const spreadSeries = toVolSeries(raw.spread_series)
   return {
     version: raw.version,
     dvolSeries,
     rvSeries,
+    ...(rv1Series.length > 0 ? { rv1Series } : {}),
+    ...(rv7Series.length > 0 ? { rv7Series } : {}),
     spreadSeries,
     error: raw.error ?? raw.meta?.error ?? null,
     meta: {
       asOfMs: raw.meta?.as_of_ms,
-      window: raw.meta?.window ?? '7d',
+      window: raw.meta?.window ?? '365d',
       units: raw.meta?.units ?? 'percent',
       dvolSource: raw.meta?.dvol_source,
-      rvSource: raw.meta?.rv_source,
-      spreadDefinition: raw.meta?.spread_definition,
+      rvSource: raw.meta?.rv_source ?? raw.meta?.rv30_source,
+      rv30Source: raw.meta?.rv30_source ?? raw.meta?.rv_source,
+      rv1Source: raw.meta?.rv1_source,
+      rv7Source: raw.meta?.rv7_source,
+      spreadDefinition: raw.meta?.spread_definition ?? 'DVOL − RV30 (percent points)',
+      primaryPair: raw.meta?.primary_pair ?? 'DVOL (30d) vs RV30',
+      chartTitle: 'IV vs RV',
       showRvDefault: raw.meta?.show_rv_default ?? true,
       showSpreadDefault: raw.meta?.show_spread_default ?? true,
       dvolPointCount: raw.meta?.dvol_point_count ?? dvolSeries.length,
       rvPointCount: raw.meta?.rv_point_count ?? rvSeries.length,
+      rv1PointCount: raw.meta?.rv1_point_count ?? rv1Series.length,
+      rv7PointCount: raw.meta?.rv7_point_count ?? rv7Series.length,
       spreadPointCount: raw.meta?.spread_point_count ?? spreadSeries.length,
       error: raw.meta?.error,
     },
@@ -504,6 +629,81 @@ function toFlowRegime(raw: BackendFlowRegime): FlowRegime {
     },
     volCompare: raw.vol_compare ? toVolCompare(raw.vol_compare) : undefined,
     skew25d: raw.skew_25d ? toSkew25d(raw.skew_25d) : undefined,
+    volSurface: raw.vol_surface ? toVolSurface(raw.vol_surface) : undefined,
+    atmTermCurve: raw.atm_term_curve ? toVolSurface(raw.atm_term_curve, 'atm_term_curve.v1') : undefined,
+    skewSurface: raw.skew_surface ? toVolSurface(raw.skew_surface, 'local_delta_skew.v1') : undefined,
+  }
+}
+
+function toVolSurface(raw: BackendVolSurface, expectedVersion = 'desk_vol_surface.v2'): VolSurface {
+  const captured = ['atm_term_curve.v1','local_delta_skew.v1'].includes(expectedVersion) && isScheduledCaptureValid(
+    expectedVersion,raw.version,raw.as_of_ms,raw.valid_until_ms,raw.capture_validated,raw.next_capture_ms,raw.capture_due_ms)
+  const current = expectedVersion === 'atm_term_curve.v1'
+    ? captured || isAtmCurveCurrent(raw.version,raw.as_of_ms,raw.valid_until_ms)
+    : expectedVersion === 'local_delta_skew.v1' ? captured && Date.now() <= raw.capture_due_ms! && raw.refresh_status?.state !== 'failed'
+    : isSurfaceCurrent(raw.version,raw.as_of_ms)
+  const tenors = (raw.term_structure ?? [])
+    .filter((row) => typeof row.tenor === 'string' && row.tenor.length > 0)
+    .map((row) => ({
+      tenor: row.tenor as string,
+      status: row.status ?? null,
+      atmIvPercent: current && row.status === 'ok' && row.calendar_ok !== false ? finiteOrNull(row.atm_iv_percent) : null,
+      bidIvPercent: current && row.status === 'ok' ? finiteOrNull(row.atm_bid_iv_percent) : null,
+      askIvPercent: current && row.status === 'ok' ? finiteOrNull(row.atm_ask_iv_percent) : null,
+      midIvPercent: current && row.status === 'ok' ? finiteOrNull(row.atm_mid_iv_percent) : null,
+      midpointReasons: row.midpoint_validation_reasons ?? [],
+      skew25Normalized: current && row.status === 'ok' && row.calendar_ok !== false ? finiteOrNull(row.skew_25_normalized) : null,
+      skew10Normalized: current && !row.metric_reasons?.skew_10?.length ? finiteOrNull(row.skew_10_normalized) : null,
+      tailGapVolPoints: current && !row.metric_reasons?.tail_gap?.length ? finiteOrNull(row.tail_gap_vol_points) : null,
+      rr25VolPoints: current ? finiteOrNull(row.rr_25_vol_points) : null,
+      metricReasons: row.metric_reasons,
+      calendarOk: row.calendar_ok ?? null,
+      reasons: !current ? [expectedVersion === 'atm_term_curve.v1' ? 'atm_curve_stale' : 'surface_stale_or_legacy'] : row.validation_reasons ?? [],
+      method: row.method ?? null,
+      lowerExpiryTsMs: row.lower_expiry_ts_ms ?? null,
+      upperExpiryTsMs: row.upper_expiry_ts_ms ?? null,
+      lowerDteDays: row.lower_dte_days ?? null,
+      upperDteDays: row.upper_dte_days ?? null,
+    }))
+  const compared = raw.atm_vs_rv
+  return {
+    version: raw.version,
+    refreshState: raw.refresh_status?.state,
+    asOfMs: raw.as_of_ms,
+    captureDueMs: captured ? raw.capture_due_ms : undefined,
+    lookbacks: raw.version === 'atm_term_curve.v1' ? (raw.lookbacks ?? []).filter(row =>
+      Number.isInteger(row.days) && row.days >= 1 && row.days <= 365 && Number.isFinite(row.as_of_ms)
+    ).map(snapshot => ({ days: snapshot.days, asOfMs: snapshot.as_of_ms,
+      tenors: snapshot.term_structure.map(row => ({
+        tenor: row.tenor ?? '', status: row.status ?? null, calendarOk: row.calendar_ok,
+        atmIvPercent: row.status === 'ok' && row.calendar_ok !== false ? finiteOrNull(row.atm_iv_percent) : null,
+        skew25Normalized: null,
+      })),
+    })) : [],
+    history: Object.fromEntries(['atm', 'skew_25', 'skew_10', 'tail_gap'].map((name) => [name,
+      Object.fromEntries(Object.entries(raw.version === expectedVersion ? raw.history?.[name] ?? {} : {}).map(([tenor, values]) => [tenor, toVolSeries(values)])),
+    ])) as VolSurface['history'],
+    tenors,
+    listedExpiries: (raw.listed_expiries ?? []).flatMap((row) => {
+      const expiryTsMs = positiveTimestampOrNull(row.expiry_ts_ms)
+      const dteDays = finiteOrNull(row.dte_days)
+      if (expiryTsMs == null || dteDays == null || dteDays < 0) return []
+      return [{
+        expiryTsMs, dteDays, status: row.status ?? null,
+        atmIvPercent: current && row.status === 'ok' ? finiteOrNull(row.atm_iv_percent) : null,
+        forwardUsd: finiteOrNull(row.forward_usd),
+        lowerStrike: finiteOrNull(row.lower_strike), upperStrike: finiteOrNull(row.upper_strike),
+        reasons: !current ? [expectedVersion === 'atm_term_curve.v1' ? 'atm_curve_stale' : 'surface_stale_or_legacy'] : row.validation_reasons ?? [],
+      }]
+    }).sort((a,b) => a.expiryTsMs-b.expiryTsMs),
+    atmVsRv: compared && current
+      ? {
+          atmIvPercent: finiteOrNull(compared.atm_iv_percent),
+          rvPercent: finiteOrNull(compared.rv_percent),
+          spreadPercent: finiteOrNull(compared.spread_percent),
+          rvEstimator: compared.rv_estimator ?? null,
+        }
+      : undefined,
   }
 }
 
@@ -516,13 +716,17 @@ function toFlowRegime(raw: BackendFlowRegime): FlowRegime {
 function toSkew25d(raw: BackendSkew25d): Skew25d {
   const levels = raw.levels ?? {}
   const detail = raw.meta?.detail ?? {}
+  const hasConstantMaturityTerm = raw.term != null
+  const skewTenors: SkewTenor[] = ['1w', '1m', '3m', '6m']
   const atmFromDetail = (tenor: string): number | null => {
-    const entry = detail[tenor]
+    const entry = hasConstantMaturityTerm
+      ? raw.term?.[tenor as SkewTenor]
+      : detail[tenor]
     if (!entry || entry.status !== 'ok') return null
     return decimalVolToPercent(entry.atm_iv)
   }
 
-  const frontRaw = raw.front
+  const frontRaw = raw.term?.['1d'] ?? raw.front
   const frontAtm =
     frontRaw && frontRaw.status === 'ok'
       ? {
@@ -532,6 +736,12 @@ function toSkew25d(raw: BackendSkew25d): Skew25d {
             frontRaw.expiry_ts_ms != null && Number.isFinite(Number(frontRaw.expiry_ts_ms))
               ? Number(frontRaw.expiry_ts_ms)
               : null,
+          targetDays: finiteOrNull(frontRaw.target_days),
+          method: frontRaw.method ?? null,
+          lowerExpiryTsMs: positiveTimestampOrNull(frontRaw.lower_expiry_ts_ms),
+          lowerDteDays: finiteOrNull(frontRaw.lower_dte_days),
+          upperExpiryTsMs: positiveTimestampOrNull(frontRaw.upper_expiry_ts_ms),
+          upperDteDays: finiteOrNull(frontRaw.upper_dte_days),
           status: frontRaw.status ?? null,
         }
       : frontRaw
@@ -540,28 +750,65 @@ function toSkew25d(raw: BackendSkew25d): Skew25d {
             dteDays: finiteOrNull(frontRaw.dte_days),
             expiryTsMs:
               frontRaw.expiry_ts_ms != null && Number.isFinite(Number(frontRaw.expiry_ts_ms))
-                ? Number(frontRaw.expiry_ts_ms)
-                : null,
+              ? Number(frontRaw.expiry_ts_ms)
+              : null,
+            targetDays: finiteOrNull(frontRaw.target_days),
+            method: frontRaw.method ?? null,
+            lowerExpiryTsMs: positiveTimestampOrNull(frontRaw.lower_expiry_ts_ms),
+            lowerDteDays: finiteOrNull(frontRaw.lower_dte_days),
+            upperExpiryTsMs: positiveTimestampOrNull(frontRaw.upper_expiry_ts_ms),
+            upperDteDays: finiteOrNull(frontRaw.upper_dte_days),
             status: frontRaw.status ?? null,
           }
         : null
 
+  const primaryTenor = raw.primary_tenor ?? raw.meta?.chart_tenor ?? null
+  const legacySeries = toVolSeries(raw.series)
+  const seriesByTenor = Object.fromEntries(
+    skewTenors.map((tenor) => {
+      const dedicated = toVolSeries(raw.series_by_tenor?.[tenor])
+      const fallback = dedicated.length === 0 && tenor === primaryTenor ? legacySeries : dedicated
+      return [tenor, fallback]
+    }),
+  ) as Record<SkewTenor, VolSeriesPoint[]>
+  const termDetails = Object.fromEntries(
+    skewTenors.map((tenor) => {
+      const entry = hasConstantMaturityTerm ? raw.term?.[tenor] : detail[tenor]
+      const expiry = Number(entry?.expiry_ts_ms)
+      return [tenor, {
+        atmIvPercent: entry?.status === 'ok' ? decimalVolToPercent(entry.atm_iv) : null,
+        dteDays: finiteOrNull(entry?.dte_days),
+        expiryTsMs: Number.isFinite(expiry) && expiry > 0 ? expiry : null,
+        targetDays: finiteOrNull(entry?.target_days),
+        method: entry?.method ?? null,
+        lowerExpiryTsMs: positiveTimestampOrNull(entry?.lower_expiry_ts_ms),
+        lowerDteDays: finiteOrNull(entry?.lower_dte_days),
+        upperExpiryTsMs: positiveTimestampOrNull(entry?.upper_expiry_ts_ms),
+        upperDteDays: finiteOrNull(entry?.upper_dte_days),
+        status: entry?.status ?? null,
+      }]
+    }),
+  ) as NonNullable<Skew25d['termDetails']>
+
   return {
     formula: raw.formula,
-    primaryTenor: raw.primary_tenor ?? raw.meta?.chart_tenor ?? null,
+    primaryTenor,
     levels: {
       // Normalized skew — pass through as-is (do NOT /100 or *100).
       '1w': finiteOrNull(levels['1w']),
       '1m': finiteOrNull(levels['1m']),
       '3m': finiteOrNull(levels['3m']),
-      ...(levels['6m'] != null ? { '6m': finiteOrNull(levels['6m']) } : {}),
+      '6m': finiteOrNull(levels['6m']),
     },
-    series: toVolSeries(raw.series),
+    series: legacySeries,
+    seriesByTenor,
     atmIvPercent: {
       '1w': atmFromDetail('1w'),
       '1m': atmFromDetail('1m'),
       '3m': atmFromDetail('3m'),
+      '6m': atmFromDetail('6m'),
     },
+    termDetails,
     frontAtm,
     meta: {
       asOfMs: raw.meta?.as_of_ms,
@@ -584,6 +831,11 @@ function finiteOrNull(value: number | null | undefined): number | null {
   if (value == null) return null
   const n = Number(value)
   return Number.isFinite(n) ? n : null
+}
+
+function positiveTimestampOrNull(value: number | null | undefined): number | null {
+  const timestamp = finiteOrNull(value)
+  return timestamp != null && timestamp > 0 ? timestamp : null
 }
 
 /** Prefer dedicated live_index; fall back to Price panel Index (Deribit) source. */

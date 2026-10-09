@@ -7,25 +7,31 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import type { GexExpiry } from '@/api/mockGexData'
 import {
   getDisplaySpot,
-  type GammaBar,
-  type Skew25d,
   type TerminalSnapshot,
-  type VolCompare,
   type VolSeriesPoint,
+  type VolSurface,
+  type VolSurfaceTenor,
 } from '@/data/mockTerminal'
+import { useTerminalSnapshot } from '@/hooks/useTerminalSnapshot'
 import { formatStrike } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
-import { VolCompareChart } from '@/components/terminal/VolCompareChart'
+import {
+  describeIvRvSignal,
+} from '@/lib/volCompareModes'
+import type { RegimeAnalyticsFamily } from '@/components/terminal/RegimeAnalyticsPanel'
 
 /**
- * Regime desk — structural polarity on the ALL book.
+ * Regime desk.
  *
- * Hierarchy: Dealer Γ headline → continuous net-GEX profile
- * → dense metrics strip (Net GEX / RV / Context)
- * → display-only vol chips (Tail risk / Term structure / IV−RV)
- * → IV vs RV chart (pinned near workspace bottom-row height).
+ * Gamma gauge, net GEX, and the two peaks are the front expiry (0DTE).
+ * Market context reads the desk surface and Deribit Parkinson RV:
+ *   IV−RV = 30d constant-maturity ATM minus Parkinson RV30
+ *   Term structure = longest published tenor ATM minus 7d ATM
+ *   25Δ skew = 30d constant-maturity (put IV − call IV) / ATM
+ *   RV trend = Parkinson 24h / Parkinson 7d
  *
  * Structure / NY Session polarity is archived (not mounted):
  *   `@/components/terminal/archived/RegimePolarityBlock`
@@ -36,87 +42,125 @@ import { VolCompareChart } from '@/components/terminal/VolCompareChart'
  */
 export const RegimePanel = memo(function RegimePanel({
   bookSnapshot,
+  onInspectFamily,
 }: {
   bookSnapshot: TerminalSnapshot
+  onInspectFamily?: (family: RegimeAnalyticsFamily) => void
 }) {
-  const context = useMemo(() => getRegimeContext(bookSnapshot), [bookSnapshot])
+  const frontExpiry = listedFrontExpiry(bookSnapshot)
+  const zeroDteQuery = useTerminalSnapshot(frontExpiry ?? 'ALL')
+  const zeroDte = frontExpiry && zeroDteQuery.data?.expiry === frontExpiry
+    ? zeroDteQuery.data
+    : null
+  const context = useMemo(() => getRegimeContext(zeroDte), [zeroDte])
   const volChips = useMemo(() => getRegimeVolChips(bookSnapshot), [bookSnapshot])
-
-  const netGexUsd = bookSnapshot.bookStats?.netGexUsd ?? bookSnapshot.totalNetGexUsd
-  const netTone: RegimeTone = netGexUsd > 0 ? 'green' : netGexUsd < 0 ? 'red' : 'muted'
-  const dealerToneClassName = getRegimeToneClassName(context.dealerGammaTone)
+  const netGexUsd = zeroDte?.totalNetGexUsd
+  const netTone: RegimeTone = netGexUsd == null
+    ? 'muted'
+    : netGexUsd > 0
+      ? 'green'
+      : netGexUsd < 0
+        ? 'red'
+        : 'muted'
 
   return (
     <section
-      className="regime-panel mt-1 flex min-h-0 flex-1 flex-col overflow-hidden border-t pt-1.5 pb-1.5"
+      className="regime-panel flex min-h-0 flex-1 flex-col overflow-hidden"
       aria-label="Regime"
     >
-      {/* Upper stack flexes; chart below is height-capped to ~workspace bottom row */}
       <div className="regime-panel__upper">
-        {/* ── Header ── */}
-        <div className="regime-panel__header flex shrink-0 items-center justify-between gap-2">
-          <span className="regime-panel__title">Regime</span>
-          <span className="regime-panel__scope">ALL</span>
-        </div>
+        <header className="regime-panel__masthead">
+          <h2>Regime</h2>
+          <span
+            className="regime-panel__scope"
+            title={frontExpiry ? `Front expiry ${frontExpiry}` : 'Front expiry unavailable'}
+          >
+            0DTE
+          </span>
+        </header>
 
-        {/* ── Dealer Γ headline + score number ── */}
-        <div className="regime-panel__headline-row grid shrink-0 grid-cols-[1fr_auto] items-end gap-2">
-          <div className="min-w-0">
-            <div className={cn('regime-panel__headline', dealerToneClassName)}>
-              {context.dealerGammaLabel}
-            </div>
-          </div>
-          <div className={cn('regime-panel__score text-right', dealerToneClassName)}>
-            {formatRegimeScore(context.dealerGammaScore)}
-          </div>
-        </div>
-
-        {/* ── Continuous net-GEX profile (live GEX surface) ── */}
-        <NetGexProfile
-          profile={context.profile}
-          leftBound={context.leftBound}
-          rightBound={context.rightBound}
-          spotPosition={context.spotPosition}
-          spot={context.spot}
+        <DealerGammaGauge
+          label={context.dealerGammaLabel}
+          score={context.dealerGammaScore}
+          tone={context.dealerGammaTone}
         />
 
-        {/* ── Dense secondary metrics strip ── */}
-        <div
-          className="regime-metrics shrink-0 grid grid-cols-3 gap-0 border-t border-[var(--desk-rule)]"
-          role="group"
-          aria-label="Regime metrics"
-        >
-          <CompactMetric
-            label="Net GEX"
-            value={formatSignedCompactUsd(netGexUsd)}
-            tone={netTone}
-            edge
-          />
-          <CompactMetric
-            label="RV"
-            value={context.rvTrendLabel}
-            detail={context.rvTrendDetail}
-            tone={context.rvTrendTone}
-            edge
-          />
-          <CompactMetric
-            label="Context"
-            value={context.regimeReadLabel}
-            tone={context.regimeReadTone}
-          />
-        </div>
-
-        {/* ── Display-only vol chips (not in regime score) ── */}
-        <RegimeVolChips chips={volChips} />
+        <RegimeVolChips
+          chips={volChips}
+          netGexUsd={netGexUsd ?? null}
+          netTone={netTone}
+          volCompare={bookSnapshot.flowRegime?.volCompare ?? bookSnapshot.volCompare}
+          positiveGammaStrike={zeroDte?.maxPositiveGammaStrike}
+          negativeGammaStrike={zeroDte?.maxNegativeGammaStrike}
+          spot={getDisplaySpot(bookSnapshot)}
+          onInspectFamily={onInspectFamily}
+        />
       </div>
-
-      {/* ── IV vs RV — height pinned to ~default workspace bottom row (38%) ── */}
-      <VolCompareZone
-        volCompare={bookSnapshot.flowRegime?.volCompare ?? bookSnapshot.volCompare}
-      />
     </section>
   )
 })
+
+function listedFrontExpiry(snapshot: TerminalSnapshot): GexExpiry | null {
+  return snapshot.expiries?.find((expiry) => expiry !== 'ALL') ?? null
+}
+
+function DealerGammaGauge({
+  label,
+  score,
+  tone,
+}: {
+  label: string
+  score: number | null
+  tone: RegimeTone
+}) {
+  const markerPct = score == null ? 50 : clamp((score + 1) * 50, 2, 98)
+  const toneClassName = getRegimeToneClassName(tone)
+
+  return (
+    <div
+      className="regime-gauge"
+      role="img"
+      aria-label={
+        score == null
+          ? 'Dealer gamma regime unavailable'
+          : `Dealer gamma regime ${label}, score ${formatRegimeScore(score)}`
+      }
+    >
+      <div className="regime-gauge__readout">
+        <div>
+          <span>Dealer gamma</span>
+          <strong className={toneClassName}>{label}</strong>
+          <em>{score == null ? '—' : getDealerGammaBehavior(score)}</em>
+        </div>
+        <div className="regime-gauge__score">
+          <span>Score</span>
+          <strong className={toneClassName}>{score == null ? '—' : formatRegimeScore(score)}</strong>
+        </div>
+      </div>
+      <div className="regime-gauge__plot" aria-hidden>
+        <div className="regime-gauge__zones">
+          <span className="regime-gauge__zone regime-gauge__zone--short" />
+          <span className="regime-gauge__zone regime-gauge__zone--neutral" />
+          <span className="regime-gauge__zone regime-gauge__zone--long" />
+        </div>
+        <div className="regime-gauge__center" />
+        {score == null ? null : (
+          <div
+            className={cn('regime-gauge__marker', toneClassName)}
+            style={{ left: `${markerPct}%` }}
+          >
+            <i />
+          </div>
+        )}
+      </div>
+      <div className="regime-gauge__axis" aria-hidden>
+        <span>Short</span>
+        <span>Neutral</span>
+        <span>Long</span>
+      </div>
+    </div>
+  )
+}
 
 /* ─────────────────────────────────────────────────────────────────────────── */
 /* Display-only vol chips (Tail / Term / IV−RV) — never enter score math       */
@@ -129,462 +173,444 @@ const EMPTY_VOL_SERIES: VolSeriesPoint[] = []
  * Stored value is dimensionless normalized skew (decimal); display is Glassnode-style
  * percent: e.g. 0.064 → +6.4%. Marker domain: fixed [−20%, +20%] ≡ [−0.20, +0.20].
  *
- * Cutover thresholds (unchanged); secondary-line copy only:
- * |s| < 4%            → Muted
- * put  4%–10%         → Mild put
- * put 10%–18%         → Elevated put
- * put ≥ 18%           → Heavy put
- * call 4%–10%         → Mild call
- * call ≥ 10%          → Elevated call
+ * Purpose-built states (what the options market is pricing):
+ * put  ≥ 18%          → Extreme Downside Skew
+ * put  10%–18%        → Downside Protection Bid
+ * |s|  < 10%          → Tail Risk Neutral
+ * call 10%–18%        → Downside Protection Cheap
+ * call ≥ 18%          → Extreme Upside Skew
  */
-const TAIL_MUTED_ABS = 0.04
 const TAIL_HIGH_ABS = 0.10
 const TAIL_EXTREME_ABS = 0.18
 /** Marker scale domain half-width (fixed; ±20% on the percent scale). */
 const TAIL_SCALE_ABS = 0.20
 
 /**
- * Term structure: |long − front| vol pts under this → Flat.
- * Long = DVOL (fallback 1m ATM); front = nearest-expiry ATM (not ~7d).
+ * Term structure shape: |long − 7d| vol pts under this → Flat Term Structure.
+ * Long is the longest published constant-maturity tenor past 7d (180d, else 90d, else 30d).
+ * Contango / Backwardation → |long − 7d| ≥ TERM_FLAT_POINTS
+ * Steep Contango / Stressed Backwardation → |long − 7d| ≥ TERM_STEEP_POINTS
  */
-const TERM_FLAT_POINTS = 1.0
-
-/**
- * Absolute DVOL (fallback front) vol-regime buckets — display only.
- *   Very calm  < 30
- *   Calm       [30, 40)
- *   Normal     [40, 55)
- *   Elevated   [55, 75)
- *   Stressed   ≥ 75
- */
-const VOL_REGIME_VERY_CALM = 30
-const VOL_REGIME_CALM = 40
-const VOL_REGIME_NORMAL = 55
-const VOL_REGIME_ELEVATED = 75
-
-/** IV−RV spread points: outside ±this → rich/cheap. */
-const IV_RV_NEUTRAL_POINTS = 2.0
-
-type PrimarySkew = {
-  /** Normalized 25Δ skew from levels only (never series). */
-  value: number
-  /** Tenor that supplied the value: 1m | 1w | 3m */
-  tenor: '1m' | '1w' | '3m'
-}
+const TERM_FLAT_POINTS = 1.5
+/** Magnitude cut for STEEP CONTANGO / STRESSED BACKWARDATION. */
+const TERM_STEEP_POINTS = 5.0
 
 type RegimeVolChipsModel = {
   tail: {
     /** Same skew value drives number, marker, and prose. */
     value: number | null
-    tenor: '1m' | '1w' | '3m' | null
+    /** Purpose-built market-state label (Protection Bid, Upside Skew, …). */
     prose: string
+    /** Hover interpretation for the state label. */
+    hint: string
     tone: RegimeTone
     markerPct: number
   }
   term: {
     longVol: number | null
     frontVol: number | null
+    longTenor: string | null
+    /**
+     * Shape only (+ spread pts). Never includes absolute vol calm/stressed.
+     * Stressed Backwardation | Backwardation | Flat Term Structure | Contango | Steep Contango
+     */
     label: string
     detail: string
-    /** Absolute vol-regime secondary line (from DVOL, fallback front). */
-    regime: string
     tone: RegimeTone
+    title: string
   }
   spread: {
     value: number | null
+    /** Short flag: IV EXTENDED / IV RICH / IV NEUTRAL / IV CHEAP / IV DEPRESSED. */
     label: string
     detail: string
     tone: RegimeTone
+    title: string
   }
 }
 
-function RegimeVolChips({ chips }: { chips: RegimeVolChipsModel }) {
-  // Numeric readout is skew only — no tenor suffix (1m/1w/3m).
-  const tailReadout =
-    chips.tail.value == null ? '—' : formatSkewNormalized(chips.tail.value)
+function RegimeVolChips({
+  chips,
+  netGexUsd,
+  netTone,
+  volCompare,
+  positiveGammaStrike,
+  negativeGammaStrike,
+  spot,
+  onInspectFamily,
+}: {
+  chips: RegimeVolChipsModel
+  netGexUsd: number | null
+  netTone: RegimeTone
+  volCompare: TerminalSnapshot['volCompare']
+  positiveGammaStrike: number | undefined
+  negativeGammaStrike: number | undefined
+  spot: number
+  onInspectFamily?: (family: RegimeAnalyticsFamily) => void
+}) {
+  const tailReadout = chips.tail.value == null ? '—' : formatSkewNormalized(chips.tail.value)
+  const termSpread = chips.term.longVol != null && chips.term.frontVol != null
+    ? chips.term.longVol - chips.term.frontVol
+    : null
+  const dailyRv = lastFiniteValue(volCompare?.rv1Series ?? EMPTY_VOL_SERIES)
+  const weeklyRv = lastFiniteValue(volCompare?.rv7Series ?? EMPTY_VOL_SERIES)
+  const paceRatio = dailyRv != null && weeklyRv != null && weeklyRv > 0
+    ? dailyRv / weeklyRv
+    : null
+  const gammaDistance = (strike: number | undefined) => {
+    if (strike == null || !(spot > 0) || !Number.isFinite(strike) || !(strike > 0)) return '—'
+    const pct = ((strike - spot) / spot) * 100
+    const sign = pct > 0 ? '+' : pct < 0 ? '−' : ''
+    return `${sign}${Math.abs(pct).toFixed(1)}%`
+  }
 
   return (
-    <div
-      className="regime-vol-chips shrink-0 border-t border-[var(--desk-rule)]"
-      role="group"
-      aria-label="Vol context chips display only"
-    >
-      {/* Tail risk (skew) — 25Δ normalized; display only */}
-      <div className="regime-vol-chip regime-vol-chip--tail">
-        <div className="regime-vol-chip__head">
-          <span className="regime-vol-chip__label">Tail risk (skew)</span>
-          <span
-            className={cn(
-              'regime-vol-chip__value regime-vol-chip__value--compact',
-              getRegimeToneClassName(chips.tail.tone),
-            )}
-            title={
-              chips.tail.value == null
-                ? undefined
-                : `Primary skew${chips.tail.tenor ? ` (${chips.tail.tenor})` : ''} · levels only`
-            }
-          >
-            {tailReadout}
-          </span>
+    <div className="regime-positioning" role="group" aria-label="Dealer positioning and market context">
+      <section className="regime-positioning__book" aria-label="0DTE dealer positioning">
+        <div className="regime-positioning__net">
+          <span>Net GEX</span>
+          <strong className={getRegimeToneClassName(netTone)}>
+            {netGexUsd == null ? '—' : formatSignedCompactUsd(netGexUsd)}
+          </strong>
+          <em>
+            {netGexUsd == null
+              ? '—'
+              : netGexUsd < 0
+                ? 'Dealer short'
+                : netGexUsd > 0
+                  ? 'Dealer long'
+                  : 'Balanced book'}
+          </em>
         </div>
-        <div className="regime-vol-chip__body regime-vol-chip__body--scale">
-          <div
-            className="regime-vol-chip__scale"
-            role="img"
-            aria-label={
-              chips.tail.value == null
-                ? 'Skew scale unavailable'
-                : `Tail risk skew ${formatSkewNormalized(chips.tail.value)} on low to high scale`
-            }
-          >
-            <span className="regime-vol-chip__scale-end">Low</span>
-            <div className="regime-vol-chip__track">
-              <div className="regime-vol-chip__track-mid" aria-hidden />
-              {chips.tail.value != null ? (
-                <div
-                  className={cn(
-                    'regime-vol-chip__marker',
-                    getRegimeToneClassName(chips.tail.tone),
-                  )}
-                  style={{ left: `${chips.tail.markerPct}%` }}
-                />
-              ) : null}
-            </div>
-            <span className="regime-vol-chip__scale-end">High</span>
-          </div>
+        <div className="regime-positioning__levels">
+          <PositioningLevel
+            label="+Γ peak"
+            strike={positiveGammaStrike}
+            distance={gammaDistance(positiveGammaStrike)}
+            tone="green"
+          />
+          <PositioningLevel
+            label="−Γ peak"
+            strike={negativeGammaStrike}
+            distance={gammaDistance(negativeGammaStrike)}
+            tone="red"
+          />
         </div>
-        <div
-          className={cn(
-            'regime-vol-chip__prose regime-vol-chip__prose--under-scale',
-            getRegimeToneClassName(chips.tail.tone),
-          )}
-        >
-          {chips.tail.prose}
-        </div>
-      </div>
+      </section>
 
-      {/* Term structure — DVOL (or 1m ATM) vs nearest-expiry front ATM */}
-      <div className="regime-vol-chip regime-vol-chip--term">
-        {/*
-          Two-column desk: left = label + detail, right = Contango / Calm stack.
-          Keeps secondary vol-regime on the same status rail (not a free row).
-        */}
-        <div className="regime-vol-chip__term">
-          <span className="regime-vol-chip__label">Term structure</span>
-          <span className={cn('regime-vol-chip__flag', getRegimeToneClassName(chips.term.tone))}>
-            {chips.term.label}
-          </span>
-          <span className="regime-vol-chip__value">{chips.term.detail}</span>
-          <span className="regime-vol-chip__status-secondary regime-vol-chip__prose--muted">
-            {chips.term.regime}
-          </span>
-        </div>
-      </div>
-
-      {/* IV−RV spread from vol_compare — flag colors match chart baseline palette */}
-      <div className="regime-vol-chip">
-        <div className="regime-vol-chip__head">
-          <span className="regime-vol-chip__label">IV−RV</span>
-          <span
-            className={cn(
-              'regime-vol-chip__flag',
-              chips.spread.tone === 'blue' && 'regime-vol-chip__flag--iv-rich',
-              chips.spread.tone === 'amber' && 'regime-vol-chip__flag--iv-cheap',
-              chips.spread.tone === 'muted' && getRegimeToneClassName('muted'),
-            )}
-          >
-            {chips.spread.label}
-          </span>
-        </div>
-        <div className="regime-vol-chip__body">
-          <span className="regime-vol-chip__value">{chips.spread.detail}</span>
-        </div>
-      </div>
+      <section className="regime-evidence" aria-label="Market context">
+        <EvidenceRow
+          family="volatility"
+          label="IV - RV (30D)"
+          title={chips.spread.title}
+          value={chips.spread.value == null ? '—' : `${formatSpreadPoints(chips.spread.value)} pts`}
+          state={chips.spread.label}
+          tone={chips.spread.tone}
+          onInspect={onInspectFamily}
+        />
+        <EvidenceRow
+          family="term"
+          label="Term structure (Long − 7D)"
+          title={chips.term.title}
+          value={termSpread == null ? '—' : `${formatSpreadPoints(termSpread)} pts`}
+          state={chips.term.label}
+          tone={chips.term.tone}
+          onInspect={onInspectFamily}
+        />
+        <EvidenceRow
+          family="skew"
+          label="25Δ skew (30D)"
+          title={chips.tail.hint}
+          value={tailReadout}
+          state={chips.tail.prose}
+          tone={chips.tail.tone}
+          onInspect={onInspectFamily}
+        />
+        <EvidenceRow
+          family="rv"
+          label="RV trend (1D / 7D)"
+          title="Parkinson realized vol, last 24 hourly bars divided by the last 168, Deribit BTC-PERPETUAL"
+          value={paceRatio == null ? '—' : `${paceRatio.toFixed(2)}×`}
+          state={formatRvTrendLabel(paceRatio)}
+          tone={paceRatio == null ? 'muted' : paceRatio >= 1.1 ? 'amber' : paceRatio < 0.9 ? 'blue' : 'muted'}
+          onInspect={onInspectFamily}
+        />
+      </section>
     </div>
   )
 }
 
-function getRegimeVolChips(bookSnapshot: TerminalSnapshot): RegimeVolChipsModel {
-  const skew = bookSnapshot.flowRegime?.skew25d
-  const volCompare = bookSnapshot.flowRegime?.volCompare ?? bookSnapshot.volCompare
-  const dvol =
-    bookSnapshot.bookStats?.dvol
-    ?? lastFiniteValue(volCompare?.dvolSeries ?? EMPTY_VOL_SERIES)
+function PositioningLevel({
+  label,
+  strike,
+  distance,
+  tone,
+}: {
+  label: string
+  strike: number | undefined
+  distance: string
+  tone: RegimeTone
+}) {
+  const shown = strike != null && Number.isFinite(strike) && strike > 0
+  return (
+    <div className="regime-positioning__level">
+      <span>{label}</span>
+      <strong className={getRegimeToneClassName(tone)}>{shown ? formatStrike(strike) : '—'}</strong>
+      <em>{distance}</em>
+    </div>
+  )
+}
 
+function EvidenceRow({
+  family,
+  label,
+  title,
+  value,
+  state,
+  tone,
+  onInspect,
+}: {
+  family: RegimeAnalyticsFamily
+  label: string
+  title: string
+  value: string
+  state: string
+  tone: RegimeTone
+  onInspect?: (family: RegimeAnalyticsFamily) => void
+}) {
+  const content = (
+    <>
+      <span>{label}</span>
+      <strong className={getRegimeToneClassName(tone)}>{value}</strong>
+      <em>{state}</em>
+      {onInspect ? <i aria-hidden>›</i> : null}
+    </>
+  )
+
+  return onInspect ? (
+    <button
+      type="button"
+      className="regime-evidence__row regime-evidence__row--action"
+      title={title}
+      onClick={() => onInspect(family)}
+    >
+      {content}
+    </button>
+  ) : (
+    <div className="regime-evidence__row" title={title}>{content}</div>
+  )
+}
+
+function formatRvTrendLabel(ratio: number | null): string {
+  if (ratio == null || !Number.isFinite(ratio)) return 'Unavailable'
+  if (ratio >= 1.3) return 'Accelerating'
+  if (ratio >= 1.1) return 'Expanding'
+  if (ratio >= 0.9) return 'Stable'
+  if (ratio >= 0.7) return 'Contracting'
+  return 'Collapsing'
+}
+
+const SKEW_TENOR = '30d'
+const TERM_FRONT_TENOR = '7d'
+const TERM_LONG_TENORS = ['180d', '90d', '30d'] as const
+
+function getRegimeVolChips(bookSnapshot: TerminalSnapshot): RegimeVolChipsModel {
   return {
-    tail: getTailRiskChip(skew),
-    term: getTermStructureChip(skew, dvol),
-    spread: getIvRvSpreadChip(volCompare),
+    tail: getTailRiskChip(bookSnapshot.flowRegime?.skewSurface),
+    term: getTermStructureChip(bookSnapshot.flowRegime?.atmTermCurve),
+    spread: getIvRvSpreadChip(bookSnapshot.flowRegime?.atmTermCurve),
   }
 }
 
 /**
- * Tail risk chip from a **single** primary 25Δ skew resolution.
- * Number, marker position, and prose all use the same skew value.
- * Readout shows skew only (no tenor suffix). Tenor kept for tooltip/source.
- * Source: levels only, order 1m → 1w → 3m (never series — avoids divergent paths).
+ * Independent 30-day fixed-delta term interpolation of local 25Δ wings.
+ * Unit: (put IV − call IV) / forward ATM.
  */
-function getTailRiskChip(skew: Skew25d | undefined): RegimeVolChipsModel['tail'] {
-  const primary = resolvePrimarySkew(skew)
-  if (primary == null) {
+function getTailRiskChip(surface: VolSurface | undefined): RegimeVolChipsModel['tail'] {
+  const value = surface?.captureDueMs != null && Date.now() > surface.captureDueMs ? null
+    : tenorField(surface, SKEW_TENOR, (row) => row.skew25Normalized)
+  if (value == null) {
     return {
       value: null,
-      tenor: null,
       prose: '—',
+      hint: '30-day constant-maturity 25-delta skew is unavailable',
       tone: 'muted',
       markerPct: 50,
     }
   }
 
-  const { value, tenor } = primary
-  const { prose, tone } = describeTailSkew(value)
-  // Map fixed domain [−TAIL_SCALE_ABS, +TAIL_SCALE_ABS] → 0..100 (Low→High).
-  // Soft edge inset is display-only (marker radius); same value as numeric readout.
+  const described = describeTailSkew(value)
   const markerPct = clamp(((value / TAIL_SCALE_ABS) + 1) * 50, 4, 96)
-  return { value, tenor, prose, tone, markerPct }
+  return {
+    value,
+    prose: described.prose,
+    hint: '30-day constant-maturity 25-delta skew, put IV minus call IV, as a percent of ATM',
+    tone: described.tone,
+    markerPct,
+  }
 }
 
 /**
  * Secondary line + tone from sign/magnitude of the same primary skew (decimal).
- * Thresholds unchanged — copy bands only (Mild / Elevated / Heavy put|call).
+ * Purpose-built market-state labels (not “elevated / mild put skew” prose):
+ *   extreme put → Extreme Downside Skew
+ *   high put    → Downside Protection Bid
+ *   midrange    → Tail Risk Neutral
+ *   low put     → Downside Protection Cheap
+ *   inverted    → Extreme Upside Skew
  */
-function describeTailSkew(value: number): { prose: string; tone: RegimeTone } {
-  const abs = Math.abs(value)
-  if (abs < TAIL_MUTED_ABS) {
+function describeTailSkew(value: number): {
+  prose: string
+  hint: string
+  tone: RegimeTone
+} {
+  if (value >= TAIL_EXTREME_ABS) {
     return {
-      prose: 'Balanced skew (puts and calls similar)',
-      tone: 'muted',
-    }
-  }
-  if (value > 0) {
-    // Put skew (positive normalized) → mild / elevated / heavy
-    if (abs >= TAIL_EXTREME_ABS) {
-      return {
-        prose: 'Heavy put skew (downside premium rich)',
-        tone: 'red',
-      }
-    }
-    if (abs >= TAIL_HIGH_ABS) {
-      return {
-        prose: 'Elevated put skew (downside premium bid)',
-        tone: 'red',
-      }
-    }
-    return {
-      prose: 'Mild put skew (modest downside premium)',
+      prose: 'Extreme Downside Skew',
+      hint: 'Put wing exceptionally rich — downside tail heavily priced',
       tone: 'red',
     }
   }
-  // Call skew (negative): mild 4%–10%, elevated ≥ 10%
-  if (abs >= TAIL_HIGH_ABS) {
+  if (value >= TAIL_HIGH_ABS) {
     return {
-      prose: 'Elevated call skew (upside premium bid)',
+      prose: 'Downside Protection Bid',
+      hint: 'Put demand / tail premium elevated',
+      tone: 'red',
+    }
+  }
+  if (value > -TAIL_HIGH_ABS) {
+    return {
+      prose: 'Tail Risk Neutral',
+      hint: 'Skew near its normal range',
+      tone: 'muted',
+    }
+  }
+  if (value > -TAIL_EXTREME_ABS) {
+    return {
+      prose: 'Downside Protection Cheap',
+      hint: 'Downside insurance relatively inexpensive',
       tone: 'green',
     }
   }
   return {
-    prose: 'Mild call skew (modest upside premium)',
+    prose: 'Extreme Upside Skew',
+    hint: 'Call wing exceptionally rich — upside premium heavily priced',
     tone: 'green',
   }
 }
 
 /**
- * Term structure ≈ VIX/VIX1D: DVOL (or 1m ATM) vs nearest-listed-expiry front ATM.
- *
- * Detail string (when both legs present):
- *   `{longTag} {long}% / Front ({dte}d) {front}%`
- *   e.g. DVOL 38.2% / Front (2d) 36.4%
- * Flag: Contango | Flat | Backwardation. Secondary: Calm…Stressed.
- *
- * Fallbacks (display only):
- * 1. long = DVOL if available, else 1m ATM IV from chain
- * 2. front = skew.frontAtm (nearest expiry DTE ≥ MIN_DTE), not closest-to-7d
- * 3. if front missing → show long only, label "—" (cannot classify shape)
- * 4. if both missing → "—"
- * Shape: long − front in vol points; |diff| < 1.0 → Flat.
- * Secondary: absolute vol regime from DVOL (fallback front).
+ * Long constant-maturity ATM minus the 7-day ATM.
+ * Long is 180d when that tenor is published, otherwise 90d, otherwise 30d.
+ * A missing leg stays blank. DVOL is not a substitute for either leg.
  */
-function getTermStructureChip(
-  skew: Skew25d | undefined,
-  dvol: number | null | undefined,
-): RegimeVolChipsModel['term'] {
-  const atm = skew?.atmIvPercent
-  const frontAtm = skew?.frontAtm
-  // Prefer explicit nearest-expiry front; fall back to 1w only if front missing
-  // (legacy payloads before front field existed).
-  const frontVol =
-    finiteVol(frontAtm?.atmIvPercent ?? null)
-    ?? finiteVol(atm?.['1w'] ?? null)
-  const frontDte = frontAtm?.dteDays ?? null
-  const longFromDvol = finiteVol(dvol ?? null)
-  const longFrom1m = finiteVol(atm?.['1m'] ?? null)
-  const longVol = longFromDvol ?? longFrom1m
-  const longSource = longFromDvol != null ? 'DVOL' : longFrom1m != null ? '1M ATM' : null
+function getTermStructureChip(surface: VolSurface | undefined): RegimeVolChipsModel['term'] {
+  const front = findTenor(surface, TERM_FRONT_TENOR)
+  const long = TERM_LONG_TENORS
+    .map((tenor) => findTenor(surface, tenor))
+    .find((row) => row != null) ?? null
+  const frontVol = finiteVol(front?.atmIvPercent)
+  const longVol = finiteVol(long?.atmIvPercent)
+  const longTenor = long?.tenor ?? null
+  const title = termStructureTitle(longTenor, longVol, frontVol)
 
-  const regimeVol = longFromDvol ?? frontVol
-  const regime = describeVolRegime(regimeVol)
-
-  if (longVol == null && frontVol == null) {
-    return {
-      longVol: null,
-      frontVol: null,
-      label: '—',
-      detail: '—',
-      regime,
-      tone: 'muted',
-    }
-  }
-
-  const frontTag = formatFrontLegTag(frontVol, frontDte, frontAtm?.status)
-
-  if (frontVol == null) {
+  if (frontVol == null || longVol == null) {
     return {
       longVol,
-      frontVol: null,
-      label: '—',
-      detail: longVol != null && longSource
-        ? `${longSource} ${formatVolPercent(longVol)} / Front n/a`
-        : '—',
-      regime,
-      tone: 'muted',
-    }
-  }
-
-  if (longVol == null) {
-    return {
-      longVol: null,
       frontVol,
+      longTenor,
       label: '—',
-      detail: `${frontTag} · long n/a`,
-      regime,
+      detail: '—',
       tone: 'muted',
+      title,
     }
   }
 
   const diff = longVol - frontVol
-  let label: string
+  const absDiff = Math.abs(diff)
+  let shape: string
   let tone: RegimeTone
-  if (Math.abs(diff) < TERM_FLAT_POINTS) {
-    label = 'Flat'
+  if (absDiff < TERM_FLAT_POINTS) {
+    shape = 'Flat Term Structure'
     tone = 'muted'
-  } else if (diff > 0) {
-    label = 'Contango'
+  } else if (diff >= TERM_STEEP_POINTS) {
+    shape = 'Steep Contango'
     tone = 'blue'
+  } else if (diff >= TERM_FLAT_POINTS) {
+    shape = 'Contango'
+    tone = 'blue'
+  } else if (diff <= -TERM_STEEP_POINTS) {
+    shape = 'Stressed Backwardation'
+    tone = 'amber'
   } else {
-    label = 'Backwardation'
+    shape = 'Backwardation'
     tone = 'amber'
   }
 
-  // Detail: "DVOL 38.2% / Front (2d) 36.4%" (or 1M ATM fallback for long).
-  const longTag = longSource === 'DVOL' ? 'DVOL' : '1M ATM'
   return {
     longVol,
     frontVol,
-    label,
-    detail: `${longTag} ${formatVolPercent(longVol)} / ${frontTag}`,
-    regime,
+    longTenor,
+    label: `${shape} ${formatSpreadPoints(diff)}`,
+    detail: `${formatTenorTag(TERM_FRONT_TENOR)} ${formatVolPercent(frontVol)} → ${formatTenorTag(longTenor)} ${formatVolPercent(longVol)}`,
     tone,
+    title,
   }
 }
 
-/**
- * Front leg display tag. Prefer "Front ({dte}d) {vol}%" when dte is known.
- * Example: Front (2d) 36.4%
- */
-function formatFrontLegTag(
+function termStructureTitle(
+  longTenor: string | null,
+  longVol: number | null,
   frontVol: number | null,
-  dteDays: number | null,
-  status: string | null | undefined,
 ): string {
-  if (frontVol == null) return 'Front n/a'
-  const vol = formatVolPercent(frontVol)
-  if (dteDays != null && Number.isFinite(dteDays) && dteDays >= 0) {
-    return `Front (${formatFrontDteLabel(dteDays)}) ${vol}`
+  const longLabel = longTenor ? formatTenorTag(longTenor) : 'long'
+  if (longVol == null || frontVol == null) {
+    return `${longLabel} constant-maturity ATM minus 7-day ATM`
   }
-  if (status && status !== 'ok') return `Front ${vol}`
-  return `Front ${vol}`
+  return `${longLabel} ATM ${formatVolPercent(longVol)} minus 7-day ATM ${formatVolPercent(frontVol)}`
+}
+
+function formatTenorTag(tenor: string | null): string {
+  if (!tenor) return 'Long'
+  return tenor.toUpperCase()
 }
 
 /**
- * Compact DTE from front.dte_days (display only — does not change selection math).
- *
- * Rule:
- * - dte &lt; 1 day → one decimal (e.g. 0.9d) so sub-day front stays legible
- * - dte ≥ 1 day  → nearest whole day (e.g. 1d, 2d, 14d) — avoids "2.0d" noise
+ * IV−RV chip: 30d constant-maturity ATM minus Parkinson RV30.
  */
-function formatFrontDteLabel(dteDays: number): string {
-  if (dteDays < 1) return `${dteDays.toFixed(1)}d`
-  return `${Math.round(dteDays)}d`
-}
-
-/**
- * Absolute vol regime from DVOL (fallback front ATM). Display only.
- * Buckets: Very calm &lt;30 · Calm [30,40) · Normal [40,55) · Elevated [55,75) · Stressed ≥75.
- */
-function describeVolRegime(volPercent: number | null): string {
-  if (volPercent == null || !Number.isFinite(volPercent) || volPercent <= 0) {
-    return 'Vol regime —'
-  }
-  if (volPercent < VOL_REGIME_VERY_CALM) return 'Very calm'
-  if (volPercent < VOL_REGIME_CALM) return 'Calm'
-  if (volPercent < VOL_REGIME_NORMAL) return 'Normal'
-  if (volPercent < VOL_REGIME_ELEVATED) return 'Elevated'
-  return 'Stressed'
-}
-
-/**
- * IV−RV spread points from vol_compare (DVOL − RV). Display only.
- * Flag colors match the IV vs RV chart baseline palette:
- *   positive spread (IV rich)  → chart spreadPos blue
- *   negative spread (IV cheap) → chart spreadNeg amber/brown
- */
-function getIvRvSpreadChip(volCompare: VolCompare | undefined): RegimeVolChipsModel['spread'] {
-  const value = lastFiniteValue(volCompare?.spreadSeries ?? EMPTY_VOL_SERIES)
+function getIvRvSpreadChip(surface: VolSurface | undefined): RegimeVolChipsModel['spread'] {
+  const title = '30-day constant-maturity ATM minus 30-day Parkinson realized vol'
+  const compared = surface?.captureDueMs != null && Date.now() > surface.captureDueMs ? undefined : surface?.atmVsRv
+  const atm = finiteVol(compared?.atmIvPercent)
+  const rv = finiteVol(compared?.rvPercent)
+  const stored = finiteOrNull(compared?.spreadPercent)
+  const value = stored ?? (atm != null && rv != null ? atm - rv : null)
   if (value == null) {
-    return { value: null, label: '—', detail: '—', tone: 'muted' }
+    return { value: null, label: '—', detail: '—', tone: 'muted', title }
   }
-
-  let label: string
-  let tone: RegimeTone
-  if (value > IV_RV_NEUTRAL_POINTS) {
-    label = 'IV rich'
-    tone = 'blue'
-  } else if (value < -IV_RV_NEUTRAL_POINTS) {
-    label = 'IV cheap'
-    tone = 'amber'
-  } else {
-    label = 'Neutral'
-    tone = 'muted'
-  }
-
+  const signal = describeIvRvSignal(value)
   return {
     value,
-    label,
+    label: signal.label,
     detail: `${formatSpreadPoints(value)} pts`,
-    tone,
+    tone: signal.tone,
+    title,
   }
 }
 
-/**
- * Resolve primary skew for Tail chip from **levels only**.
- * Order: 1m → 1w → 3m (aligned with backend primary_tenor_preference).
- * Does **not** fall back to series history — that was a divergent path that could
- * disagree with live levels (e.g. stale series vs fresh 1m).
- */
-function resolvePrimarySkew(skew: Skew25d | undefined): PrimarySkew | null {
-  if (!skew?.levels) return null
-  const order: Array<'1m' | '1w' | '3m'> = ['1m', '1w', '3m']
-  // Prefer declared primary tenor when it is one of the level keys and finite.
-  const preferred = skew.primaryTenor
-  if (preferred === '1w' || preferred === '1m' || preferred === '3m') {
-    const v = finiteOrNull(skew.levels[preferred])
-    if (v != null) return { value: v, tenor: preferred }
-  }
-  for (const key of order) {
-    const v = finiteOrNull(skew.levels[key])
-    if (v != null) return { value: v, tenor: key }
-  }
-  return null
+function findTenor(surface: VolSurface | undefined, tenor: string): VolSurfaceTenor | null {
+  const row = surface?.tenors.find((item) => item.tenor === tenor)
+  if (!row || row.status !== 'ok') return null
+  return row
+}
+
+function tenorField(
+  surface: VolSurface | undefined,
+  tenor: string,
+  read: (row: VolSurfaceTenor) => number | null,
+): number | null {
+  const row = findTenor(surface, tenor)
+  return row ? finiteOrNull(read(row)) : null
 }
 
 function finiteOrNull(value: number | null | undefined): number | null {
@@ -607,135 +633,12 @@ function formatSkewNormalized(value: number): string {
   return `${sign}${Math.abs(pct).toFixed(1)}%`
 }
 
-/* ─────────────────────────────────────────────────────────────────────────── */
-/* IV vs RV dual-pane (Lightweight Charts v5)                                  */
-/* 25Δ skew is chip-only above. Chart height pinned ≈ workspace bottom row.    */
-/* Structure/NY Session polarity: archived/RegimePolarityBlock.tsx             */
-/* ─────────────────────────────────────────────────────────────────────────── */
-
-function VolCompareZone({ volCompare }: { volCompare: VolCompare | undefined }) {
-  const dvolSeries = volCompare?.dvolSeries ?? EMPTY_VOL_SERIES
-  const rvSeries = volCompare?.rvSeries ?? EMPTY_VOL_SERIES
-  const spreadSeries = volCompare?.spreadSeries ?? EMPTY_VOL_SERIES
-  const windowLabel = (volCompare?.meta?.window ?? '7d').toUpperCase()
-  const showRvDefault = volCompare?.meta?.showRvDefault ?? true
-  const showSpreadDefault = volCompare?.meta?.showSpreadDefault ?? true
-
-  const [showRv, setShowRv] = useState(showRvDefault)
-  const [showSpread, setShowSpread] = useState(showSpreadDefault)
-
-  const lastDvol = lastFiniteValue(dvolSeries)
-  const lastRv = lastFiniteValue(rvSeries)
-  const lastSpread = lastFiniteValue(spreadSeries)
-
-  const dvolPointCount = countFinite(dvolSeries)
-  const hasChart = dvolPointCount >= 1
-  const errorMsg = volCompare?.error ?? volCompare?.meta?.error
-  const emptyLabel = errorMsg
-    ? 'IV unavailable'
-    : dvolSeries.length === 0
-      ? 'No IV series'
-      : '—'
-
-  const title = showRv ? 'IV vs RV' : 'IV'
-  const aria = hasChart
-    ? `${title} ${windowLabel}${showRv ? ' with realized vol overlay' : ''}${
-        showSpread ? ' and IV minus RV spread pane' : ''
-      }`
-    : `${title} series unavailable`
-
-  return (
-    <div
-      className="regime-flow flex flex-col border-t border-[var(--desk-rule)]"
-      aria-label={showRv ? 'IV versus realized vol' : 'Implied vol'}
-    >
-      <div className="regime-flow-zone regime-flow-zone--vol">
-        <div className="regime-flow-zone__head">
-          <span className="regime-flow-zone__title regime-flow-zone__title--vol">
-            {title}
-          </span>
-          <div className="regime-vol__controls">
-            <span className="regime-vol__window" aria-label={`Window ${windowLabel}`}>
-              {windowLabel}
-            </span>
-            <button
-              type="button"
-              className={cn(
-                'regime-vol__toggle regime-vol__toggle--rv',
-                showRv && 'regime-vol__toggle--on',
-              )}
-              aria-pressed={showRv}
-              aria-label="Toggle realized vol overlay"
-              onClick={() => setShowRv((v) => !v)}
-            >
-              RV
-            </button>
-            <button
-              type="button"
-              className={cn(
-                'regime-vol__toggle regime-vol__toggle--spread',
-                showSpread && 'regime-vol__toggle--on',
-              )}
-              aria-pressed={showSpread}
-              aria-label="Toggle IV minus RV spread pane"
-              onClick={() => setShowSpread((v) => !v)}
-            >
-              Δ
-            </button>
-            <span className="regime-flow-zone__meta">
-              {[
-                lastDvol != null ? `IV ${formatVolPercent(lastDvol)}` : null,
-                lastRv != null ? `RV ${formatVolPercent(lastRv)}` : null,
-                lastSpread != null ? `Δ ${formatSpreadPoints(lastSpread)}` : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </span>
-          </div>
-        </div>
-
-        <div
-          className={cn(
-            'regime-vol__chart',
-            showSpread && 'regime-vol__chart--dual',
-          )}
-          role="img"
-          aria-label={aria}
-        >
-          {hasChart ? (
-            <VolCompareChart
-              className="regime-vol__lwc"
-              dvolSeries={dvolSeries}
-              rvSeries={rvSeries}
-              spreadSeries={spreadSeries}
-              showRv={showRv}
-              showSpread={showSpread}
-            />
-          ) : (
-            <div className="regime-vol__empty" aria-hidden>
-              {emptyLabel}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function lastFiniteValue(series: VolSeriesPoint[]): number | null {
   for (let i = series.length - 1; i >= 0; i--) {
     const v = series[i]?.value
     if (v != null && Number.isFinite(v)) return v
   }
   return null
-}
-
-function countFinite(series: VolSeriesPoint[]): number {
-  let n = 0
-  for (const p of series) {
-    if (Number.isFinite(p.value) && Number.isFinite(p.tsMs)) n++
-  }
-  return n
 }
 
 function formatVolPercent(value: number): string {
@@ -923,7 +826,8 @@ function buildSignedPaths(
   }
 }
 
-function NetGexProfile({
+/** Archived renderer retained for future diagnostics; no longer mounted in Regime. */
+export function NetGexProfile({
   profile,
   leftBound,
   rightBound,
@@ -1330,196 +1234,37 @@ function pointerUp(cx: number, tipY: number, half = 2.4): string {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────── */
-/* Compact metrics                                                             */
+/* Metrics strip / scoring (presentation data only)                            */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-function CompactMetric({
-  label,
-  value,
-  detail,
-  tone,
-  edge,
-}: {
-  label: string
-  value: string
-  detail?: string
-  tone: RegimeTone
-  edge?: boolean
-}) {
-  const toneClassName = getRegimeToneClassName(tone)
-
-  return (
-    <div
-      className={cn(
-        'regime-metric min-w-0 px-1.5 py-0.5',
-        edge && 'border-r border-[var(--desk-rule)]',
-      )}
-    >
-      <div className="regime-metric__label">
-        {label}
-      </div>
-      {/* No terminal-value here — its global color would override tone classes. */}
-      <div
-        className={cn(
-          'regime-metric__value mt-0.5 uppercase leading-tight tracking-tight',
-          toneClassName,
-        )}
-      >
-        {value}
-      </div>
-      {detail ? (
-        <div className={cn('regime-metric__detail mt-0.5 leading-none', toneClassName)}>
-          {detail}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────────────────────────────────── */
-/* Context / scoring (unchanged logic; presentation data only)                 */
-/* ─────────────────────────────────────────────────────────────────────────── */
-
-type RegimeTone = 'green' | 'red' | 'amber' | 'muted' | 'heading' | 'blue' | 'violet'
+type RegimeTone =
+  | 'green'
+  | 'red'
+  | 'amber'
+  | 'muted'
+  | 'heading'
+  | 'blue'
+  | 'deepBlue'
+  | 'violet'
 
 const DEALER_GAMMA_STRONG = 0.35
 const DEALER_GAMMA_MILD = 0.12
-/** Regime profile corridor: fixed half-width = 8% of spot, centered on spot. */
-const CORRIDOR_HALF_PERCENT = 8
-/** Dense sample count for continuous heat gradient source field. */
-const PROFILE_SAMPLE_COUNT = 128
 
-function getRegimeContext(bookSnapshot: TerminalSnapshot) {
-  const netGexUsd = bookSnapshot.bookStats?.netGexUsd ?? bookSnapshot.totalNetGexUsd
-  const dealerGammaScore = getDealerGammaScore(bookSnapshot, netGexUsd)
-  const dealerGammaLabel = getDealerGammaLabel(dealerGammaScore)
-  const dealerGammaTone = getDealerGammaTone(dealerGammaScore)
-
-  // Profile spot marker + corridor center: live Deribit index (fallback: GEX spot).
-  const spot = getDisplaySpot(bookSnapshot)
-
-  const { leftBound, rightBound } = resolveCorridorBounds({ spot })
-  const corridorSpan = rightBound - leftBound
-
-  const positionFor = (value: number | undefined) => {
-    if (value === undefined || !Number.isFinite(value)) return undefined
-    if (Math.abs(corridorSpan) < 1e-9) return 50
-    return clamp(((value - leftBound) / corridorSpan) * 100, 0, 100)
-  }
-
-  const rv = getRvTrendMetrics(bookSnapshot)
-  const regimeRead = getRegimeRead(dealerGammaScore, rv.label)
-
-  const profile = buildLandscapeProfile(bookSnapshot.gammaBars, leftBound, rightBound)
-
-  return {
-    dealerGammaScore,
-    dealerGammaLabel,
-    dealerGammaTone,
-    rvTrendLabel: rv.label,
-    rvTrendDetail: rv.detail,
-    rvTrendTone: rv.tone,
-    regimeReadLabel: regimeRead.label,
-    regimeReadTone: regimeRead.tone,
-    spotPosition: positionFor(spot) ?? 50,
-    spot,
-    leftBound,
-    rightBound,
-    profile,
-  }
-}
-
-/**
- * Build a continuous signed net-GEX profile from real gammaBars in the window.
- * unit ∈ [-1, 1] relative to max |net GEX| inside the corridor domain.
- * Samples are linearly interpolated so the path is smooth (no discrete bars).
- */
-function buildLandscapeProfile(
-  gammaBars: GammaBar[],
-  leftBound: number,
-  rightBound: number,
-): LandscapeProfile {
-  const span = rightBound - leftBound
-  if (!(span > 0)) {
-    return { samples: [], maxAbs: 1 }
-  }
-
-  const lo = Math.min(leftBound, rightBound)
-  const hi = Math.max(leftBound, rightBound)
-
-  const rows = gammaBars
-    .map((row) => {
-      const netGex = row.netGammaExposureUsd ?? row.gammaExposureUsd
-      return {
-        strike: row.strike,
-        netGex: Number.isFinite(netGex) ? netGex : 0,
-      }
-    })
-    .filter((row) => Number.isFinite(row.strike) && row.strike >= lo && row.strike <= hi)
-    .sort((a, b) => a.strike - b.strike)
-
-  const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.netGex)), 1)
-
-  if (rows.length === 0) {
-    return { samples: [], maxAbs }
-  }
-
-  const count = Math.max(PROFILE_SAMPLE_COUNT, rows.length * 2)
-  const samples: ProfileSample[] = []
-
-  for (let i = 0; i < count; i++) {
-    const xPct = (i / (count - 1)) * 100
-    const strike = leftBound + (xPct / 100) * span
-    const unit = sampleSignedUnitAtStrike(rows, strike, maxAbs)
-    const netGex = unit * maxAbs
-    samples.push({ strike, netGex, xPct, unit })
-  }
-
-  return { samples, maxAbs }
-}
-
-/** Piecewise-linear sample of signed net GEX unit at an arbitrary strike. */
-function sampleSignedUnitAtStrike(
-  rows: { strike: number; netGex: number }[],
-  strike: number,
-  maxAbs: number,
-): number {
-  if (rows.length === 0) return 0
-  if (strike <= rows[0]!.strike) return clamp(rows[0]!.netGex / maxAbs, -1, 1)
-  if (strike >= rows[rows.length - 1]!.strike) {
-    return clamp(rows[rows.length - 1]!.netGex / maxAbs, -1, 1)
-  }
-
-  for (let i = 0; i < rows.length - 1; i++) {
-    const a = rows[i]!
-    const b = rows[i + 1]!
-    if (strike >= a.strike && strike <= b.strike) {
-      const t = (b.strike - a.strike) < 1e-9
-        ? 0
-        : (strike - a.strike) / (b.strike - a.strike)
-      const net = a.netGex + (b.netGex - a.netGex) * t
-      return clamp(net / maxAbs, -1, 1)
+function getRegimeContext(gammaSnapshot: TerminalSnapshot | null) {
+  if (!gammaSnapshot) {
+    return {
+      dealerGammaScore: null as number | null,
+      dealerGammaLabel: '—',
+      dealerGammaTone: 'muted' as RegimeTone,
     }
   }
 
-  return 0
-}
-
-/**
- * Corridor window **symmetric about spot** with fixed half-width
- * CORRIDOR_HALF_PERCENT (8%) of spot. Does not expand for walls.
- */
-function resolveCorridorBounds({
-  spot,
-}: {
-  spot: number
-}): { leftBound: number; rightBound: number } {
-  const safeSpot = Number.isFinite(spot) && spot > 0 ? spot : 1
-  const half = safeSpot * (CORRIDOR_HALF_PERCENT / 100)
-
+  const netGexUsd = gammaSnapshot.totalNetGexUsd
+  const dealerGammaScore = getDealerGammaScore(gammaSnapshot, netGexUsd)
   return {
-    leftBound: safeSpot - half,
-    rightBound: safeSpot + half,
+    dealerGammaScore,
+    dealerGammaLabel: getDealerGammaLabel(dealerGammaScore),
+    dealerGammaTone: getDealerGammaTone(dealerGammaScore),
   }
 }
 
@@ -1537,12 +1282,16 @@ function getDealerGammaScore(snapshot: TerminalSnapshot, netGexUsd: number) {
   return clamp(netGexUsd / totalAbsGexUsd, -1, 1)
 }
 
+/**
+ * Net-GEX polarity headline — purpose-built SHORT GAMMA ↔ LONG GAMMA pair.
+ * Magnitude modifiers only at the extremes (Unstable / Pinned); mid = bare pair.
+ */
 function getDealerGammaLabel(score: number): string {
-  if (score > DEALER_GAMMA_STRONG) return 'Strong Long Gamma'
+  if (score > DEALER_GAMMA_STRONG) return 'Long Gamma — Pinned'
   if (score >= DEALER_GAMMA_MILD) return 'Long Gamma'
-  if (score > -DEALER_GAMMA_MILD) return 'Balanced'
+  if (score > -DEALER_GAMMA_MILD) return 'Gamma Neutral'
   if (score >= -DEALER_GAMMA_STRONG) return 'Short Gamma'
-  return 'Strong Short Gamma'
+  return 'Short Gamma — Unstable'
 }
 
 function getDealerGammaTone(score: number): RegimeTone {
@@ -1551,80 +1300,24 @@ function getDealerGammaTone(score: number): RegimeTone {
   return 'amber'
 }
 
-type RvTrendLabel = 'Expanding' | 'Neutral' | 'Compressing' | '—'
-
-function getRvTrendMetrics(bookSnapshot: TerminalSnapshot): {
-  label: RvTrendLabel
-  detail: string | undefined
-  tone: RegimeTone
-} {
-  const stats = bookSnapshot.bookStats
-  const trend = stats?.rvTrend ?? null
-  const ratio = stats?.rvRatio ?? null
-
-  if (!trend) {
-    return { label: '—', detail: undefined, tone: 'muted' }
-  }
-
-  const detail = ratio !== null && Number.isFinite(ratio)
-    ? `${ratio.toFixed(2)}× d/w`
-    : undefined
-
-  // RV confirmation: expanding = warm pressure, compressing = cool calm
-  if (trend === 'Expanding') return { label: trend, detail, tone: 'amber' }
-  if (trend === 'Compressing') return { label: trend, detail, tone: 'blue' }
-  return { label: trend, detail, tone: 'muted' }
-}
-
-/**
- * Context = polarity × RV only (never "Short Gamma" / "Long Gamma").
- * Polarity wording stays on the Dealer Γ headline; this cell is the interaction read.
- * Values unchanged: Trend / Soft trend / Fragile / Pin / Range / Unstable pin / Balanced.
- *
- *   Short + Expanding  → Trend
- *   Short + Neutral    → Soft trend   (also when RV unavailable)
- *   Short + Compressing → Fragile
- *   Long  + Compressing → Pin
- *   Long  + Neutral    → Range        (also when RV unavailable)
- *   Long  + Expanding  → Unstable pin
- *   Balanced           → Balanced
- */
-function getRegimeRead(
-  dealerGammaScore: number,
-  rvLabel: RvTrendLabel,
-): { label: string; tone: RegimeTone } {
-  const isShort = dealerGammaScore < -DEALER_GAMMA_MILD
-  const isLong = dealerGammaScore > DEALER_GAMMA_MILD
-
-  if (!isShort && !isLong) {
-    return { label: 'Balanced', tone: 'amber' }
-  }
-
-  // Treat missing RV as Neutral for the matrix (still polarity × RV only).
-  const rv: 'Expanding' | 'Neutral' | 'Compressing' =
-    rvLabel === 'Expanding' || rvLabel === 'Compressing' ? rvLabel : 'Neutral'
-
-  if (isShort) {
-    if (rv === 'Expanding') return { label: 'Trend', tone: 'red' }
-    if (rv === 'Compressing') return { label: 'Fragile', tone: 'amber' }
-    return { label: 'Soft trend', tone: 'red' }
-  }
-
-  if (rv === 'Compressing') return { label: 'Pin', tone: 'green' }
-  if (rv === 'Expanding') return { label: 'Unstable pin', tone: 'amber' }
-  return { label: 'Range', tone: 'green' }
+function getDealerGammaBehavior(score: number): string {
+  if (score > DEALER_GAMMA_MILD) return 'Stabilizing'
+  if (score < -DEALER_GAMMA_MILD) return 'Amplifying'
+  return 'Balanced'
 }
 
 function getRegimeToneClassName(tone: RegimeTone) {
   return {
-    // Full-strength polarity for Net GEX / short-long context reads
+    // Full-strength polarity for Net GEX / short-long reads
     green: 'text-[var(--terminal-green-strong)]',
     red: 'text-[var(--terminal-red-strong)]',
     amber: 'text-[var(--terminal-yellow)]',
     muted: 'text-[var(--terminal-muted)]',
     heading: 'text-[var(--terminal-heading)]',
-    // Cool non-GEX accent (RV compressing)
+    // Cool non-GEX accent (RV contracting / DVOL COMPRESSED)
     blue: 'text-[var(--regime-accent-blue,var(--terminal-blue))]',
+    // Deeper blue for DVOL FLOOR (lower historical tail)
+    deepBlue: 'text-[var(--regime-accent-deep-blue)]',
     violet: 'text-[var(--regime-accent-violet)]',
   }[tone]
 }

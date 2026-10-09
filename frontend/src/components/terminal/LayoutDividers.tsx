@@ -1,4 +1,10 @@
-import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useCallback,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { cn } from '@/lib/utils'
 
 type DividerProps = {
@@ -8,6 +14,10 @@ type DividerProps = {
   onDragEnd?: () => void
   className?: string
   label?: string
+  beforePct?: number
+  afterPct?: number
+  /** Double click returns the adjacent tracks to an even split. */
+  onReset?: () => void
 }
 
 /**
@@ -16,7 +26,16 @@ type DividerProps = {
  *
  * Uses rAF-coalesced deltas so resize stays smooth under high pointer rates.
  */
-export function LayoutDivider({ orientation, onDrag, onDragEnd, className, label }: DividerProps) {
+export function LayoutDivider({
+  orientation,
+  onDrag,
+  onDragEnd,
+  className,
+  label,
+  beforePct,
+  afterPct,
+  onReset,
+}: DividerProps) {
   const dragging = useRef(false)
   const last = useRef(0)
   const pendingDelta = useRef(0)
@@ -40,6 +59,7 @@ export function LayoutDivider({ orientation, onDrag, onDragEnd, className, label
       event.currentTarget.setPointerCapture(event.pointerId)
       document.body.style.cursor = orientation === 'horizontal' ? 'row-resize' : 'col-resize'
       document.body.style.userSelect = 'none'
+      document.documentElement.dataset.layoutResizing = orientation
     },
     [orientation],
   )
@@ -80,6 +100,7 @@ export function LayoutDivider({ orientation, onDrag, onDragEnd, className, label
       }
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      delete document.documentElement.dataset.layoutResizing
       onDragEnd?.()
     },
     [onDrag, onDragEnd],
@@ -87,45 +108,58 @@ export function LayoutDivider({ orientation, onDrag, onDragEnd, className, label
 
   const isH = orientation === 'horizontal'
 
+  const onKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const negativeKey = isH ? 'ArrowUp' : 'ArrowLeft'
+      const positiveKey = isH ? 'ArrowDown' : 'ArrowRight'
+      if (event.key !== negativeKey && event.key !== positiveKey) return
+
+      event.preventDefault()
+      const step = event.shiftKey ? 24 : 8
+      onDrag(event.key === negativeKey ? -step : step)
+    },
+    [isH, onDrag],
+  )
+
+  const splitLabel = beforePct !== undefined && afterPct !== undefined
+    ? `${Math.round(beforePct)} / ${Math.round(afterPct)}`
+    : undefined
+
   return (
     <div
       role="separator"
       aria-orientation={orientation}
       aria-label={label ?? (isH ? 'Resize rows' : 'Resize columns')}
+      aria-valuemin={14}
+      aria-valuemax={86}
+      aria-valuenow={beforePct !== undefined ? Math.round(beforePct) : undefined}
+      aria-valuetext={splitLabel}
       tabIndex={0}
       className={cn(
-        'group relative z-[5] shrink-0 touch-none select-none',
-        isH ? 'h-2 w-full cursor-row-resize' : 'h-full w-2 cursor-col-resize',
+        'layout-divider',
+        isH ? 'layout-divider--horizontal' : 'layout-divider--vertical',
+        active && 'layout-divider--active',
         className,
       )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      onKeyDown={onKeyDown}
+      onDoubleClick={onReset}
     >
-      <div
-        className={cn(
-          'absolute',
-          isH ? 'inset-x-0 -top-1 -bottom-1' : 'inset-y-0 -left-1 -right-1',
-        )}
-      />
-      <div
-        className={cn(
-          'absolute rounded-full transition-all duration-100',
-          active
-            ? 'bg-[var(--terminal-heading)] opacity-95'
-            : 'bg-[var(--terminal-border)] opacity-45 group-hover:opacity-100 group-hover:bg-[var(--terminal-border-strong)]',
-          isH
-            ? cn(
-                'left-1/2 top-1/2 h-[2px] -translate-x-1/2 -translate-y-1/2',
-                active ? 'w-14' : 'w-10 group-hover:w-12',
-              )
-            : cn(
-                'left-1/2 top-1/2 w-[2px] -translate-x-1/2 -translate-y-1/2',
-                active ? 'h-14' : 'h-10 group-hover:h-12',
-              ),
-        )}
-      />
+      <span className="layout-divider__hit" />
+      <span className="layout-divider__line" />
+      <span className="layout-divider__grip" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
+      {active && splitLabel ? (
+        <output className="layout-divider__readout" aria-live="off">
+          {Math.round(beforePct ?? 0)}<i />{Math.round(afterPct ?? 0)}
+        </output>
+      ) : null}
     </div>
   )
 }

@@ -70,7 +70,8 @@ export const SidePanels = memo(function SidePanels({
           <LevelsDesk
             bookSnapshot={bookSnapshot}
             sessionLevels={snapshot.levels.zeroDte}
-            // Reference Flip is always ALL-book cumulative (Levels tab only).
+            // Reference HVL = front/active session expiry (not ALL aggregate).
+            // Book HVL is an optional secondary row when present.
             reference={bookSnapshot.levels.reference}
           />
         ) : levelPanelTab === 'walls' ? (
@@ -197,8 +198,9 @@ function CopyLevelsButton() {
  * Read-only structural desk — no chart overlay toggles.
  * Order: Key Levels → All → 0DTE → Weekly → Monthly → Quarterly.
  * All / 0DTE / tenors = Positive Gamma + Negative Gamma (flow net_gex extrema).
- * Key Levels = Gamma Flip (flow), Max Pain (OI), Expected Move (vol).
- * Regime lives on its own tab (Dealer Γ / Net GEX / Context / vol chips / IV−RV).
+ * Key Levels = HVL (flow, per active/front expiry), Max Pain (OI), Expected Move (vol).
+ * Optional Book HVL (ALL multi-expiry) is secondary when the API attaches it.
+ * Regime lives on its own tab (Dealer Γ / Net GEX / d/w RV / DVOL / vol chips / IV−RV).
  * Structure/NY Session polarity is archived (see archived/RegimePolarityBlock.tsx).
  */
 function LevelsDesk({
@@ -210,10 +212,17 @@ function LevelsDesk({
   sessionLevels: LevelItem[]
   reference: AdvancedMetric[]
 }) {
-  // Key Levels: Gamma Flip (not "Zero Gamma"), Max Pain, Expected Move.
+  // Key Levels: HVL (session), optional Book HVL, Max Pain, Expected Move.
+  // HVL = cumulative flow-GEX zero-cross on this expiry within spot ±12%
+  // (mass filter 1.5%). Not classic OI gamma flip.
   const contextMetrics = useMemo(
     () => reference.filter((metric) => (
-      !metric.label.includes('Zero Gamma')
+      metric.label === 'HVL'
+      || metric.label.includes('Book HVL')
+      || metric.label.includes('Zero Gamma')
+      || metric.label.includes('Gamma Flip')
+      || metric.label.includes('Max Pain')
+      || metric.label.includes('Expected Move')
     )),
     [reference],
   )
@@ -480,19 +489,46 @@ function getLevelRoleModifier(label: string) {
 
 function getReferenceRoleAccent(metric: AdvancedMetric) {
   if (metric.label.includes('Expected')) return levelRoleCssVars.expectedMove
-  if (metric.label.includes('Flip')) return levelRoleCssVars.gammaFlip
+  if (
+    metric.label === 'HVL'
+    || metric.label.includes('Book HVL')
+    || metric.label.includes('Zero Gamma')
+    || metric.label.includes('Flip')
+    || metric.label === 'ZG'
+  ) {
+    return levelRoleCssVars.gammaFlip
+  }
   if (metric.label.includes('Max Pain')) return levelRoleCssVars.maxPain
   return 'var(--terminal-muted)'
 }
 
 function getReferenceRoleModifier(metric: AdvancedMetric) {
   if (metric.label.includes('Expected')) return 'levels-board__row--move'
-  if (metric.label.includes('Flip')) return 'levels-board__row--flip'
+  if (
+    metric.label === 'HVL'
+    || metric.label.includes('Book HVL')
+    || metric.label.includes('Zero Gamma')
+    || metric.label.includes('Flip')
+    || metric.label === 'ZG'
+  ) {
+    return 'levels-board__row--flip'
+  }
   return undefined
 }
 
 function formatReferenceLabel(label: string) {
   if (label.includes('Expected')) return 'Expected Move'
+  if (label.includes('Book HVL')) return 'Book HVL'
+  // Legacy API labels → HVL
+  if (
+    label === 'HVL'
+    || label.includes('Zero Gamma')
+    || label.includes('Gamma Flip')
+    || label === 'Flip'
+    || label === 'ZG'
+  ) {
+    return label.includes('Book') ? 'Book HVL' : 'HVL'
+  }
   return label
 }
 
@@ -503,10 +539,15 @@ function formatReferenceScopeTag(metric: AdvancedMetric) {
     return null
   }
 
-  if (metric.scope === 'book' || metric.label.includes('Flip')) {
+  // Book HVL / explicit book scope → ALL (multi-expiry sum).
+  if (
+    metric.label.includes('Book HVL')
+    || metric.scope === 'book'
+  ) {
     return 'ALL'
   }
 
+  // Session HVL → show the active/front expiry tag (not forced ALL).
   const raw = metric.scopeLabel
   if (!raw || raw === 'ALL') return null
 

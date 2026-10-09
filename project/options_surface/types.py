@@ -95,6 +95,13 @@ class FitterGrade(str, Enum):
     RESEARCH = "research"
 
 
+class PrimaryFailureCategory(str, Enum):
+    NONE = "none"
+    MARKET_DATA = "market_data"
+    FIT_QUALITY = "fit_quality"
+    HARD_GATE = "hard_gate"
+
+
 class PointOrigin(str, Enum):
     RAW_OBSERVED = "raw_observed"
     SYNTHETIC_ATM = "synthetic_atm"
@@ -475,6 +482,10 @@ class SurfaceDisplayState:
     research_failed_checks: tuple[str, ...] = ()
     research_human_reason: str | None = None
     customer_warning_scope: str = "none"
+    serving_mode: str = "diagnostic_candidate"
+    config_version: str = "surface_serving.v1"
+    config_hash: str = ""
+    primary_failure_category: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -539,3 +550,7 @@ class OptionsSurfaceResult:
     served_density_grid: int | None = None
     selected_model_status: str = "not_evaluated"
     candidate_comparison: tuple[CandidateComparison, ...] = ()
+    serving_mode: str = "diagnostic_candidate"
+    config_version: str = "surface_serving.v1"
+    config_hash: str = ""
+    primary_failure_category: str | None = None

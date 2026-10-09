@@ -144,8 +144,8 @@ python project/scripts/refresh_dashboard_live.py `
   --artifacts-dir project/runtime/dashboard_build `
   --snapshot-path project/greeks/data/latest_gex_snapshot.json `
   --job-name btc_options_live_phase6 `
-  --lookback-minutes 180 `
-  --interval-seconds 120
+  --lookback-minutes 30 `
+  --interval-seconds 60
 ```
 
 One-shot prove-out:
@@ -156,7 +156,7 @@ python project/scripts/refresh_dashboard_live.py --once `
   --artifacts-dir project/runtime/dashboard_build `
   --snapshot-path project/greeks/data/latest_gex_snapshot.json `
   --job-name btc_options_live_phase6 `
-  --lookback-minutes 180
+  --lookback-minutes 30
 ```
 
 #### Live sync window (self-heal)
@@ -217,7 +217,7 @@ Live rematerialization uses a **lightweight + checkpointed incremental** path:
 - Subsequent cycles load only trades at/after the watermark and apply them to
   the checkpoint instead of replaying the entire YTD history.
 
-Default interval is 120s; default lookback is **180** minutes. With incremental
+Default start-to-start interval is 60s; default lookback is **30** minutes. With incremental
 materialize the cycle is dominated by the trade append + live Greeks fetch, not
 full-history CPU. Force a full rebuild after methodology version bumps or
 suspected checkpoint corruption:

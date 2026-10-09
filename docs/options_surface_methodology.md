@@ -106,7 +106,15 @@ to loosen gates. There is no silent PCHIP fallback.
 
 A diagnostic candidate cannot produce `surface_display_status = ready`
 even when `density_status` is `accepted`. Promotion to `production`
-requires a later, frozen-snapshot decision.
+requires a later, frozen-snapshot decision documented in
+`docs/constrained_svi_promotion_rubric.md`. One or two live
+snapshots are not sufficient. Evidence is collected by the
+immutable capture corpus (`docs/surface_validation_corpus_plan.md`).
+
+Serving mode is an explicit, versioned local configuration
+(`diagnostic_candidate`, `shadow_compare`, `disabled`). Disabled
+mode does not attempt constrained SVI and does not restore PCHIP
+serving. Historical replay uses the recorded mode and config hash.
 
 No IV clipping. `w ≤ 0` is a diagnostic failure. Queries outside
 `[k_min, k_max]` return `extrapolated` / unavailable. No invented
@@ -168,3 +176,5 @@ No composite score and no directional verdict.
 - Not a price forecast or confidence interval.
 - Not evidence of predictive alpha.
 - Not a reason to convert inverse BTC premiums into USD vanillas.
+- Not a backtest of constrained SVI. Historical snapshots measure
+  calibration quality, validity, and availability only.

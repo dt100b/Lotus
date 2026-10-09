@@ -290,7 +290,7 @@ def test_failed_convexity_rejects_density_headlines() -> None:
 
 def test_no_silent_pchip_fallback() -> None:
     points = _known_svi_points()
-    _fitter, reason, comparison, _result = select_serving_candidate(
+    _fitter, reason, comparison, _result, _serve = select_serving_candidate(
         points,
         time_to_expiry_years=_tau(),
         forward_usd=FORWARD,

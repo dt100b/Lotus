@@ -27,7 +27,7 @@ def disable_hyperliquid_mid(monkeypatch) -> None:
             "dvol_series": [],
             "rv_series": [],
             "spread_series": [],
-            "meta": {"units": "percent", "window": "7d"},
+            "meta": {"units": "percent", "window": "365d"},
         },
     )
 
@@ -72,6 +72,49 @@ def build_client(snapshot_path: Path) -> TestClient:
 
 def build_repository(snapshot_path: Path) -> SnapshotRepository:
     return SnapshotRepository(snapshot_path)
+
+
+def test_term_curve_artifact_is_independent_of_snapshot_smile_status(tmp_path: Path):
+    path=write_snapshot(tmp_path / 'latest_gex_snapshot.json')
+    p=json.loads(path.read_text())
+    p['flow_regime']={'vol_surface':{'version':'desk_vol_surface.v2','term_structure':[
+        {'tenor':'30d','status':'unavailable','validation_reasons':['source_smile_rejected']}]}}
+    path.write_text(json.dumps(p))
+    curve={'version':'atm_term_curve.v1','as_of_ms':1791400000000,'term_structure':[
+        {'tenor':'30d','status':'ok','atm_iv_percent':35}]}
+    from vol_surface.snapshot import attach_atm_rv
+    (tmp_path / 'atm_term_curve.json').write_text(json.dumps(curve))
+    result=SnapshotRepository(path,tmp_path).get_terminal_snapshot()
+    assert result['flow_regime']['atm_term_curve']=={**attach_atm_rv(curve, []), 'lookbacks': [], 'history': {'atm': {}}}
+    assert result['flow_regime']['vol_surface']['term_structure'][0]['status']=='unavailable'
+    # Cached inventory payload must not swallow a later independent curve update.
+    curve['term_structure'][0]['atm_iv_percent']=36
+    (tmp_path / 'atm_term_curve.json').write_text(json.dumps(curve))
+    assert SnapshotRepository(path,tmp_path).get_terminal_snapshot()['flow_regime']['atm_term_curve']=={**attach_atm_rv(curve, []), 'lookbacks': [], 'history': {'atm': {}}}
+    from vol_surface.atm_history import DAY, retain_snapshot
+    historical = {**curve, 'as_of_ms': curve['as_of_ms'] - DAY,
+                  'valid_until_ms': curve['as_of_ms'] - DAY + 300_000,
+                  'term_structure': [
+                      {'tenor': '7d', 'status': 'ok', 'atm_iv_percent': 32},
+                      {'tenor': '30d', 'status': 'ok', 'atm_iv_percent': 34}]}
+    retain_snapshot(tmp_path, historical)
+    served = SnapshotRepository(path,tmp_path).get_terminal_snapshot()['flow_regime']['atm_term_curve']
+    assert served['lookbacks'] == [{'days': 1, 'as_of_ms': historical['as_of_ms'],
+                                   'target_offset_ms': 0,
+                                   'term_structure': historical['term_structure']}]
+    assert served['history']['atm']['30d'] == [{'ts_ms':historical['as_of_ms'],'value':34}]
+    assert served['term_structure'] == curve['term_structure']
+    dedicated = {**curve, 'as_of_ms': curve['as_of_ms']+60_000}
+    (tmp_path / 'atm_term_curve_live.json').write_text(json.dumps(dedicated))
+    repository = SnapshotRepository(path,tmp_path)
+    expected = {**attach_atm_rv(dedicated, []), 'lookbacks': [{**served['lookbacks'][0], 'target_offset_ms':60_000}],
+                'history':served['history']}
+    assert repository.get_terminal_snapshot()['flow_regime']['atm_term_curve']==expected
+    # An old worker writing its own file cannot replace the independent curve.
+    (tmp_path / 'atm_term_curve.json').write_text(json.dumps({**curve, 'as_of_ms': curve['as_of_ms']+120_000}))
+    assert repository.get_terminal_snapshot()['flow_regime']['atm_term_curve']==expected
+    (tmp_path / 'atm_term_curve_live.json').write_text('{broken')
+    assert repository.get_terminal_snapshot()['flow_regime']['atm_term_curve']['as_of_ms']==curve['as_of_ms']+120_000
 
 
 def test_expiries_and_all_profile_aggregate_by_strike(tmp_path: Path) -> None:
@@ -134,6 +177,58 @@ def test_terminal_snapshot_passes_flow_regime(tmp_path: Path) -> None:
     assert body["flow_regime"]["vol_compare"]["meta"]["units"] == "percent"
     # Core totals still from production rows only.
     assert body["total_net_gex_usd"] == 1.0
+    app.dependency_overrides.clear()
+
+
+def test_terminal_snapshot_joins_parkinson_rv_onto_vol_surface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        repository_module,
+        "_fetch_vol_compare",
+        lambda **_kwargs: {
+            "version": "vol_compare.v1",
+            "dvol_series": [],
+            "rv_series": [{"ts_ms": 1, "value": 40.0}],
+            "spread_series": [],
+            "meta": {"units": "percent", "window": "365d"},
+        },
+    )
+    path = tmp_path / "latest_gex_snapshot.json"
+    payload = {
+        "as_of": "2026-04-25T21:45:00Z",
+        "underlying": "BTC",
+        "spot_price": 94750.25,
+        "rows": [
+            {
+                "expiry": "2026-05-01",
+                "strike": 90000,
+                "net_gex": 1.0,
+                "call_gex": 3.0,
+                "put_gex": -2.0,
+            }
+        ],
+        "flow_regime": {
+            "version": "flow_regime.v1",
+            "vol_surface": {
+                "version": "desk_vol_surface.v1",
+                "term_structure": [
+                    {"tenor": "30d", "status": "ok", "atm_iv_percent": 55.0},
+                ],
+            },
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    client = build_client(path)
+    response = client.get("/api/v1/terminal-snapshot", params={"expiry": "ALL"})
+    assert response.status_code == 200
+    compared = response.json()["flow_regime"]["vol_surface"]["atm_vs_rv"]
+    assert compared["atm_iv_percent"] == 55.0
+    assert compared["rv_percent"] == 40.0
+    assert compared["spread_percent"] == 15.0
+    assert compared["rv_estimator"] == "parkinson"
+    assert compared["iv_definition"].startswith("30d constant-maturity")
     app.dependency_overrides.clear()
 
 
@@ -387,12 +482,15 @@ def test_terminal_snapshot_exposes_backend_authoritative_dashboard_fields(tmp_pa
         "Positive Gamma",
         "Negative Gamma",
     }
-    # Reference: Gamma Flip (flow net_gex) + Max Pain (OI) + Expected Move (vol).
+    # Reference: HVL (session) + Book HVL (ALL secondary) + Max Pain + Expected Move.
     assert {metric["label"] for metric in body["levels"]["reference"]} == {
-        "Gamma Flip",
+        "HVL",
+        "Book HVL",
         "Max Pain",
         "Expected Move",
     }
+    assert body.get("hvl_by_expiry") is not None
+    assert "hvl_book" in body
     assert len(body["rankings"]["all_expiry"]) == 2
     assert body["expiry_events"][0]["expiry"] in {"2026-05-01", "2026-06-26"}
     app.dependency_overrides.clear()
@@ -430,14 +528,14 @@ def test_structure_levels_peak_extrema(tmp_path: Path) -> None:
     reference = {metric["label"]: metric for metric in body["levels"]["reference"]}
     # Cumulative: -4 (62k) → -14 (64k) → -8 (70k) → -5 (72k) — never crosses zero.
     # Policy: no mass-valid cross → Flip unavailable (never flattest |net| fallback).
-    assert reference["Gamma Flip"]["value"] == "—"
-    assert reference["Gamma Flip"]["status"] == "no_cross"
+    assert reference["HVL"]["value"] == "—"
+    assert reference["HVL"]["status"] == "no_cross"
     assert body["gamma_flip"] is None
     assert body["gamma_flip_status"] == "no_cross"
     assert body["zero_gamma"] is None
     # One-sided short book → locked empty copy with polarity suffix.
-    assert body["gamma_flip_note"] == "No local flip · GEX one-sided (short)"
-    assert reference["Gamma Flip"]["note"] == "No local flip · GEX one-sided (short)"
+    assert body["gamma_flip_note"] == "No local HVL · GEX one-sided (short)"
+    assert reference["HVL"]["note"] == "No local HVL · GEX one-sided (short)"
     app.dependency_overrides.clear()
 
 
@@ -467,17 +565,17 @@ def test_gamma_flip_cumulative_zero_cross_nearest_spot_with_mass(tmp_path: Path)
 
     body = client.get("/api/v1/terminal-snapshot", params={"expiry": "ALL"}).json()
     reference = {metric["label"]: metric for metric in body["levels"]["reference"]}
-    flip = float(reference["Gamma Flip"]["value"].replace("$", "").replace(",", ""))
+    flip = float(reference["HVL"]["value"].replace("$", "").replace(",", ""))
     # Cumulative crosses between 65k (cum≈8) and 70k (cum≈-4) → interpolate in that band.
     assert 65000.0 <= flip <= 70000.0
     assert body["gamma_flip_status"] == "ok"
-    assert reference["Gamma Flip"]["status"] == "ok"
+    assert reference["HVL"]["status"] == "ok"
     # gamma_flip / zero_gamma share the same definition; reference is USD-rounded for display.
     assert body["gamma_flip"] is not None
     assert abs(body["gamma_flip"] - flip) < 1.0
     assert abs(body["zero_gamma"] - flip) < 1.0
     assert body.get("gamma_flip_note") is None
-    assert "note" not in reference["Gamma Flip"]
+    assert "note" not in reference["HVL"]
     app.dependency_overrides.clear()
 
 
@@ -501,7 +599,7 @@ def test_gamma_flip_ignores_tiny_noise_crossing(tmp_path: Path) -> None:
 
     body = client.get("/api/v1/terminal-snapshot", params={"expiry": "ALL"}).json()
     flip = float(
-        {m["label"]: m for m in body["levels"]["reference"]}["Gamma Flip"]["value"]
+        {m["label"]: m for m in body["levels"]["reference"]}["HVL"]["value"]
         .replace("$", "")
         .replace(",", "")
     )
@@ -533,14 +631,14 @@ def test_gamma_flip_no_cross_is_null_not_fallback_strike(tmp_path: Path) -> None
     assert body["gamma_flip"] is None
     assert body["zero_gamma"] is None
     assert body["gamma_flip_status"] == "no_cross"
-    ref = {m["label"]: m for m in body["levels"]["reference"]}["Gamma Flip"]
+    ref = {m["label"]: m for m in body["levels"]["reference"]}["HVL"]
     assert ref["value"] == "—"
     assert ref["status"] == "no_cross"
     # Must not brand any strike (e.g. 75000 flattest) as Flip.
     assert "$" not in ref["value"]
     # All-positive local book → long empty-state copy.
-    assert body["gamma_flip_note"] == "No local flip · GEX one-sided (long)"
-    assert ref["note"] == "No local flip · GEX one-sided (long)"
+    assert body["gamma_flip_note"] == "No local HVL · GEX one-sided (long)"
+    assert ref["note"] == "No local HVL · GEX one-sided (long)"
     app.dependency_overrides.clear()
 
 
@@ -570,14 +668,14 @@ def test_gamma_flip_mass_discard_only_noise_yields_no_cross(tmp_path: Path) -> N
     assert body["gamma_flip"] is None
     assert body["gamma_flip_status"] == "no_cross"
     assert body["zero_gamma"] is None
-    assert {m["label"]: m for m in body["levels"]["reference"]}["Gamma Flip"]["value"] == "—"
+    assert {m["label"]: m for m in body["levels"]["reference"]}["HVL"]["value"] == "—"
     app.dependency_overrides.clear()
 
 
 def test_gamma_flip_far_only_cross_outside_window_is_no_cross(tmp_path: Path) -> None:
     """Mass-valid cross only far from spot (e.g. ~42k with spot ~65k) → no_cross.
 
-    |42000 − 65000| / 65000 ≈ 0.35 > GAMMA_FLIP_MAX_DISTANCE_FRAC (0.15).
+    |42000 − 65000| / 65000 ≈ 0.35 > GAMMA_FLIP_MAX_DISTANCE_FRAC (0.12).
     Must not publish the far zero, and must not fall back to flattest |net_gex|.
     """
     payload = {
@@ -588,7 +686,7 @@ def test_gamma_flip_far_only_cross_outside_window_is_no_cross(tmp_path: Path) ->
             # Far wing: cumulative crosses zero between 40k and 42k (deep put wing).
             {"expiry": "2026-05-01", "strike": 40000, "net_gex": 15.0, "call_gex": 15.0, "put_gex": 0.0},
             {"expiry": "2026-05-01", "strike": 42000, "net_gex": -20.0, "call_gex": 0.0, "put_gex": -20.0},
-            # Near-spot book is one-sided negative — no additional zero-cross in ±15%.
+            # Near-spot book is one-sided negative — no additional zero-cross in ±12%.
             {"expiry": "2026-05-01", "strike": 60000, "net_gex": -5.0, "call_gex": 0.0, "put_gex": -5.0},
             {"expiry": "2026-05-01", "strike": 65000, "net_gex": -8.0, "call_gex": 0.0, "put_gex": -8.0},
             {"expiry": "2026-05-01", "strike": 70000, "net_gex": -3.0, "call_gex": 0.0, "put_gex": -3.0},
@@ -602,14 +700,14 @@ def test_gamma_flip_far_only_cross_outside_window_is_no_cross(tmp_path: Path) ->
     assert body["gamma_flip"] is None
     assert body["zero_gamma"] is None
     assert body["gamma_flip_status"] == "no_cross"
-    ref = {m["label"]: m for m in body["levels"]["reference"]}["Gamma Flip"]
+    ref = {m["label"]: m for m in body["levels"]["reference"]}["HVL"]
     assert ref["value"] == "—"
     assert ref["status"] == "no_cross"
     # Must not brand the far wing (~42k) or any flattest bar as Flip.
     assert "$" not in ref["value"]
     # Near-spot book is one-sided short → locked empty copy with (short).
-    assert body["gamma_flip_note"] == "No local flip · GEX one-sided (short)"
-    assert ref["note"] == "No local flip · GEX one-sided (short)"
+    assert body["gamma_flip_note"] == "No local HVL · GEX one-sided (short)"
+    assert ref["note"] == "No local HVL · GEX one-sided (short)"
     app.dependency_overrides.clear()
 
 
@@ -620,10 +718,10 @@ def test_gamma_flip_prefers_in_window_over_far_cross(tmp_path: Path) -> None:
         "underlying": "BTC",
         "spot_price": 65000.0,
         "rows": [
-            # Far mass-valid cross ~42k (outside ±15% of 65k).
+            # Far mass-valid cross ~42k (outside ±12% of 65k).
             {"expiry": "2026-05-01", "strike": 40000, "net_gex": 12.0, "call_gex": 12.0, "put_gex": 0.0},
             {"expiry": "2026-05-01", "strike": 42000, "net_gex": -14.0, "call_gex": 0.0, "put_gex": -14.0},
-            # Rebuild then in-window cross between 62k and 68k (within ±15%).
+            # Rebuild then in-window cross between 62k and 68k (within ±12%).
             # cum after 42k ≈ -2; +18 at 62k → +16; -20 at 68k → -4 → cross in [62k,68k].
             {"expiry": "2026-05-01", "strike": 62000, "net_gex": 18.0, "call_gex": 18.0, "put_gex": 0.0},
             {"expiry": "2026-05-01", "strike": 68000, "net_gex": -20.0, "call_gex": 0.0, "put_gex": -20.0},
@@ -643,13 +741,13 @@ def test_gamma_flip_prefers_in_window_over_far_cross(tmp_path: Path) -> None:
 
 
 def test_gamma_flip_in_window_mass_valid_is_ok(tmp_path: Path) -> None:
-    """Cross inside spot ±15% with sufficient mass → ok, Flip returned (not null)."""
+    """Cross inside spot ±12% with sufficient mass → ok, Flip returned (not null)."""
     payload = {
         "as_of": "2026-04-25T21:45:00Z",
         "underlying": "BTC",
         "spot_price": 65000.0,
         "rows": [
-            # Cross between 64000 and 66000: well inside ±15% of 65k (55.25k–74.75k).
+            # Cross between 64000 and 66000: well inside ±12% of 65k (55.25k–74.75k).
             {"expiry": "2026-05-01", "strike": 64000, "net_gex": 10.0, "call_gex": 10.0, "put_gex": 0.0},
             {"expiry": "2026-05-01", "strike": 66000, "net_gex": -12.0, "call_gex": 0.0, "put_gex": -12.0},
         ],
@@ -662,7 +760,7 @@ def test_gamma_flip_in_window_mass_valid_is_ok(tmp_path: Path) -> None:
     assert body["gamma_flip_status"] == "ok"
     assert body["gamma_flip"] is not None
     assert 64000.0 <= body["gamma_flip"] <= 66000.0
-    ref = {m["label"]: m for m in body["levels"]["reference"]}["Gamma Flip"]
+    ref = {m["label"]: m for m in body["levels"]["reference"]}["HVL"]
     assert ref["status"] == "ok"
     assert ref["value"] != "—"
     app.dependency_overrides.clear()
@@ -770,4 +868,37 @@ def test_terminal_snapshot_single_expiry_filters_gamma_bars(tmp_path: Path) -> N
     assert body["expiry"] == "2026-05-01"
     assert [row["strike"] for row in body["gamma_bars"]] == [80000.0, 90000.0]
     assert body["gamma_bars"][1]["call_gamma_exposure_usd"] == 3.0
+    app.dependency_overrides.clear()
+
+
+def test_terminal_snapshot_includes_signed_delta_exposure_by_strike(tmp_path: Path) -> None:
+    path = tmp_path / "latest_gex_snapshot.json"
+    path.write_text(json.dumps({
+        "as_of": "2026-04-25T21:45:00Z",
+        "underlying": "BTC",
+        "spot_price": 94_750.25,
+        "rows": [{
+            "expiry": "2026-05-01",
+            "strike": 90_000,
+            "net_gex": 0.0,
+            "call_gex": 0.0,
+            "put_gex": 0.0,
+            "call_position_units": 10.0,
+            "put_position_units": 10.0,
+            "call_mark_iv": 50.0,
+            "put_mark_iv": 50.0,
+        }],
+    }), encoding="utf-8")
+    client = build_client(path)
+
+    response = client.get("/api/v1/terminal-snapshot", params={"expiry": "ALL"})
+
+    assert response.status_code == 200
+    bar = response.json()["gamma_bars"][0]
+    assert bar["call_delta_exposure_usd"] > 0
+    assert bar["put_delta_exposure_usd"] < 0
+    assert bar["net_delta_exposure_usd"] == pytest.approx(
+        bar["call_delta_exposure_usd"] + bar["put_delta_exposure_usd"]
+    )
+    assert bar["delta_exposure_usd"] == bar["net_delta_exposure_usd"]
     app.dependency_overrides.clear()

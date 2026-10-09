@@ -51,7 +51,7 @@ const emptyCandles: OhlcCandle[] = []
  */
 export function useHyperliquidCandles({
   enabled = true,
-  interval = '15m',
+  interval = '30m',
   windowStartMs,
   windowEndMs,
 }: UseHyperliquidCandlesOptions): UseHyperliquidCandlesResult {
@@ -89,7 +89,7 @@ export function useHyperliquidCandles({
     const applyTrim = (list: OhlcCandle[]) => {
       // Always keep through "now" so a stable history window still accepts live bars.
       const end = Math.max(windowEndRef.current, Date.now() + candleIntervalMs[bootInterval])
-      return trimCandlesToWindow(list, windowStartRef.current, end)
+      return trimCandlesToWindow(list, windowStartRef.current, end, bootInterval)
     }
 
     const flushToState = () => {
@@ -185,7 +185,7 @@ export function useHyperliquidCandles({
     // Only trim against the interval the buffer was actually built for.
     const iv = dataIntervalRef.current
     const end = Math.max(windowEndMs, Date.now() + candleIntervalMs[iv])
-    const trimmed = trimCandlesToWindow(candlesRef.current, windowStartMs, end)
+    const trimmed = trimCandlesToWindow(candlesRef.current, windowStartMs, end, iv)
     if (trimmed.length !== candlesRef.current.length) {
       candlesRef.current = trimmed
       setCandles(trimmed)

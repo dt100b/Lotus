@@ -69,6 +69,8 @@ def classify_event(
         return False, "wrong_kind"
     if event.taker_side not in {"buy", "sell"}:
         return False, "unknown_taker_side"
+    if not event.amount.is_finite() or event.amount <= 0:
+        return False, "invalid_amount"
     if policy.require_single_leg and not event.is_single_leg:
         return False, "non_single_leg"
     if policy.exclude_combo_trades and event.is_combo_trade:

@@ -1,0 +1,21 @@
+[Unit]
+Description=Lotus delta skew collector
+Documentation=file:/opt/lotus/docs/continuous_worker_hosting.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=lotus
+WorkingDirectory=/opt/lotus
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/lotus/.venv/bin/python project/scripts/collect_skew.py --artifacts-dir project/runtime/dashboard_build --interval-seconds 600
+Restart=always
+RestartSec=15
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

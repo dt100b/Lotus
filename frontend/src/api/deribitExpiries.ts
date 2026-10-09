@@ -39,6 +39,19 @@ export function getNextDeribitExpiry(nowMs = Date.now()) {
   }
 }
 
+export function formatDeribitCountdown(msRemaining: number) {
+  const totalSeconds = Math.max(0, Math.floor(msRemaining / 1_000))
+  const days = Math.floor(totalSeconds / 86_400)
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600)
+  const minutes = Math.floor((totalSeconds % 3_600) / 60)
+  const seconds = totalSeconds % 60
+  const time = [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, '0'))
+    .join(':')
+
+  return days > 0 ? `${days}d ${time}` : time
+}
+
 export function parseDeribitExpiry(value: string) {
   const match = /^(\d{1,2})([A-Z]{3})(\d{2})$/.exec(value)
   if (!match) return null

@@ -5,8 +5,11 @@
  * - Split/ABS: under the taker-flow model, signed net GEX is the primary signal.
  * - Profile: continuous Baseline smooth view; keep render path for restore, hide from UI.
  * Legacy mode strings still normalize cleanly via `normalizeExposureMode`.
+ *
+ * `forward` is the 0DTE forward gamma surface (pure τ projection) — independent of
+ * historical heatmap / price-bands / strike profile.
  */
-export const gexModes = ['net', 'heatmap'] as const
+export const gexModes = ['net', 'heatmap', 'forward'] as const
 export type GexModeOption = (typeof gexModes)[number]
 
 /** Modes that render a real GEX profile/strike chart (excludes price-bands overlay). */
@@ -19,7 +22,8 @@ export type ArchivedGexMode = (typeof archivedGexModes)[number]
 
 export const gexModeLabels: Record<GexModeOption, string> = {
   net: 'Strike',
-  heatmap: 'Bands',
+  heatmap: 'Price',
+  forward: 'Surface',
 }
 
 /** Legacy modes removed from the dashboard; map to a supported mode. */
@@ -44,9 +48,9 @@ export function isChartRenderMode(mode: GexModeOption): mode is ChartRenderMode 
   return mode === 'net'
 }
 
-/** Modes that support the strike data-window control (includes price bands). */
+/** Modes that support the strike data-window control (includes price bands + forward). */
 export function supportsDataWindow(mode: GexModeOption): boolean {
-  return isChartRenderMode(mode) || mode === 'heatmap'
+  return isChartRenderMode(mode) || mode === 'heatmap' || mode === 'forward'
 }
 
 /**
@@ -55,13 +59,20 @@ export function supportsDataWindow(mode: GexModeOption): boolean {
  */
 export const defaultHeatmapDataWindowPct = 6
 
+/** Default ±% price window for 0DTE forward surface projection. */
+export const defaultForwardDataWindowPct = 8
+
 export function getGexChartTitle(mode: GexModeOption | ArchivedGexMode | string) {
   if (mode === 'net') {
-    return 'NET GEX BY STRIKE'
+    return 'GEX Strike'
   }
 
   if (mode === 'heatmap') {
-    return 'BANDS'
+    return 'PRICE/GEX'
+  }
+
+  if (mode === 'forward') {
+    return 'GEX Surface'
   }
 
   // Archived titles only if something still routes here before normalize.

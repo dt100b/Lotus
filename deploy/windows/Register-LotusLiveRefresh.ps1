@@ -26,8 +26,8 @@ $ArgList = @(
     "--artifacts-dir", "project\runtime\dashboard_build"
     "--snapshot-path", "project\greeks\data\latest_gex_snapshot.json"
     "--job-name", "btc_options_live_phase6"
-    "--lookback-minutes", "180"
-    "--interval-seconds", "120"
+    "--lookback-minutes", "30"
+    "--interval-seconds", "60"
     "--materialize-mode", "auto"
 ) -join " "
 

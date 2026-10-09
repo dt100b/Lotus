@@ -15,6 +15,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+# Frontend helpers are application source, not Python build output.
+!frontend/src/lib/
+!frontend/src/lib/**
 lib64/
 parts/
 sdist/
@@ -222,6 +225,11 @@ project/runtime/
 project/greeks/data/
 project/data/*.sqlite3
 project/data/*.sqlite3-journal
+project/data/*.sqlite3-wal
+project/data/*.sqlite3-shm
+# Local audit captures, screenshots, and downloaded reference bundles.
+# Previously committed frozen diagnostics remain tracked.
+/runtime/
 
 # Local bulk archives / scratch (never commit)
 *.zip

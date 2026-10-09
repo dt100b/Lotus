@@ -604,6 +604,10 @@ class OptionsSurfaceDisplayState(BaseModel):
     research_failed_checks: list[str] = Field(default_factory=list)
     research_human_reason: str | None = None
     customer_warning_scope: Literal["served", "research", "none"] = "none"
+    serving_mode: Literal["diagnostic_candidate", "shadow_compare", "disabled"] | None = None
+    config_version: str | None = None
+    config_hash: str | None = None
+    primary_failure_category: Literal["none", "market_data", "fit_quality", "hard_gate"] | None = None
 
 
 class OptionsSurfaceResidualSummary(BaseModel):
@@ -680,6 +684,10 @@ class OptionsSurfaceResponse(BaseModel):
     served_call_convex: bool | None = None
     served_density_grid: int | None = None
     selected_model_status: str | None = None
+    serving_mode: Literal["diagnostic_candidate", "shadow_compare", "disabled"] | None = None
+    config_version: str | None = None
+    config_hash: str | None = None
+    primary_failure_category: Literal["none", "market_data", "fit_quality", "hard_gate"] | None = None
     feed: IvSignalFeedHealth
     freshness: IvSignalFreshness
     warnings: list[str]

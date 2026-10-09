@@ -6,10 +6,13 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Literal
 import json
+import logging
 import sqlite3
 import time
 
 from greeks.gex_engine import compute_gex_profile, write_profile_artifacts
+
+logger = logging.getLogger(__name__)
 from greeks.providers import (
     DeribitPublicGreeksProvider,
     GreeksFetchStats,
@@ -35,6 +38,9 @@ from pipeline.flow_regime import (
     strike_gex_map_from_profile_rows,
 )
 from pipeline.skew_25d import build_and_persist_skew_25d, empty_skew_25d_payload
+from vol_surface.snapshot import build_and_persist_vol_surface, empty_vol_surface_payload
+from vol_surface.atm_term import build_atm_term_curve, FILENAME as ATM_CURVE_FILENAME
+from vol_surface.atm_refresh import is_atm_refresh_running
 from pipeline.inventory_checkpoint import (
     InventoryCheckpoint,
     build_checkpoint,
@@ -65,6 +71,35 @@ _HEAVY_ARTIFACT_NAMES = (
     "normalized_events_phase3.jsonl",
     "position_deltas.jsonl",
 )
+
+# Deribit options settle 08:00 UTC. Inventory ``expiry_ts`` is midnight UTC of the
+# expiry calendar date (from the instrument name parser), so a naive
+# ``expiry_ts >= now_ms`` drops the true 0DTE book for the entire 00:00–08:00 UTC
+# window on expiry day. GEX materialize must keep contracts until real settle.
+_DERIBIT_SETTLE_HOUR_UTC = 8
+
+
+def deribit_settle_ms_from_expiry_ts(expiry_ts: int) -> int:
+    """Map inventory ``expiry_ts`` (UTC date) → Deribit settlement epoch ms."""
+    day = datetime.fromtimestamp(int(expiry_ts) / 1000, tz=UTC).date()
+    return int(
+        datetime(
+            day.year,
+            day.month,
+            day.day,
+            _DERIBIT_SETTLE_HOUR_UTC,
+            0,
+            0,
+            tzinfo=UTC,
+        ).timestamp()
+        * 1000
+    )
+
+
+def is_live_gex_contract(expiry_ts: int, now_ms: int) -> bool:
+    """True while Deribit settlement for this expiry is still in the future."""
+    return deribit_settle_ms_from_expiry_ts(expiry_ts) > int(now_ms)
+
 
 
 @dataclass(frozen=True)
@@ -187,6 +222,95 @@ def load_raw_phase1_records(
     return instrument_rows, trade_rows
 
 
+def load_incremental_phase1_records(
+    db_path: str | Path,
+    *,
+    trades_after_timestamp_ms: int,
+    checkpoint_instrument_names: Iterable[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Load only the catalog rows needed by an incremental replay.
+
+    A production history DB contains every expired instrument seen YTD, while
+    the live book typically holds only a small subset. Re-parsing and rewriting
+    the entire catalog every minute was the dominant non-network cycle cost.
+    The final inventory only needs checkpoint positions plus instruments found
+    in the watermark trade batch.
+    """
+    database_path = Path(db_path)
+    if not database_path.exists():
+        raise FileNotFoundError(f"Phase 1 SQLite database not found: {database_path}")
+
+    with sqlite3.connect(database_path) as conn:
+        trade_rows = _load_payload_rows(
+            conn,
+            """
+            SELECT payload_json
+            FROM raw_trades
+            WHERE timestamp_ms >= ?
+            ORDER BY timestamp_ms, trade_seq, instrument_name, trade_id
+            """,
+            (int(trades_after_timestamp_ms),),
+        )
+
+        required_names = {
+            str(name) for name in checkpoint_instrument_names if str(name)
+        }
+        required_names.update(
+            str(row.get("instrument_name"))
+            for row in trade_rows
+            if row.get("instrument_name")
+        )
+
+        instrument_rows: list[dict[str, Any]] = []
+        ordered_names = sorted(required_names)
+        # Stay below conservative SQLite host-parameter limits.
+        for offset in range(0, len(ordered_names), 800):
+            batch = ordered_names[offset : offset + 800]
+            placeholders = ",".join("?" for _ in batch)
+            instrument_rows.extend(
+                _load_payload_rows(
+                    conn,
+                    f"""
+                    SELECT payload_json
+                    FROM raw_instruments
+                    WHERE instrument_name IN ({placeholders})
+                    ORDER BY instrument_name
+                    """,
+                    tuple(batch),
+                )
+            )
+
+    return instrument_rows, trade_rows
+
+
+def checkpoint_has_late_arriving_trades(
+    db_path: str | Path,
+    checkpoint: InventoryCheckpoint,
+) -> bool:
+    """Return True when raw rows were inserted behind a checkpoint watermark.
+
+    Per-instrument sequence cursors make equal-timestamp overlap idempotent, but
+    they cannot safely reconstruct a trade inserted historically behind the
+    saved book. Auto mode therefore falls back to a full replay in that case.
+    """
+    created_at = datetime.fromisoformat(
+        checkpoint.created_at_utc.replace("Z", "+00:00")
+    )
+    created_at_ms = int(created_at.timestamp() * 1000)
+    with sqlite3.connect(Path(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM raw_trades
+            WHERE ingested_at_ms > ?
+              AND timestamp_ms <= ?
+            LIMIT 1
+            """,
+            (created_at_ms, int(checkpoint.max_timestamp_ms)),
+        ).fetchone()
+    return row is not None
+
+
 def materialize_dashboard_snapshot(
     *,
     db_path: str | Path,
@@ -253,6 +377,9 @@ def materialize_dashboard_snapshot(
             gex_methodology_version=gex_methodology_version,
             raw_trade_count=trade_count,
         )
+        if ok and checkpoint_has_late_arriving_trades(db_path, checkpoint):
+            ok = False
+            reason = "late_arriving_trade_before_checkpoint"
         if ok and mode in {"auto", "incremental"}:
             use_incremental = True
             incremental_reason = "compatible_checkpoint"
@@ -499,9 +626,10 @@ def _materialize_incremental(
 
     # Always refresh instruments (listings change; enrichment needs full map).
     # Trades: only the watermark window, then cursor-filter already-applied seqs.
-    raw_instruments, raw_trades = load_raw_phase1_records(
+    raw_instruments, raw_trades = load_incremental_phase1_records(
         db_path,
         trades_after_timestamp_ms=int(checkpoint.max_timestamp_ms),
+        checkpoint_instrument_names=checkpoint.positions,
     )
     t = mark("load_raw_incremental", t)
 
@@ -515,7 +643,9 @@ def _materialize_incremental(
     del raw_trades
     t = mark("normalize_incremental", t)
 
-    _write_jsonl(artifacts_root / "canonical_instruments.jsonl", phase2["instruments"])
+    # Full materialization owns the complete canonical catalog artifact.
+    # Incremental replay uses a deliberately scoped registry and must not
+    # replace that complete artifact with a partial file every cycle.
     instruments_by_name = _instruments_from_phase2_records(phase2["instruments"])
 
     phase3_events = build_phase3_events(
@@ -539,7 +669,6 @@ def _materialize_incremental(
     max_timestamp_ms = max(
         int(checkpoint.max_timestamp_ms),
         max((int(event.ts_ms) for event in ledger_events), default=0),
-        int(db_max_timestamp_ms or 0),
     )
     phase3_event_count = checkpoint.input_event_count + len(ledger_events)
     t = mark("ledger_event_objects", t)
@@ -772,7 +901,8 @@ def _finish_from_ledger(
         )
         for row in inventory_rows
         # Expired names cannot receive live ticker greeks; skip the round-trips.
-        if (not lightweight) or int(row.expiry_ts) >= now_ms
+        # Gate on Deribit settle (08:00 UTC), not midnight expiry_ts.
+        if (not lightweight) or is_live_gex_contract(int(row.expiry_ts), now_ms)
     ]
 
     otc_gex_inventory_rows: list[DealerInventoryRow] = []
@@ -788,7 +918,7 @@ def _finish_from_ledger(
                 include_in_gex=bool(row.include_in_gex),
             )
             for row in otc_inventory_rows
-            if (not lightweight) or int(row.expiry_ts) >= now_ms
+            if (not lightweight) or is_live_gex_contract(int(row.expiry_ts), now_ms)
         ]
 
     # Fetch greeks for the union of production + include-OTC non-zero books.
@@ -1061,6 +1191,20 @@ def _build_and_persist_flow_regime(
         skew["error"] = str(exc)[:240]
         payload["skew_25d"] = skew
 
+    # Desk vol surface: listed and constant-maturity ATM, 25Δ and 10Δ skew,
+    # and the 1σ move. Additive. Parkinson RV30 is joined at serve time from
+    # the same candle fetch as the existing vol-compare series.
+    try:
+        payload["vol_surface"] = build_and_persist_vol_surface(
+            artifacts_root,
+            as_of_ms=as_of_ms,
+            greeks=greeks,
+        )
+    except Exception as exc:  # noqa: BLE001 — never block flow_regime serve
+        surface = empty_vol_surface_payload(as_of_ms=as_of_ms)
+        surface["error"] = str(exc)[:240]
+        payload["vol_surface"] = surface
+
     return payload
 
 
@@ -1083,9 +1227,13 @@ def _compute_session_gex_by_strike(
     so Horizon can surface a diagnostic instead of a silent dash.
     """
     try:
-        raw_instruments, raw_trades = load_raw_phase1_records(
+        # Session inventory starts empty at the NY anchor, so it only needs
+        # metadata for instruments actually traded in this session. Loading the
+        # complete YTD expired catalog here dominated every warm live cycle.
+        raw_instruments, raw_trades = load_incremental_phase1_records(
             db_path,
             trades_after_timestamp_ms=int(anchor_ms),
+            checkpoint_instrument_names=(),
         )
         phase2 = normalize_trade_batch(
             raw_instruments,
@@ -1140,7 +1288,7 @@ def _compute_session_gex_by_strike(
                 include_in_gex=bool(row.include_in_gex),
             )
             for row in inventory_rows
-            if (not lightweight) or int(row.expiry_ts) >= as_of_ms
+            if (not lightweight) or is_live_gex_contract(int(row.expiry_ts), as_of_ms)
         ]
         session_profile = compute_gex_profile(
             inventory_rows=gex_rows,
@@ -1169,14 +1317,28 @@ def build_phase5_snapshot_payload(profile: GEXProfile) -> dict[str, Any]:
                 "put_open_interest": 0.0,
                 "call_iv_weighted": 0.0,
                 "put_iv_weighted": 0.0,
+                # Forward surfaces should consume the actual taker-flow
+                # position when it is available.  Recovering it from GEX / BS
+                # gamma is only a compatibility fallback for older snapshots.
+                "call_position_units": 0.0,
+                "put_position_units": 0.0,
+                "call_flow_iv_weighted": 0.0,
+                "put_flow_iv_weighted": 0.0,
+                "call_flow_iv_weight": 0.0,
+                "put_flow_iv_weight": 0.0,
             },
         )
         option_type = row.option_type
         open_interest = float(row.open_interest or 0.0)
         mark_iv = float(row.mark_iv or 0.0)
+        position_units = float(row.net_contracts) * float(row.contract_multiplier)
+        flow_iv_weight = abs(position_units)
         bucket[option_type + "_gex"] += float(row.dollar_gamma_per_1pct)
         bucket[option_type + "_open_interest"] += open_interest
         bucket[option_type + "_iv_weighted"] += mark_iv * open_interest
+        bucket[option_type + "_position_units"] += position_units
+        bucket[option_type + "_flow_iv_weighted"] += mark_iv * flow_iv_weight
+        bucket[option_type + "_flow_iv_weight"] += flow_iv_weight
 
     rows = []
     for _, bucket in sorted(rows_by_bucket.items(), key=lambda item: (item[0][0], item[0][1])):
@@ -1187,6 +1349,12 @@ def build_phase5_snapshot_payload(profile: GEXProfile) -> dict[str, Any]:
         open_interest = call_open_interest + put_open_interest
         call_mark_iv = _weighted_average(bucket["call_iv_weighted"], call_open_interest)
         put_mark_iv = _weighted_average(bucket["put_iv_weighted"], put_open_interest)
+        call_flow_iv = _weighted_average(
+            bucket["call_flow_iv_weighted"], bucket["call_flow_iv_weight"]
+        )
+        put_flow_iv = _weighted_average(
+            bucket["put_flow_iv_weighted"], bucket["put_flow_iv_weight"]
+        )
         mark_iv = _weighted_average(
             bucket["call_iv_weighted"] + bucket["put_iv_weighted"],
             open_interest,
@@ -1204,6 +1372,10 @@ def build_phase5_snapshot_payload(profile: GEXProfile) -> dict[str, Any]:
                 "mark_iv": mark_iv,
                 "call_mark_iv": call_mark_iv,
                 "put_mark_iv": put_mark_iv,
+                "call_position_units": float(bucket["call_position_units"]),
+                "put_position_units": float(bucket["put_position_units"]),
+                "call_flow_iv": call_flow_iv,
+                "put_flow_iv": put_flow_iv,
             }
         )
 
@@ -1256,6 +1428,18 @@ def _load_or_fetch_greeks(
     with DeribitPublicGreeksProvider() as provider:
         snapshots = provider.fetch_greeks_for_instruments(names)
         stats = provider.last_stats
+        # A separate ATM artifact uses full-chain discovery, never inventory
+        # coverage or the validation state of unrelated smile wings.
+        try:
+            if not is_atm_refresh_running(greeks_dir.parent):
+                atm_quotes = provider.fetch_near_atm_greeks()
+                write_greeks_snapshot_json(atm_quotes, greeks_dir.parent / "atm_term_quotes.json")
+                curve = build_atm_term_curve(atm_quotes, as_of_ms=int(time.time()*1000))
+                _write_json_atomic(greeks_dir.parent / ATM_CURVE_FILENAME, curve)
+        except Exception as exc:
+            # Keep the last artifact with its original timestamp; API freshness
+            # checks withhold it after five minutes. GEX continues independently.
+            logger.warning("ATM term curve refresh failed: %s", exc)
 
     write_greeks_snapshot_json(snapshots, greeks_dir / "greeks_snapshot.json")
     return snapshots, stats

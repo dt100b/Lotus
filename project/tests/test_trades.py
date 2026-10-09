@@ -152,3 +152,22 @@ def test_unknown_instrument_non_strict_is_unresolved_and_never_eligible():
     assert event.instrument_key == "UNRESOLVED:BTC-UNKNOWN-THING"
     assert event.excluded_from_v1_derived is True
     assert "missing_instrument_metadata" in event.exclusion_reasons
+
+
+def test_invalid_amount_is_preserved_for_audit_but_excluded_from_derived():
+    raw_trade = {
+        "instrument_name": "BTC-30JUN26-100000-C",
+        "trade_id": "bad-amount",
+        "trade_seq": 459,
+        "timestamp": 1_700_000_000_000,
+        "direction": "buy",
+        "amount": "NaN",
+        "price": "0.01",
+    }
+    registry = InstrumentRegistry.build(
+        [{"instrument_name": raw_trade["instrument_name"], "kind": "option"}]
+    )
+    event = normalize_trade(raw_trade, registry, strict_instrument_lookup=True)
+    assert str(event.amount) == "0"
+    assert event.excluded_from_v1_derived is True
+    assert "invalid_amount" in event.exclusion_reasons

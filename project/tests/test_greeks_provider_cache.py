@@ -118,6 +118,52 @@ def _reset_process_cache() -> None:
     reset_process_greeks_cache()
 
 
+@pytest.mark.parametrize("age_ms,refresh", [
+    (59_999, False), (60_000, False), (60_001, True),
+    (239_000, True), (-5_001, True),
+])
+def test_atm_refresh_uses_quote_timestamp_not_cache_insertion_age(monkeypatch, age_ms, refresh):
+    now_ms = 1_791_400_000_000
+    monkeypatch.setattr("greeks.providers.time.time", lambda: now_ms / 1000)
+    name = "BTC-30OCT26-101000-C"
+    cache = GreeksLiveCache(ttl_seconds=210)
+    cached = GreekSnapshot(name, 9.9, 100_000, now_ms-age_ms)
+    # Just inserted, as happens when a slow multi-instrument batch completes.
+    cache.put(cached)
+    calls = []
+
+    def handler(request):
+        if request.url.path.endswith("/public/get_book_summary_by_currency"):
+            return httpx.Response(200, json={"result": [
+                {"instrument_name": name, "underlying_price": 100_000},
+            ]})
+        calls.append(request.url.params["instrument_name"])
+        payload = _ticker_payload(name).json()
+        payload["result"]["timestamp"] = now_ms
+        return httpx.Response(200, json=payload)
+
+    with DeribitPublicGreeksProvider(transport=httpx.MockTransport(handler), cache=cache) as provider:
+        result = provider.fetch_near_atm_greeks()
+        assert calls == ([name] if refresh else [])
+        assert result[name].snapshot_ts == (now_ms if refresh else cached.snapshot_ts)
+        assert provider.last_stats.cache_hits == (0 if refresh else 1)
+        # Existing inventory consumers continue using their normal TTL cache.
+        calls.clear()
+        provider.fetch_greeks_for_instruments([name])
+        assert calls == []
+
+
+def test_discovery_without_forward_preserves_unavailable_expiry():
+    name = 'BTC-30OCT26-100000-C'
+    def handler(request):
+        assert request.url.path.endswith('/public/get_book_summary_by_currency')
+        return httpx.Response(200,json={'result':[{'instrument_name':name}]})
+    with DeribitPublicGreeksProvider(transport=httpx.MockTransport(handler),use_process_cache=False) as provider:
+        result = provider.fetch_near_atm_greeks()
+    assert name in result
+    assert result[name].mark_iv is None
+
+
 def test_cache_ttl_and_get_put() -> None:
     cache = GreeksLiveCache(ttl_seconds=0.05)
     snap = GreekSnapshot(

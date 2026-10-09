@@ -12,6 +12,11 @@ import { createPortal } from 'react-dom'
 import { PanelCloseButton } from '@/components/terminal/PanelCloseButton'
 import type { PaneDragHandleProps } from '@/components/terminal/PaneWorkspace'
 import type { GexExpiry } from '@/api/mockGexData'
+import {
+  candleIntervalLabels,
+  candleIntervals,
+  type CandleInterval,
+} from '@/api/hyperliquidCandles'
 import { usePrefetchTerminalSnapshots } from '@/hooks/useTerminalSnapshot'
 import { cn } from '@/lib/utils'
 
@@ -50,7 +55,7 @@ export function useHeaderDensity(ref: RefObject<HTMLElement | null>): HeaderDens
  * Shared desk header for every chart mode.
  *
  * Primary row: title + left (view modes) | right (expiry / actions)
- * Toolbar row: always present so Strike / Bands / Table headers
+ * Toolbar row: always present so Strike / Price / Table headers
  * share the same height (Heatmap fills it with TF + GEX; others reserve
  * the band so side-by-side panes align). Mode tools go here (TF, GEX, etc.).
  */
@@ -86,7 +91,7 @@ export function ChartPaneHeader({
     >
       <div className="chart-pane-header__row">
         <div className="chart-pane-header__left">
-          <span className="chart-pane-header__title" title={title}>
+          <span className="chart-pane-header__title">
             {title}
           </span>
           {left}
@@ -175,6 +180,187 @@ export function ChartSegmentButton({
   )
 }
 
+/** Compact mode selector shared by Strike, Price, Surface, and Table panes. */
+export function ChartViewSelect<T extends string>({
+  value,
+  options,
+  onValueChange,
+  label = 'Panel view',
+}: {
+  value: T
+  options: ReadonlyArray<{ id: T; label: string }>
+  onValueChange: (value: T) => void
+  label?: string
+}) {
+  return (
+    <label className="chart-pane-header__view-select-wrap">
+      <span className="sr-only">{label}</span>
+      <select
+        className="chart-pane-header__view-select"
+        value={value}
+        aria-label={label}
+        onChange={(event) => onValueChange(event.target.value as T)}
+      >
+        {options.map((option) => (
+          <option key={option.id} value={option.id}>{option.label}</option>
+        ))}
+      </select>
+      <span className="chart-pane-header__view-select-caret" aria-hidden>▾</span>
+    </label>
+  )
+}
+
+/**
+ * Compact candle timeframe dropdown (replaces the full TF pill strip).
+ * Shares expiry control chrome so toolbar height stays aligned.
+ */
+export function ChartTimeframeSelect({
+  interval,
+  onIntervalChange,
+  intervals = candleIntervals,
+  pending = false,
+  className,
+}: {
+  interval: CandleInterval
+  onIntervalChange: (interval: CandleInterval) => void
+  intervals?: readonly CandleInterval[]
+  /** True while the new TF backfill is in flight. */
+  pending?: boolean
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const listId = useId()
+
+  const label = candleIntervalLabels[interval] ?? interval
+
+  useLayoutEffect(() => {
+    if (!open || !rootRef.current) {
+      setMenuPos(null)
+      return
+    }
+    const place = () => {
+      const rect = rootRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const menuW = Math.max(88, rect.width)
+      const menuH = menuRef.current?.offsetHeight ?? 200
+      const left = Math.min(
+        Math.max(6, rect.left),
+        window.innerWidth - menuW - 6,
+      )
+      const below = rect.bottom + 4
+      const top =
+        below + menuH > window.innerHeight - 6
+          ? Math.max(6, rect.top - menuH - 4)
+          : below
+      setMenuPos({ top, left, width: menuW })
+    }
+    place()
+    requestAnimationFrame(place)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open, intervals.length])
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (rootRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div
+      ref={rootRef}
+      className={cn(
+        'chart-pane-header__expiry-wrap chart-pane-header__tf-wrap',
+        pending && 'chart-pane-header__tf-wrap--pending',
+        className,
+      )}
+    >
+      <button
+        type="button"
+        className={cn(
+          'chart-pane-header__expiry-btn chart-pane-header__tf-btn',
+          open && 'chart-pane-header__expiry-btn--open',
+        )}
+        aria-label={`Candle timeframe: ${label}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-busy={pending || undefined}
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          setOpen((v) => !v)
+        }}
+      >
+        <span className="chart-pane-header__expiry-value">{label}</span>
+        <span className="chart-pane-header__expiry-caret" aria-hidden>
+          ▾
+        </span>
+      </button>
+
+      {open && menuPos
+        ? createPortal(
+            <div
+              ref={menuRef}
+              id={listId}
+              role="listbox"
+              aria-label="Candle timeframe"
+              className="chart-pane-header__expiry-menu"
+              style={{ top: menuPos.top, left: menuPos.left, minWidth: menuPos.width }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              {intervals.map((tf) => {
+                const selected = tf === interval
+                return (
+                  <button
+                    key={tf}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    className={cn(
+                      'chart-pane-header__expiry-option',
+                      selected && 'chart-pane-header__expiry-option--active',
+                    )}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setOpen(false)
+                      if (tf === interval) return
+                      onIntervalChange(tf)
+                    }}
+                  >
+                    {candleIntervalLabels[tf]}
+                  </button>
+                )
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  )
+}
+
 /** Quiet expiry control — no amber flash on open. Density-aware labels. */
 export type ExpiryOption = {
   value: GexExpiry
@@ -187,11 +373,14 @@ export function ChartExpirySelect({
   expiryOptions,
   onExpiryChange,
   className,
+  prefetchSnapshots = true,
 }: {
   expiry: GexExpiry
   expiryOptions: ExpiryOption[]
   onExpiryChange: (expiry: GexExpiry) => void
   className?: string
+  /** Disable when values are semantic tenors rather than terminal snapshot IDs. */
+  prefetchSnapshots?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null)
@@ -268,13 +457,12 @@ export function ChartExpirySelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
-        title={fullLabel}
         onClick={(event) => {
           event.preventDefault()
           event.stopPropagation()
           setOpen((value) => {
             const next = !value
-            if (next) prefetch(expiryOptions.map((o) => o.value))
+            if (next && prefetchSnapshots) prefetch(expiryOptions.map((o) => o.value))
             return next
           })
         }}

@@ -15,6 +15,10 @@ from project.options_surface.surface.fitters import (
     RawSviFitter,
     SmileFitter,
 )
+from project.options_surface.config import (
+    SurfaceServingConfig,
+    default_serving_config,
+)
 from project.options_surface.surface.selection import (
     attach_density_status,
     select_serving_candidate,
@@ -60,6 +64,7 @@ def build_options_surface(
     underlying: str = "BTC",
     feed: Mapping[str, Any] | None = None,
     fitter: SmileFitter | None = None,
+    serving_config: SurfaceServingConfig | None = None,
     max_quote_age_seconds: float = 30.0,
     require_iv_market: bool = True,
     require_open_state: bool = True,
@@ -67,6 +72,13 @@ def build_options_surface(
     rate: float = 0.0,
 ) -> OptionsSurfaceResult:
     as_of = as_utc(as_of_utc)
+    config = serving_config or default_serving_config()
+    require_iv_market = config.require_iv_market if serving_config is not None else require_iv_market
+    require_open_state = config.require_open_state if serving_config is not None else require_open_state
+    require_sizes = config.require_sizes if serving_config is not None else require_sizes
+    max_quote_age_seconds = (
+        config.max_quote_age_seconds if serving_config is not None else max_quote_age_seconds
+    )
     if rows and isinstance(rows[0], NativeOptionQuote):
         quotes = tuple(rows)  # type: ignore[arg-type]
     else:
@@ -112,6 +124,7 @@ def build_options_surface(
             feed=feed or {},
             warnings=warnings,
             reason="forward_unavailable",
+            serving_config=config,
         )
 
     selected = select_otm_observations(
@@ -135,12 +148,13 @@ def build_options_surface(
     if sparse:
         warnings.append("insufficient_or_sparse_observations")
 
-    engine, selection_reason, comparison, constrained_result = select_serving_candidate(
+    engine, selection_reason, comparison, constrained_result, serve_density = select_serving_candidate(
         train,
         time_to_expiry_years=tau,
         forward_usd=float(forward.forward_usd),
         sparse=sparse,
         serving_fitter=fitter,
+        serving_config=config,
     )
     smile, fitted = calibrate_smile(
         observed=observed,
@@ -170,7 +184,8 @@ def build_options_surface(
     if constrained_result is not None and engine.name == "constrained_svi":
         residual_budget_ok = constrained_result.residual_budget_ok is not False
     if (
-        fitted.knot_k
+        serve_density
+        and fitted.knot_k
         and smile.diagnostics.status is not ModelStatus.REJECTED
         and not sparse
     ):
@@ -198,6 +213,10 @@ def build_options_surface(
             warnings.append("residual_budget_exceeded")
         if density.status is ModelStatus.REJECTED:
             warnings.append("density_rejected")
+    elif not serve_density and selection_reason == "serving_disabled":
+        warnings.append("serving_disabled")
+    elif not serve_density and selection_reason == "shadow_compare_record_only":
+        warnings.append("shadow_compare_record_only")
     elif sparse:
         warnings.append("density_skipped_sparse_book")
 
@@ -234,6 +253,9 @@ def build_options_surface(
         sparse=sparse,
         fitter_name=engine.name,
         research=research,
+        serving_mode=config.mode.value,
+        config_version=config.version,
+        config_hash=config.config_hash,
     )
     model_status = _combine_status(
         smile_status=smile.diagnostics.status,
@@ -301,6 +323,10 @@ def build_options_surface(
         served_density_grid=served_density_grid,
         selected_model_status=selected_model_status,
         candidate_comparison=comparison,
+        serving_mode=config.mode.value,
+        config_version=config.version,
+        config_hash=config.config_hash,
+        primary_failure_category=display.primary_failure_category,
     )
 
 
@@ -526,6 +552,7 @@ def _rejected_result(
     feed,
     warnings,
     reason,
+    serving_config: SurfaceServingConfig | None = None,
 ) -> OptionsSurfaceResult:
     from project.options_surface.types import (
         ArbitrageReport,
@@ -607,6 +634,7 @@ def _rejected_result(
         k_25_call=None,
         k_25_put=None,
     )
+    config = serving_config or default_serving_config()
     display = build_display_state(
         forward=forward,
         quotes=quotes,
@@ -618,6 +646,9 @@ def _rejected_result(
         sparse=True,
         fitter_name="none",
         research=None,
+        serving_mode=config.mode.value,
+        config_version=config.version,
+        config_hash=config.config_hash,
     )
     validation = ValidationReport(
         as_of_utc=as_of,
@@ -661,4 +692,8 @@ def _rejected_result(
         served_density_grid=None,
         selected_model_status="rejected",
         candidate_comparison=(),
+        serving_mode=config.mode.value,
+        config_version=config.version,
+        config_hash=config.config_hash,
+        primary_failure_category=display.primary_failure_category,
     )

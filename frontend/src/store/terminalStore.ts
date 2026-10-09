@@ -16,9 +16,19 @@ import {
 import { defaultHeatmapDataWindowPct } from '@/components/terminal/gexModes'
 
 /** Active chart/table exposure modes. Split/ABS/Profile archived — see gexModes.ts. */
-export type ExposureMode = 'net' | 'heatmap'
+export type ExposureMode = 'net' | 'heatmap' | 'forward'
 export type DataWindowMode = 'percent' | 'full'
 export type { HeatmapPaletteId }
+
+export type GexStrikeFocus = {
+  strike: number
+  netGexUsd: number
+  /** Ladder instance that owns live refreshes for this selection. */
+  ownerId?: string
+  /** Palette colors travel with linked guides so Surface/Price lines match Strike. */
+  positiveColor?: string
+  negativeColor?: string
+}
 
 type TerminalState = {
   symbol: 'BTC'
@@ -36,6 +46,11 @@ type TerminalState = {
   /** TRACE surface opacity/brightness (20–100). Shared across heatmap panels. */
   heatmapIntensity: number
   strikeRange: string
+  /** Shared ladder focus: hover is transient, active is a single click selection. */
+  gexActiveStrike: GexStrikeFocus | null
+  gexHoveredStrike: GexStrikeFocus | null
+  /** Shift-marked strikes remain until individually toggled off. */
+  gexMarkedStrikes: GexStrikeFocus[]
   setTheme: (theme: TerminalThemeId) => void
   setExpiry: (expiry: GexExpiry) => void
   setExposureMode: (mode: ExposureMode) => void
@@ -47,6 +62,10 @@ type TerminalState = {
   setHeatmapPalette: (palette: HeatmapPaletteId) => void
   setHeatmapIntensity: (intensity: number) => void
   setStrikeRange: (range: string) => void
+  setGexActiveStrike: (focus: GexStrikeFocus | null) => void
+  setGexHoveredStrike: (focus: GexStrikeFocus | null) => void
+  setGexMarkedStrikes: (strikes: GexStrikeFocus[]) => void
+  toggleGexMarkedStrike: (focus: GexStrikeFocus) => void
 }
 
 export const useTerminalStore = create<TerminalState>((set) => ({
@@ -56,14 +75,17 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   exposureMode: 'net',
   /** Default top-right pane: heatmap. */
   chartTwoExposureMode: 'heatmap',
-  dataWindowMode: 'percent',
-  /** Home layout uses a mid-band ±15% window on the primary Net chart. */
+  dataWindowMode: 'full',
+  /** Retained for Price/Surface camera state; Strike always shows the full surface. */
   dataWindowPct: 15,
   chartTwoDataWindowMode: 'percent',
   chartTwoDataWindowPct: defaultHeatmapDataWindowPct,
   heatmapPalette: getStoredHeatmapPaletteId(),
   heatmapIntensity: getStoredHeatmapIntensity(),
   strikeRange: 'Auto',
+  gexActiveStrike: null,
+  gexHoveredStrike: null,
+  gexMarkedStrikes: [],
   setTheme: (theme) => {
     persistTerminalThemeId(theme)
     set({ theme })
@@ -85,7 +107,43 @@ export const useTerminalStore = create<TerminalState>((set) => ({
     set({ heatmapIntensity: next })
   },
   setStrikeRange: (strikeRange) => set({ strikeRange }),
+  setGexActiveStrike: (gexActiveStrike) => set((state) => (
+    sameGexFocus(state.gexActiveStrike, gexActiveStrike)
+      ? state
+      : { gexActiveStrike }
+  )),
+  setGexHoveredStrike: (gexHoveredStrike) => set((state) => (
+    sameGexFocus(state.gexHoveredStrike, gexHoveredStrike)
+      ? state
+      : { gexHoveredStrike }
+  )),
+  setGexMarkedStrikes: (gexMarkedStrikes) => set((state) => (
+    sameGexFocusList(state.gexMarkedStrikes, gexMarkedStrikes)
+      ? state
+      : { gexMarkedStrikes }
+  )),
+  toggleGexMarkedStrike: (focus) => set((state) => {
+    const exists = state.gexMarkedStrikes.some((item) => item.strike === focus.strike)
+    return {
+      gexMarkedStrikes: exists
+        ? state.gexMarkedStrikes.filter((item) => item.strike !== focus.strike)
+        : [...state.gexMarkedStrikes, focus],
+    }
+  }),
 }))
+
+function sameGexFocus(left: GexStrikeFocus | null, right: GexStrikeFocus | null) {
+  return left?.strike === right?.strike
+    && left?.netGexUsd === right?.netGexUsd
+    && left?.ownerId === right?.ownerId
+    && left?.positiveColor === right?.positiveColor
+    && left?.negativeColor === right?.negativeColor
+}
+
+function sameGexFocusList(left: GexStrikeFocus[], right: GexStrikeFocus[]) {
+  return left.length === right.length
+    && left.every((item, index) => sameGexFocus(item, right[index] ?? null))
+}
 
 function clampWindowPct(value: number) {
   if (!Number.isFinite(value)) {

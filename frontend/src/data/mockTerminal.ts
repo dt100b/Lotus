@@ -9,6 +9,13 @@ export type GammaBar = {
   callGammaExposureUsd?: number
   putGammaExposureUsd?: number
   netGammaExposureUsd?: number
+  deltaExposureUsd?: number
+  callDeltaExposureUsd?: number
+  putDeltaExposureUsd?: number
+  netDeltaExposureUsd?: number
+  openInterest?: number
+  callOpenInterest?: number
+  putOpenInterest?: number
 }
 
 export type MarketSource = {
@@ -128,8 +135,19 @@ export type BookStats = {
   dvol: number | null
   /** short_rv / long_rv (1h closes); null when offline. */
   rvRatio?: number | null
-  /** Expanding | Neutral | Compressing — light Regime confirmation only. */
-  rvTrend?: 'Expanding' | 'Neutral' | 'Compressing' | null
+  /**
+   * Accelerating | Expanding | Stable | Contracting | Collapsing —
+   * light Regime confirmation only. Legacy Neutral/Compressing accepted upstream.
+   */
+  rvTrend?:
+    | 'Accelerating'
+    | 'Expanding'
+    | 'Stable'
+    | 'Contracting'
+    | 'Collapsing'
+    | 'Neutral'
+    | 'Compressing'
+    | null
   /** Annualized short-window realized vol (%). */
   rvShort?: number | null
   /** Annualized longer-window realized vol (%). */
@@ -142,19 +160,27 @@ export type FlowHorizonAgreement = 'Aligned' | 'Mixed' | 'Fighting'
  * Vol-compare series point (DVOL / RV / spread). Values are percent vol.
  */
 export type VolSeriesPoint = {
+  gapBefore?: boolean
   tsMs: number
   value: number
 }
 
 /**
- * Deribit DVOL vs Hyperliquid rolling RV for Regime lower zone.
- * Units: percent annualized vol. spread = DVOL − RV (percent points).
- * Does not alter main Dealer Γ / Flip / Net GEX / RV Trend scoring.
+ * Deribit DVOL vs Hyperliquid RV30 for Regime lower zone.
+ * Units: percent annualized vol. Primary spread = DVOL − RV30 (percent points).
+ * Optional rv7Series is overlay-only and does not drive IV rich/cheap.
+ * Does not alter main Dealer Γ / HVL / Net GEX / d/w RV scoring.
+ * DVOL series also feeds the DVOL percentile regime card.
  */
 export type VolCompare = {
   version?: string
   dvolSeries: VolSeriesPoint[]
+  /** Primary matched-tenor RV (RV30). */
   rvSeries: VolSeriesPoint[]
+  /** Rolling 24h realized volatility for the dedicated RV-trend view. */
+  rv1Series?: VolSeriesPoint[]
+  /** Optional secondary 7d RV overlay (not used for spread / chip). */
+  rv7Series?: VolSeriesPoint[]
   spreadSeries: VolSeriesPoint[]
   meta?: {
     asOfMs?: number
@@ -162,11 +188,18 @@ export type VolCompare = {
     units?: 'percent' | string
     dvolSource?: string
     rvSource?: string
+    rv30Source?: string
+    rv1Source?: string
+    rv7Source?: string
     spreadDefinition?: string
+    primaryPair?: string
+    chartTitle?: string
     showRvDefault?: boolean
     showSpreadDefault?: boolean
     dvolPointCount?: number
     rvPointCount?: number
+    rv1PointCount?: number
+    rv7PointCount?: number
     spreadPointCount?: number
     error?: string
   }
@@ -176,8 +209,23 @@ export type VolCompare = {
 /**
  * 25Δ normalized skew for display-only Regime chips (Tail risk / term ATM).
  * Formula: (IV_25Δ_put − IV_25Δ_call) / ATM_IV. Positive = puts richer.
- * Does not alter Dealer Γ / Flip / Net GEX / RV Trend / Context scoring inputs.
+ * Does not alter Dealer Γ / Flip / Net GEX / d/w RV scoring inputs.
  */
+export type SkewTenor = '1w' | '1m' | '3m' | '6m'
+
+export type SkewTermDetail = {
+  atmIvPercent: number | null
+  dteDays: number | null
+  expiryTsMs: number | null
+  targetDays?: number | null
+  method?: string | null
+  lowerExpiryTsMs?: number | null
+  lowerDteDays?: number | null
+  upperExpiryTsMs?: number | null
+  upperDteDays?: number | null
+  status?: string | null
+}
+
 export type Skew25d = {
   formula?: string
   primaryTenor?: string | null
@@ -191,7 +239,10 @@ export type Skew25d = {
     '3m': number | null
     '6m'?: number | null
   }
+  /** Backward-compatible primary-tenor history. */
   series?: VolSeriesPoint[]
+  /** Independent history for every normalized-skew tenor. */
+  seriesByTenor?: Partial<Record<SkewTenor, VolSeriesPoint[]>>
   /**
    * Per-tenor ATM IV in **percent** vol (converted from backend decimal).
    * Long-leg fallback for term structure when DVOL missing (1m).
@@ -200,17 +251,15 @@ export type Skew25d = {
     '1w': number | null
     '1m': number | null
     '3m'?: number | null
+    '6m'?: number | null
   }
+  /** Exact constant-maturity ATM metadata used by the term curve. */
+  termDetails?: Partial<Record<SkewTenor, SkewTermDetail>>
   /**
-   * Front term leg: ATM IV on nearest listed expiry with DTE ≥ MIN_DTE (~0.35d).
-   * Percent vol. Not the closest-to-7d tenor match.
+   * Exact rolling 1d constant-maturity ATM IV, interpolated in total variance
+   * between its bracketing listed expiries. Percent vol.
    */
-  frontAtm?: {
-    atmIvPercent: number | null
-    dteDays: number | null
-    expiryTsMs: number | null
-    status?: string | null
-  } | null
+  frontAtm?: SkewTermDetail | null
   meta?: {
     asOfMs?: number
     chartTenor?: string | null
@@ -246,6 +295,65 @@ export type FlowRegime = {
   volCompare?: VolCompare
   /** 25Δ normalized skew (display chips only). */
   skew25d?: Skew25d
+  /** Desk vol surface. Header reads 7d/30d ATM and Parkinson RV30 from here. */
+  volSurface?: VolSurface
+  /** Independent current forward-ATM estimator; no complete-smile requirement. */
+  atmTermCurve?: VolSurface
+  /** Independent local-delta measurements; never splice legacy surface history. */
+  skewSurface?: VolSurface
+}
+
+/** Constant-maturity slice of the desk surface. ATM IV is percent vol. */
+export type VolSurfaceTenor = {
+  bidIvPercent?: number | null
+  askIvPercent?: number | null
+  midIvPercent?: number | null
+  midpointReasons?: string[]
+  tenor: string
+  status: string | null
+  atmIvPercent: number | null
+  /** (25Δ put IV − 25Δ call IV) / ATM. Positive means puts are richer. */
+  skew25Normalized: number | null
+  skew10Normalized?: number | null
+  tailGapVolPoints?: number | null
+  rr25VolPoints?: number | null
+  metricReasons?: Record<string, string[]>
+  calendarOk?: boolean | null
+  reasons?: string[]
+  method?: string | null
+  lowerExpiryTsMs?: number | null
+  upperExpiryTsMs?: number | null
+  lowerDteDays?: number | null
+  upperDteDays?: number | null
+}
+
+/** Validated ATM observation for an actual listed contract maturity. */
+export type VolSurfaceListedExpiry = {
+  expiryTsMs: number
+  dteDays: number
+  status: string | null
+  atmIvPercent: number | null
+  forwardUsd: number | null
+  lowerStrike: number | null
+  upperStrike: number | null
+  reasons: string[]
+}
+
+export type VolSurface = {
+  refreshState?: string
+  captureDueMs?: number
+  lookbacks?: Array<{ days: number; asOfMs: number; tenors: VolSurfaceTenor[] }>
+  version?: string
+  asOfMs?: number
+  history?: Record<'atm' | 'skew_25' | 'skew_10' | 'tail_gap', Record<string, VolSeriesPoint[]>>
+  tenors: VolSurfaceTenor[]
+  listedExpiries?: VolSurfaceListedExpiry[]
+  atmVsRv?: {
+    atmIvPercent: number | null
+    rvPercent: number | null
+    spreadPercent: number | null
+    rvEstimator: string | null
+  }
 }
 
 export type TerminalSnapshot = {
@@ -278,16 +386,17 @@ export type TerminalSnapshot = {
   maxPositiveGammaStrike: number
   maxNegativeGammaStrike: number
   /**
-   * Gamma Flip level (legacy alias of gammaFlip).
-   * null when gammaFlipStatus === 'no_cross' — never a flattest-bar fake Flip.
+   * HVL level (legacy alias names: zeroGamma / gammaFlip).
+   * null when gammaFlipStatus === 'no_cross' — never a flattest-bar fake level.
+   * Primary is session/front expiry HVL, not ALL-book aggregate.
    */
   zeroGamma: number | null
-  /** Explicit Flip level from mass-valid cumulative zero-cross; null if none. */
+  /** Explicit HVL from mass-valid cumulative zero-cross; null if none. */
   gammaFlip: number | null
   gammaFlipStatus: GammaFlipStatus
   /**
    * Locked empty-state copy when gammaFlipStatus === 'no_cross'
-   * (e.g. "No local flip · GEX one-sided (short)"). Null/undefined when ok.
+   * (e.g. "No local HVL · GEX one-sided (short)"). Null/undefined when ok.
    */
   gammaFlipNote?: string | null
   marketSources: MarketSource[]
@@ -305,7 +414,7 @@ export type TerminalSnapshot = {
     monthly: LevelItem[]
     /** Nearest quarterly last-Friday peaks. */
     quarterly: LevelItem[]
-    /** Reference metrics (Gamma Flip, Max Pain, Expected Move). */
+    /** Reference metrics (HVL, optional Book HVL, Max Pain, Expected Move). */
     reference: ReferenceMetric[]
   }
   rankings: {
@@ -350,7 +459,7 @@ export function getTerminalSnapshot(expiry: GexExpiry = 'ALL'): TerminalSnapshot
       putCallOiRatio: callOi > 0 ? putOi / callOi : null,
       dvol: 48.6,
       rvRatio: 1.05,
-      rvTrend: 'Neutral',
+      rvTrend: 'Stable',
       rvShort: 42.0,
       rvLong: 40.0,
     },
@@ -367,19 +476,38 @@ export function getTerminalSnapshot(expiry: GexExpiry = 'ALL'): TerminalSnapshot
       ...buildMockTenorLevels(datedSnapshots, spot),
       reference: [
         (() => {
-          // Same estimator as mock GEX / backend — no hardcoded far Flip.
-          const flip = allExpiry.gammaFlip
-          const status = allExpiry.gammaFlipStatus
+          // Session HVL from front expiry surface (not ALL-book aggregate).
+          const flip = frontExpiry.gammaFlip ?? allExpiry.gammaFlip
+          const status = frontExpiry.gammaFlipStatus ?? allExpiry.gammaFlipStatus
           return {
-            label: 'Gamma Flip' as const,
+            label: 'HVL' as const,
             value: flip != null ? `$${Math.round(flip).toLocaleString('en-US')}` : '—',
             change:
               flip != null ? formatSignedPercent(percentFromSpot(flip, spot)) : undefined,
             color: levelColors.gammaFlip,
+            scope: 'session' as const,
+            scopeLabel: frontExpiryId === 'ALL' ? undefined : frontExpiryId,
+            status,
+            note: status === 'no_cross' ? (frontExpiry.gammaFlipNote ?? allExpiry.gammaFlipNote ?? undefined) : undefined,
+          }
+        })(),
+        (() => {
+          // Optional Book HVL (ALL multi-expiry) — secondary.
+          const flip = allExpiry.gammaFlip
+          const status = allExpiry.gammaFlipStatus
+          return {
+            label: 'Book HVL' as const,
+            value: flip != null ? `$${Math.round(flip).toLocaleString('en-US')}` : '—',
+            change:
+              flip != null ? formatSignedPercent(percentFromSpot(flip, spot)) : undefined,
+            color: '#a8b7c4',
             scope: 'book' as const,
             scopeLabel: 'ALL',
             status,
-            note: status === 'no_cross' ? (allExpiry.gammaFlipNote ?? undefined) : undefined,
+            note:
+              status === 'no_cross'
+                ? (allExpiry.gammaFlipNote ?? undefined)
+                : 'Book HVL: multi-expiry cumulative zero-cross (ALL). Prefer session HVL.',
           }
         })(),
         {
@@ -417,14 +545,24 @@ const marketSources: MarketSource[] = [
 function buildMockFlowRegime(netGexUsd: number): FlowRegime {
   const now = Date.now()
   const stepMs = 60 * 60_000
-  const dvolSeries = Array.from({ length: 168 }, (_, i) => {
-    const t = now - (167 - i) * stepMs
+  // ~365d of hourly points for DVOL / IV vs RV / VRP history windows.
+  const nBars = 365 * 24
+  const dvolSeries = Array.from({ length: nBars }, (_, i) => {
+    const t = now - (nBars - 1 - i) * stepMs
     const wave = Math.sin(i / 18) * 1.8 + Math.cos(i / 31) * 0.9
     return { tsMs: t, value: 42 + wave + (netGexUsd >= 0 ? 0 : 1.5) }
   })
   const rvSeries = dvolSeries.map((p, i) => ({
     tsMs: p.tsMs,
     value: p.value - 4.5 + Math.sin(i / 12) * 1.2,
+  }))
+  const rv7Series = dvolSeries.map((p, i) => ({
+    tsMs: p.tsMs,
+    value: p.value - 5.3 + Math.sin(i / 9) * 1.8,
+  }))
+  const rv1Series = dvolSeries.map((p, i) => ({
+    tsMs: p.tsMs,
+    value: p.value - 6.0 + Math.sin(i / 5) * 3.1 + Math.cos(i / 17) * 1.2,
   }))
   const spreadSeries = dvolSeries.map((p, i) => ({
     tsMs: p.tsMs,
@@ -448,22 +586,31 @@ function buildMockFlowRegime(netGexUsd: number): FlowRegime {
       version: 'vol_compare.v1',
       dvolSeries,
       rvSeries,
+      rv1Series,
+      rv7Series,
       spreadSeries,
       meta: {
         asOfMs: now,
-        window: '7d',
+        window: '365d',
         units: 'percent',
-        dvolSource: 'mock deribit dvol',
-        rvSource: 'mock hyperliquid rolling 7d rv',
-        spreadDefinition: 'DVOL − RV (percent points)',
+        dvolSource: 'mock deribit dvol (~30d IV index)',
+        rvSource: 'mock Parkinson RV30 (720 hourly high-low bars)',
+        rv30Source: 'mock Parkinson RV30 (720 hourly high-low bars)',
+        rv1Source: 'mock hyperliquid rolling 24h rv (RV1)',
+        rv7Source: 'mock hyperliquid rolling 7d rv (RV7)',
+        spreadDefinition: 'DVOL − RV30 (percent points)',
+        primaryPair: 'DVOL (30d) vs RV30',
+        chartTitle: 'IV vs RV',
         showRvDefault: true,
         showSpreadDefault: true,
         dvolPointCount: dvolSeries.length,
         rvPointCount: rvSeries.length,
+        rv1PointCount: rv1Series.length,
+        rv7PointCount: rv7Series.length,
         spreadPointCount: spreadSeries.length,
       },
     },
-    // Display-only Tail / term chips — not used in Dealer Γ or Context math.
+    // Display-only Tail / term chips — not used in Dealer Γ / d/w RV / DVOL math.
     skew25d: {
       formula: '(IV_25d_put - IV_25d_call) / ATM_IV',
       primaryTenor: '1m',
@@ -471,20 +618,47 @@ function buildMockFlowRegime(netGexUsd: number): FlowRegime {
         '1w': 0.055,
         '1m': 0.072,
         '3m': 0.068,
+        '6m': 0.061,
       },
       series: Array.from({ length: 48 }, (_, i) => ({
         tsMs: now - (47 - i) * stepMs,
         value: 0.06 + Math.sin(i / 9) * 0.02,
       })),
+      seriesByTenor: {
+        '1w': Array.from({ length: 48 }, (_, i) => ({
+          tsMs: now - (47 - i) * stepMs,
+          value: 0.052 + Math.sin(i / 7) * 0.024,
+        })),
+        '1m': Array.from({ length: 48 }, (_, i) => ({
+          tsMs: now - (47 - i) * stepMs,
+          value: 0.06 + Math.sin(i / 9) * 0.02,
+        })),
+        '3m': Array.from({ length: 48 }, (_, i) => ({
+          tsMs: now - (47 - i) * stepMs,
+          value: 0.066 + Math.sin(i / 11) * 0.012,
+        })),
+        '6m': Array.from({ length: 48 }, (_, i) => ({
+          tsMs: now - (47 - i) * stepMs,
+          value: 0.061 + Math.sin(i / 13) * 0.008,
+        })),
+      },
       atmIvPercent: {
         '1w': 44.5,
         '1m': 47.8,
         '3m': 49.2,
+        '6m': 50.4,
+      },
+      termDetails: {
+        '1w': { atmIvPercent: 44.5, dteDays: 7, expiryTsMs: now + 7 * 86_400_000, method: 'exact_expiry', status: 'ok' },
+        '1m': { atmIvPercent: 47.8, dteDays: 30, expiryTsMs: now + 30 * 86_400_000, method: 'exact_expiry', status: 'ok' },
+        '3m': { atmIvPercent: 49.2, dteDays: 90, expiryTsMs: now + 90 * 86_400_000, method: 'exact_expiry', status: 'ok' },
+        '6m': { atmIvPercent: 50.4, dteDays: 180, expiryTsMs: now + 180 * 86_400_000, method: 'exact_expiry', status: 'ok' },
       },
       frontAtm: {
         atmIvPercent: 42.1,
-        dteDays: 0.9,
-        expiryTsMs: now + 0.9 * 86_400_000,
+        dteDays: 1.0,
+        expiryTsMs: now + 1.0 * 86_400_000,
+        method: 'exact_expiry',
         status: 'ok',
       },
       meta: {
@@ -492,6 +666,48 @@ function buildMockFlowRegime(netGexUsd: number): FlowRegime {
         chartTenor: '1m',
         chainPointCount: 240,
         historySampleCount: 48,
+      },
+    },
+    atmTermCurve: {
+      version: 'atm_term_curve.v1', asOfMs: now,
+      listedExpiries: [[.25,45.2],[1.25,43.2],[2.25,42.8],[3.25,42.1],[8.25,44.8],[15.25,45.1],[22.25,47.1],[50.25,48.4],[78.25,49.0],[169.25,50.2],[260.25,51.0],[351.25,51.5]]
+        .map(([days,iv]) => ({expiryTsMs:now+days!*86_400_000,dteDays:days!,status:'ok',atmIvPercent:iv!,
+          forwardUsd:77_041,lowerStrike:77_000,upperStrike:78_000,reasons:[]})),
+      tenors: [['1d',43.5],['7d',44.5],['30d',47.8],['60d',48.6],['90d',49.2],['180d',50.4],['365d',51.2]]
+        .map(([tenor,value]) => ({tenor:tenor as string,status:'ok',atmIvPercent:value as number,
+          skew25Normalized:null,calendarOk:true,method:'atm_total_variance_interpolation'})),
+    },
+    volSurface: {
+      version: 'desk_vol_surface.v2',
+      asOfMs: now,
+      history: {
+        atm: Object.fromEntries(['7d','30d','60d','90d','180d'].map((tenor,index) => [tenor,
+          dvolSeries.map((p,i) => ({tsMs:p.tsMs,value:44+index*1.8+Math.sin(i/23)})),
+        ])),
+        skew_25: Object.fromEntries(['7d','30d','90d','180d'].map((tenor,index) => [tenor,
+          dvolSeries.map((p,i) => ({tsMs:p.tsMs,value:.04+index*.005+Math.sin(i/13)*.02})),
+        ])),
+        skew_10: Object.fromEntries(['7d','30d','90d','180d'].map((tenor,index) => [tenor,
+          dvolSeries.map((p,i) => ({tsMs:p.tsMs,value:.08+index*.005+Math.sin(i/13)*.035})),
+        ])),
+        tail_gap: Object.fromEntries(['7d','30d','90d','180d'].map((tenor) => [tenor,
+          dvolSeries.map((p,i) => ({tsMs:p.tsMs,value:2+Math.sin(i/13)})),
+        ])),
+      },
+      tenors: [
+        { tenor: '1d', status: 'ok', atmIvPercent: 43.5, skew25Normalized: 0.038 },
+        { tenor: '7d', status: 'ok', atmIvPercent: 44.5, skew25Normalized: 0.041 },
+        { tenor: '30d', status: 'ok', atmIvPercent: 47.8, skew25Normalized: 0.064 },
+        { tenor: '90d', status: 'ok', atmIvPercent: 49.2, skew25Normalized: 0.058 },
+        { tenor: '180d', status: 'ok', atmIvPercent: 50.4, skew25Normalized: 0.052 },
+      ],
+      atmVsRv: {
+        atmIvPercent: 47.8,
+        rvPercent: rvSeries[rvSeries.length - 1]?.value ?? null,
+        spreadPercent: rvSeries.length
+          ? 47.8 - (rvSeries[rvSeries.length - 1]?.value ?? 47.8)
+          : null,
+        rvEstimator: 'parkinson',
       },
     },
   }

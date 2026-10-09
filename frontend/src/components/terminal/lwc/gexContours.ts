@@ -1,12 +1,19 @@
 /**
  * Iso-GEX contour extraction (marching squares) for gamma surface ridge borders.
  *
- * Contours are level sets of the signed unit GEX field — zone borders around
- * concentration ridges. They are NOT the neutral/void fill (that is mid-ramp color).
+ * Two independent contour families share this extractor:
+ *   1. Magnitude isolines ("Lines") — equal-|GEX| ridges (non-zero levels)
+ *   2. Zero-gamma contour ("Flip") — net GEX = 0 polarity boundary
+ *
+ * Contours are level sets of the signed unit GEX field. They are NOT the
+ * neutral/void fill (that is mid-ramp color).
  */
 
-/** Default isoline levels in signed unit space (mirrors prior canvas prototype). */
+/** Default magnitude isolines in signed unit space (excludes zero / Flip). */
 export const DEFAULT_CONTOUR_LEVELS = [-0.75, -0.5, -0.28, 0.28, 0.5, 0.75] as const
+
+/** Zero-gamma / Flip contour level (net GEX polarity boundary). */
+export const ZERO_GAMMA_CONTOUR_LEVEL = 0 as const
 
 export type ContourSegment = {
   x0: number
@@ -52,6 +59,28 @@ export function extractContourSegments(
     }
   }
   return out
+}
+
+/**
+ * Extract only the zero-gamma (Flip) contour — net GEX polarity boundary.
+ * Independent of magnitude isolines so callers can style it differently.
+ */
+export function extractZeroGammaContour(
+  field: Float32Array,
+  cols: number,
+  rows: number,
+): ContourSegment[] {
+  return extractContourSegments(field, cols, rows, [ZERO_GAMMA_CONTOUR_LEVEL])
+}
+
+/**
+ * Strip zero from a level list so magnitude isolines never duplicate Flip.
+ */
+export function magnitudeContourLevels(
+  levels: readonly number[],
+  eps = 1e-6,
+): number[] {
+  return levels.filter((l) => Math.abs(l) > eps)
 }
 
 function marchingSegments(

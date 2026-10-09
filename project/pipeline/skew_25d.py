@@ -13,8 +13,9 @@ the ticker when present, otherwise Black–Scholes (r=q=0) using mark_iv.
 25Δ / ATM IVs are linear-interpolated in |Δ|-space on the chosen expiry.
 Tenors: 1W (7d), 1M (30d), 3M (90d); 6M (180d) optional when chain allows.
 
-Primary chart series is 1M, falling back to 1W when 1M is unavailable.
-History is a timed ring buffer (same general pattern as gex_window_history).
+History persists 1W / 1M / 3M / 6M independently in a tier-compacted,
+400-day ring. The legacy chart series remains the currently resolved primary
+tenor (1M, then 1W, then 3M) without mixing fallback values across tenors.
 """
 
 from __future__ import annotations
@@ -22,20 +23,31 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from greeks.types import GreekSnapshot
 from normalizer.instruments import parse_deribit_option_instrument_name
 
-SKEW_HISTORY_VERSION = "skew_25d_history.v1"
+SKEW_HISTORY_VERSION = "skew_25d_history.v2"
+SKEW_HISTORY_LEGACY_VERSION = "skew_25d_history.v1"
 SKEW_HISTORY_FILENAME = "skew_25d_history.json"
 SKEW_FORMULA = "(IV_25d_put - IV_25d_call) / ATM_IV"
 SKEW_PAYLOAD_KEY = "skew_25d"
 
-# Timed ring — aligned with gex_window_history retention defaults.
-HISTORY_RETENTION_MS = 26 * 3600 * 1000
-HISTORY_MAX_SAMPLES = 900
+# Tiered history keeps enough data for a one-year view without carrying
+# minute-resolution rows for the entire period. Each persisted row contains all
+# stable tenors independently; compaction retains the newest row in each bucket.
+HISTORY_FINE_WINDOW_MS = 48 * 3600 * 1000
+HISTORY_MID_WINDOW_MS = 30 * 24 * 3600 * 1000
+HISTORY_RETENTION_MS = 400 * 24 * 3600 * 1000
+HISTORY_FINE_BUCKET_MS = 5 * 60 * 1000
+HISTORY_MID_BUCKET_MS = 30 * 60 * 1000
+HISTORY_ARCHIVE_BUCKET_MS = 6 * 3600 * 1000
+# The tier policy yields roughly 3,400 rows at steady state. Leave headroom for
+# boundary buckets / migrated data while keeping corrupt artifacts bounded.
+HISTORY_MAX_SAMPLES = 4_096
 
 # Tenor targets (calendar days to expiry).
 TENOR_TARGET_DAYS: dict[str, float] = {
@@ -44,8 +56,15 @@ TENOR_TARGET_DAYS: dict[str, float] = {
     "3m": 90.0,
     "6m": 180.0,
 }
+# Exact constant-maturity targets used only by the ATM term-structure curve.
+# The normalized 25-delta skew levels above remain expiry-specific.
+TERM_ATM_TARGET_DAYS: dict[str, float] = {
+    "1d": 1.0,
+    **TENOR_TARGET_DAYS,
+}
 LEVEL_TENORS: tuple[str, ...] = ("1w", "1m", "3m")
 OPTIONAL_TENORS: tuple[str, ...] = ("6m",)
+HISTORY_TENORS: tuple[str, ...] = (*LEVEL_TENORS, *OPTIONAL_TENORS)
 PRIMARY_TENOR = "1m"
 PRIMARY_FALLBACK_TENOR = "1w"
 
@@ -55,10 +74,39 @@ ATM_DELTA = 0.50
 DELTA_NEAREST_TOL = 0.08
 # Ignore near-zero residual life (unstable IV/Δ).
 MIN_DTE_DAYS = 0.35
+# Constant-maturity ATM needs the lower daily expiry until it settles. Retain
+# positive-lived chain points down to one minute; expiry-specific skew selection
+# still enforces ``MIN_DTE_DAYS`` independently.
+TERM_MIN_DTE_DAYS = 1.0 / (24.0 * 60.0)
 # mark_iv > this → treat as percent (Deribit public ticker convention).
 IV_PERCENT_THRESHOLD = 3.0
 
 MS_PER_DAY = 86_400_000.0
+# Deribit options settle 08:00 UTC. Instrument ``expiry_ts_ms`` is midnight UTC
+# of the expiry date (parser convention) — residual life must use real settle.
+DERIBIT_SETTLE_HOUR_UTC = 8
+
+
+def deribit_settle_ms_from_expiry_ts(expiry_ts_ms: int) -> int:
+    """Map parser midnight ``expiry_ts_ms`` → Deribit settlement epoch ms."""
+    day = datetime.fromtimestamp(int(expiry_ts_ms) / 1000, tz=UTC).date()
+    return int(
+        datetime(
+            day.year,
+            day.month,
+            day.day,
+            DERIBIT_SETTLE_HOUR_UTC,
+            0,
+            0,
+            tzinfo=UTC,
+        ).timestamp()
+        * 1000
+    )
+
+
+def residual_dte_days(expiry_ts_ms: int, as_of_ms: int) -> float:
+    """Calendar days of residual life until Deribit settle (not midnight)."""
+    return (deribit_settle_ms_from_expiry_ts(expiry_ts_ms) - int(as_of_ms)) / MS_PER_DAY
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,10 +236,11 @@ def build_chain_points(
         if not (math.isfinite(spot) and spot > 0):
             continue
         expiry_ts_ms = int(parsed.expiry_ts_ms)
-        t_ms = expiry_ts_ms - int(as_of_ms)
-        if t_ms < MIN_DTE_DAYS * MS_PER_DAY:
+        # Residual life to real Deribit settle (08:00 UTC), not midnight stamp.
+        dte = residual_dte_days(expiry_ts_ms, as_of_ms)
+        if dte < TERM_MIN_DTE_DAYS:
             continue
-        t_years = t_ms / (MS_PER_DAY * 365.0)
+        t_years = dte / 365.0
         option_type = parsed.option_type
         strike = float(parsed.strike)
 
@@ -241,12 +290,12 @@ def select_expiry_for_tenor(
     as_of_ms: int,
     target_days: float,
 ) -> int | None:
-    """Pick expiry whose DTE is closest to ``target_days`` (strictly future)."""
+    """Pick expiry whose residual life to Deribit settle is closest to ``target_days``."""
     expiries = {p.expiry_ts_ms for p in points}
     best: int | None = None
     best_dist: float | None = None
     for expiry_ts in expiries:
-        dte = (int(expiry_ts) - int(as_of_ms)) / MS_PER_DAY
+        dte = residual_dte_days(int(expiry_ts), as_of_ms)
         if dte < MIN_DTE_DAYS:
             continue
         dist = abs(dte - target_days)
@@ -256,26 +305,30 @@ def select_expiry_for_tenor(
     return best
 
 
+# Legacy nearest-expiry helper retained for compatibility and skew diagnostics.
+# The production ATM term curve uses ``compute_constant_maturity_atm`` below.
+FRONT_TENOR_TARGET_DAYS = 1.0
+
+
 def select_front_expiry(
     points: Sequence[ChainPoint],
     *,
     as_of_ms: int,
+    target_days: float = FRONT_TENOR_TARGET_DAYS,
 ) -> int | None:
-    """Nearest listed expiry with DTE ≥ MIN_DTE (BTC VIX1D-style front).
+    """Fixed ~1d term-structure front (not rolling nearest, not ~7d).
 
-    Unlike ``select_expiry_for_tenor(..., target_days=7)``, this does **not**
-    prefer ~7d — it takes the minimum valid residual life on the chain.
+    Picks the listed expiry whose residual life is closest to ``target_days``
+    (default 1.0), among contracts with DTE ≥ MIN_DTE. Same selection primitive
+    as tenor skew legs (``select_expiry_for_tenor``).
+
+    Production term-structure values do not use this nearest-expiry helper.
     """
-    best: int | None = None
-    best_dte: float | None = None
-    for expiry_ts in {p.expiry_ts_ms for p in points}:
-        dte = (int(expiry_ts) - int(as_of_ms)) / MS_PER_DAY
-        if dte < MIN_DTE_DAYS:
-            continue
-        if best_dte is None or dte < best_dte:
-            best = int(expiry_ts)
-            best_dte = dte
-    return best
+    return select_expiry_for_tenor(
+        points,
+        as_of_ms=as_of_ms,
+        target_days=float(target_days),
+    )
 
 
 def compute_atm_for_expiry(
@@ -301,6 +354,102 @@ def compute_atm_for_expiry(
         "spot": float(spot) if spot is not None else None,
         "n_calls": len(call_pts),
         "n_puts": len(put_pts),
+    }
+
+
+def compute_constant_maturity_atm(
+    points: Sequence[ChainPoint],
+    *,
+    as_of_ms: int,
+    target_days: float,
+) -> dict[str, Any]:
+    """Return an exact fixed-maturity ATM IV using total-variance interpolation.
+
+    ATM IV is first resolved independently on every usable listed expiry. The
+    two valid expiries bracketing ``target_days`` are then interpolated in total
+    variance (``iv² * time``), which is the standard way to construct a smooth
+    constant-maturity volatility point. Extrapolation is deliberately refused:
+    a fixed-tenor label must never silently represent a materially different
+    listed expiry.
+    """
+    target = float(target_days)
+    if not math.isfinite(target) or target <= 0:
+        return {"status": "invalid_target", "target_days": target_days}
+
+    samples: list[dict[str, Any]] = []
+    for expiry_ts_ms in sorted({point.expiry_ts_ms for point in points}):
+        dte_days = residual_dte_days(expiry_ts_ms, as_of_ms)
+        if dte_days < TERM_MIN_DTE_DAYS:
+            continue
+        computed = compute_atm_for_expiry(points, expiry_ts_ms=expiry_ts_ms)
+        if computed is None:
+            continue
+        samples.append(
+            {
+                "expiry_ts_ms": int(expiry_ts_ms),
+                "dte_days": float(dte_days),
+                "atm_iv": float(computed["atm_iv"]),
+            }
+        )
+
+    lower = max(
+        (sample for sample in samples if sample["dte_days"] <= target),
+        key=lambda sample: sample["dte_days"],
+        default=None,
+    )
+    upper = min(
+        (sample for sample in samples if sample["dte_days"] >= target),
+        key=lambda sample: sample["dte_days"],
+        default=None,
+    )
+
+    if lower is None or upper is None:
+        return {
+            "status": "no_bracket",
+            "target_days": target,
+            "lower_expiry_ts_ms": lower["expiry_ts_ms"] if lower else None,
+            "lower_dte_days": lower["dte_days"] if lower else None,
+            "upper_expiry_ts_ms": upper["expiry_ts_ms"] if upper else None,
+            "upper_dte_days": upper["dte_days"] if upper else None,
+        }
+
+    lower_dte = float(lower["dte_days"])
+    upper_dte = float(upper["dte_days"])
+    lower_iv = float(lower["atm_iv"])
+    upper_iv = float(upper["atm_iv"])
+
+    if abs(upper_dte - lower_dte) < 1e-12:
+        weight = 0.0
+        atm_iv = lower_iv
+        method = "exact_expiry"
+    else:
+        weight = (target - lower_dte) / (upper_dte - lower_dte)
+        lower_total_variance = lower_iv * lower_iv * (lower_dte / 365.0)
+        upper_total_variance = upper_iv * upper_iv * (upper_dte / 365.0)
+        target_total_variance = (
+            lower_total_variance
+            + weight * (upper_total_variance - lower_total_variance)
+        )
+        target_years = target / 365.0
+        if target_total_variance <= 0 or target_years <= 0:
+            return {"status": "invalid_variance", "target_days": target}
+        atm_iv = math.sqrt(target_total_variance / target_years)
+        method = "total_variance_interpolation"
+
+    return {
+        "status": "ok",
+        "method": method,
+        "atm_iv": float(atm_iv),
+        # This is an exact constant-maturity point, not either source expiry.
+        "dte_days": target,
+        "target_days": target,
+        "interpolation_weight": float(weight),
+        "lower_expiry_ts_ms": int(lower["expiry_ts_ms"]),
+        "lower_dte_days": lower_dte,
+        "lower_atm_iv": lower_iv,
+        "upper_expiry_ts_ms": int(upper["expiry_ts_ms"]),
+        "upper_dte_days": upper_dte,
+        "upper_atm_iv": upper_iv,
     }
 
 
@@ -350,8 +499,8 @@ def compute_skew_levels(
 ) -> dict[str, Any]:
     """Current normalized 25Δ skew for 1W / 1M / 3M (+ optional 6M).
 
-    Also computes **front** ATM IV on the nearest listed expiry with DTE ≥ MIN_DTE
-    (display-only term-structure leg; not used by Environment / Dealer Γ).
+    Also computes a display-only, exact constant-maturity ATM curve. These ATM
+    points are not used by Environment / Dealer Γ or the normalized skew lines.
     """
     points = build_chain_points(greeks, as_of_ms=as_of_ms)
     levels: dict[str, float | None] = {k: None for k in LEVEL_TENORS}
@@ -369,40 +518,31 @@ def compute_skew_levels(
             detail[tenor] = {
                 "status": "insufficient_smile",
                 "expiry_ts_ms": expiry,
-                "dte_days": (expiry - int(as_of_ms)) / MS_PER_DAY,
+                "dte_days": residual_dte_days(expiry, as_of_ms),
             }
             continue
         levels[tenor] = float(computed["value"])
         detail[tenor] = {
             "status": "ok",
-            "dte_days": (expiry - int(as_of_ms)) / MS_PER_DAY,
+            "dte_days": residual_dte_days(expiry, as_of_ms),
             **computed,
         }
 
-    # Front leg for term structure: nearest expiry ≥ MIN_DTE (not ~7d tenor match).
-    front_expiry = select_front_expiry(points, as_of_ms=as_of_ms)
-    front: dict[str, Any]
-    if front_expiry is None:
-        front = {"status": "no_expiry"}
-    else:
-        dte_days = (front_expiry - int(as_of_ms)) / MS_PER_DAY
-        atm_computed = compute_atm_for_expiry(points, expiry_ts_ms=front_expiry)
-        if atm_computed is None:
-            front = {
-                "status": "insufficient_smile",
-                "expiry_ts_ms": front_expiry,
-                "dte_days": dte_days,
-            }
-        else:
-            front = {
-                "status": "ok",
-                "dte_days": dte_days,
-                **atm_computed,
-            }
+    term = {
+        tenor: compute_constant_maturity_atm(
+            points,
+            as_of_ms=as_of_ms,
+            target_days=target_days,
+        )
+        for tenor, target_days in TERM_ATM_TARGET_DAYS.items()
+    }
+    # Backward-compatible alias for consumers that predate the full term map.
+    front = dict(term["1d"])
 
     return {
         "levels": levels,
         "detail": detail,
+        "term": term,
         "front": front,
         "chain_point_count": len(points),
     }
@@ -417,6 +557,45 @@ def resolve_primary_tenor(levels: Mapping[str, float | None]) -> tuple[str | Non
     return None, None
 
 
+def append_skew_history_levels(
+    artifacts_dir: str | Path,
+    *,
+    ts_ms: int,
+    levels: Mapping[str, float | None],
+) -> dict[str, Any]:
+    """Append one all-tenor row and apply tiered retention/compaction.
+
+    Missing or non-finite values are persisted as ``None`` in their own tenor
+    slot. They are intentionally omitted from that tenor's payload series later,
+    so one unavailable smile never suppresses or contaminates another tenor.
+    """
+    path = history_path(artifacts_dir)
+    doc = _load_history(path)
+    sample = {
+        "ts_ms": int(ts_ms),
+        "values": _normalize_tenor_values(levels),
+    }
+    samples = list(doc.get("samples") or [])
+
+    # Exact-timestamp rematerialization replaces the row atomically. Ordinary
+    # rapid cycles are collapsed by the age-appropriate bucket policy below.
+    replaced = False
+    for index, existing in enumerate(samples):
+        if int(existing.get("ts_ms", 0)) == int(ts_ms):
+            samples[index] = sample
+            replaced = True
+            break
+    if not replaced:
+        samples.append(sample)
+
+    newest_ts = max((int(row.get("ts_ms", 0)) for row in samples), default=int(ts_ms))
+    samples = _compact_history_samples(samples, reference_ts_ms=newest_ts)
+    out = _build_history_doc(samples)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(path, out)
+    return out
+
+
 def append_skew_history_sample(
     artifacts_dir: str | Path,
     *,
@@ -424,35 +603,30 @@ def append_skew_history_sample(
     value: float,
     tenor: str,
 ) -> dict[str, Any]:
-    """Append primary-tenor skew sample and prune retention. Returns history doc."""
-    path = history_path(artifacts_dir)
-    doc = _load_history(path)
-    sample = {
-        "ts_ms": int(ts_ms),
-        "value": float(value),
-        "tenor": str(tenor),
-    }
-    samples = list(doc.get("samples") or [])
-    # Replace last sample if same ~5s window (rapid re-materialize).
-    if samples and abs(int(samples[-1].get("ts_ms", 0)) - int(ts_ms)) < 5_000:
-        samples[-1] = sample
-    else:
-        samples.append(sample)
+    """Backward-compatible single-tenor append wrapper.
 
-    cutoff = int(ts_ms) - HISTORY_RETENTION_MS
-    samples = [s for s in samples if int(s.get("ts_ms", 0)) >= cutoff]
-    if len(samples) > HISTORY_MAX_SAMPLES:
-        samples = samples[-HISTORY_MAX_SAMPLES:]
+    New production code writes all levels with ``append_skew_history_levels``.
+    This wrapper maps the value only to the named tenor and never clones it into
+    any other history series.
+    """
+    key = str(tenor).lower()
+    if key not in HISTORY_TENORS:
+        raise ValueError(f"Unsupported skew tenor: {tenor}")
 
-    out = {
-        "version": SKEW_HISTORY_VERSION,
-        "formula": SKEW_FORMULA,
-        "primary_tenor_preference": [PRIMARY_TENOR, PRIMARY_FALLBACK_TENOR, "3m"],
-        "samples": samples,
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json_atomic(path, out)
-    return out
+    # Preserve other values if a compatibility caller fills the same timestamp
+    # one tenor at a time.
+    values: dict[str, float | None] = {name: None for name in HISTORY_TENORS}
+    current = _load_history(history_path(artifacts_dir))
+    for row in current.get("samples") or []:
+        if int(row.get("ts_ms", 0)) == int(ts_ms):
+            values.update(_normalize_tenor_values(row.get("values")))
+            break
+    values[key] = _finite_float_or_none(value)
+    return append_skew_history_levels(
+        artifacts_dir,
+        ts_ms=ts_ms,
+        levels=values,
+    )
 
 
 def load_skew_history_doc(artifacts_dir: str | Path) -> dict[str, Any]:
@@ -467,31 +641,36 @@ def build_skew_25d_payload(
     primary_tenor: str | None,
     chain_point_count: int = 0,
     detail: Mapping[str, Any] | None = None,
+    term: Mapping[str, Any] | None = None,
     front: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Shape for ``flow_regime.skew_25d`` (levels + primary series + front ATM + meta)."""
-    series_raw = list((history_doc or {}).get("samples") or [])
-    series: list[dict[str, Any]] = []
-    for sample in series_raw:
-        try:
-            ts = int(sample.get("ts_ms", 0))
-            value = float(sample.get("value"))
-        except (TypeError, ValueError):
-            continue
-        if ts <= 0 or not math.isfinite(value):
-            continue
-        series.append({"ts_ms": ts, "value": value})
+    """Shape for ``flow_regime.skew_25d`` including exact ATM term points."""
+    history_rows = _normalize_history_samples((history_doc or {}).get("samples"))
+    series_by_tenor: dict[str, list[dict[str, Any]]] = {
+        key: [] for key in HISTORY_TENORS
+    }
+    for sample in history_rows:
+        ts = int(sample["ts_ms"])
+        values = sample["values"]
+        for key in HISTORY_TENORS:
+            value = _finite_float_or_none(values.get(key))
+            if value is not None:
+                series_by_tenor[key].append({"ts_ms": ts, "value": value})
+
+    # Legacy consumers still receive one semantically stable series: the
+    # currently resolved primary tenor only. Historical fallback rows from a
+    # different tenor are never mixed into it.
+    series = list(series_by_tenor.get(str(primary_tenor), [])) if primary_tenor else []
 
     level_out = {
-        key: (float(levels[key]) if levels.get(key) is not None and math.isfinite(float(levels[key])) else None)
-        for key in (*LEVEL_TENORS, *OPTIONAL_TENORS)
-        if key in levels or key in LEVEL_TENORS
+        key: _finite_float_or_none(levels.get(key)) for key in HISTORY_TENORS
     }
-    # Always expose 1w/1m/3m keys for the FE.
-    for key in LEVEL_TENORS:
-        level_out.setdefault(key, None)
 
     front_out = dict(front or {"status": "no_expiry"})
+    term_out = {
+        key: dict((term or {}).get(key) or {"status": "no_bracket"})
+        for key in TERM_ATM_TARGET_DAYS
+    }
 
     return {
         "formula": SKEW_FORMULA,
@@ -504,15 +683,14 @@ def build_skew_25d_payload(
             "1w": level_out.get("1w"),
             "1m": level_out.get("1m"),
             "3m": level_out.get("3m"),
-            **(
-                {"6m": level_out["6m"]}
-                if "6m" in level_out and level_out.get("6m") is not None
-                else {}
-            ),
+            "6m": level_out.get("6m"),
         },
-        # Display-only term front leg (nearest expiry ≥ MIN_DTE). Not scored.
+        # Display-only exact constant-maturity ATM curve. Not scored.
+        "term": term_out,
+        # Backward-compatible 1d alias.
         "front": front_out,
         "series": series,
+        "series_by_tenor": series_by_tenor,
         "meta": {
             "as_of_ms": int(as_of_ms),
             "atm_definition": (
@@ -522,14 +700,22 @@ def build_skew_25d_payload(
             "delta_interpolation": "linear in |delta|-space to 0.25; nearest within 0.08 if unbracketed",
             "delta_source_preference": "ticker delta when present, else BS |Δ| from mark_iv (r=q=0)",
             "iv_unit": "decimal vol (Deribit mark_iv percent / 100 when needed)",
-            "front_definition": (
-                f"ATM IV on nearest listed expiry with DTE ≥ {MIN_DTE_DAYS:g}d "
-                "(minimum residual life; not closest-to-7d)"
+            "term_atm_definition": (
+                "Exact constant-maturity ATM IV from linear interpolation of total variance "
+                "between bracketing Deribit expiries; source-expiry ATM is the mean of call/put "
+                "IV at |delta|=0.50. No maturity extrapolation."
             ),
+            "front_definition": "Exact 1d constant-maturity ATM from the term map.",
+            "front_target_days": FRONT_TENOR_TARGET_DAYS,
+            "term_target_days": dict(TERM_ATM_TARGET_DAYS),
             "primary_tenor_preference": [PRIMARY_TENOR, PRIMARY_FALLBACK_TENOR, "3m"],
             "chart_tenor": primary_tenor,
             "chain_point_count": int(chain_point_count),
             "history_sample_count": len(series),
+            "history_row_count": len(history_rows),
+            "history_point_count_by_tenor": {
+                key: len(series_by_tenor[key]) for key in HISTORY_TENORS
+            },
             "detail": dict(detail or {}),
         },
     }
@@ -538,10 +724,11 @@ def build_skew_25d_payload(
 def empty_skew_25d_payload(*, as_of_ms: int = 0) -> dict[str, Any]:
     return build_skew_25d_payload(
         as_of_ms=as_of_ms,
-        levels={"1w": None, "1m": None, "3m": None},
+        levels={key: None for key in HISTORY_TENORS},
         history_doc={"samples": []},
         primary_tenor=None,
         chain_point_count=0,
+        term={key: {"status": "no_bracket"} for key in TERM_ATM_TARGET_DAYS},
         front={"status": "no_expiry"},
     )
 
@@ -555,18 +742,16 @@ def build_and_persist_skew_25d(
     """Compute live levels, append primary sample to the ring, return payload."""
     computed = compute_skew_levels(greeks, as_of_ms=as_of_ms)
     levels = computed["levels"]
-    primary_tenor, primary_value = resolve_primary_tenor(levels)
+    primary_tenor, _primary_value = resolve_primary_tenor(levels)
 
-    history_doc: dict[str, Any]
-    if primary_tenor is not None and primary_value is not None:
-        history_doc = append_skew_history_sample(
-            artifacts_dir,
-            ts_ms=as_of_ms,
-            value=primary_value,
-            tenor=primary_tenor,
-        )
-    else:
-        history_doc = load_skew_history_doc(artifacts_dir)
+    # Persist every tenor independently on every calculation. The primary value
+    # is intentionally not used for history writes: a fallback tenor must never
+    # be relabeled or mixed into another tenor's line.
+    history_doc = append_skew_history_levels(
+        artifacts_dir,
+        ts_ms=as_of_ms,
+        levels=levels,
+    )
 
     return build_skew_25d_payload(
         as_of_ms=as_of_ms,
@@ -575,6 +760,7 @@ def build_and_persist_skew_25d(
         primary_tenor=primary_tenor,
         chain_point_count=int(computed.get("chain_point_count") or 0),
         detail=computed.get("detail"),
+        term=computed.get("term"),
         front=computed.get("front"),
     )
 
@@ -617,19 +803,134 @@ def _norm_cdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
+def _finite_float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _normalize_tenor_values(values: Any) -> dict[str, float | None]:
+    source = values if isinstance(values, Mapping) else {}
+    return {
+        key: _finite_float_or_none(source.get(key))
+        for key in HISTORY_TENORS
+    }
+
+
+def _normalize_history_samples(samples: Any) -> list[dict[str, Any]]:
+    """Normalize v2 rows and migrate v1 rows without cross-tenor cloning."""
+    if not isinstance(samples, list):
+        return []
+
+    by_timestamp: dict[int, dict[str, float | None]] = {}
+    for raw in samples:
+        if not isinstance(raw, Mapping):
+            continue
+        try:
+            ts_ms = int(raw.get("ts_ms", 0))
+        except (TypeError, ValueError):
+            continue
+        if ts_ms <= 0:
+            continue
+
+        if isinstance(raw.get("values"), Mapping):
+            values = _normalize_tenor_values(raw.get("values"))
+        else:
+            # v1: one value explicitly belongs only to its recorded tenor.
+            tenor = str(raw.get("tenor") or "").lower()
+            value = _finite_float_or_none(raw.get("value"))
+            if tenor not in HISTORY_TENORS or value is None:
+                continue
+            values = {key: None for key in HISTORY_TENORS}
+            values[tenor] = value
+
+        existing = by_timestamp.get(ts_ms)
+        if existing is None:
+            by_timestamp[ts_ms] = values
+            continue
+        # Multiple legacy rows can share a timestamp. Merge only explicit finite
+        # values into their own slots; never copy a value across tenors.
+        for key, value in values.items():
+            if value is not None:
+                existing[key] = value
+
+    return [
+        {"ts_ms": ts_ms, "values": by_timestamp[ts_ms]}
+        for ts_ms in sorted(by_timestamp)
+    ]
+
+
+def _history_bucket_for_age(age_ms: int) -> tuple[str, int]:
+    if age_ms <= HISTORY_FINE_WINDOW_MS:
+        return "fine", HISTORY_FINE_BUCKET_MS
+    if age_ms <= HISTORY_MID_WINDOW_MS:
+        return "mid", HISTORY_MID_BUCKET_MS
+    return "archive", HISTORY_ARCHIVE_BUCKET_MS
+
+
+def _compact_history_samples(
+    samples: Any,
+    *,
+    reference_ts_ms: int,
+) -> list[dict[str, Any]]:
+    """Retain the newest row per age-tier bucket through the 400-day horizon."""
+    normalized = _normalize_history_samples(samples)
+    reference = int(reference_ts_ms)
+    cutoff = reference - HISTORY_RETENTION_MS
+    newest_by_bucket: dict[tuple[str, int], dict[str, Any]] = {}
+
+    for sample in normalized:
+        sample_ts = int(sample["ts_ms"])
+        if sample_ts < cutoff or sample_ts > reference:
+            continue
+        tier, bucket_ms = _history_bucket_for_age(reference - sample_ts)
+        bucket_key = (tier, sample_ts // bucket_ms)
+        prior = newest_by_bucket.get(bucket_key)
+        if prior is None or sample_ts >= int(prior["ts_ms"]):
+            newest_by_bucket[bucket_key] = sample
+
+    compacted = sorted(newest_by_bucket.values(), key=lambda row: int(row["ts_ms"]))
+    if len(compacted) > HISTORY_MAX_SAMPLES:
+        compacted = compacted[-HISTORY_MAX_SAMPLES:]
+    return compacted
+
+
+def _build_history_doc(samples: Any) -> dict[str, Any]:
+    return {
+        "version": SKEW_HISTORY_VERSION,
+        "formula": SKEW_FORMULA,
+        "tenors": list(HISTORY_TENORS),
+        "primary_tenor_preference": [PRIMARY_TENOR, PRIMARY_FALLBACK_TENOR, "3m"],
+        "retention_ms": HISTORY_RETENTION_MS,
+        "compaction": {
+            "within_48h_ms": HISTORY_FINE_BUCKET_MS,
+            "within_30d_ms": HISTORY_MID_BUCKET_MS,
+            "within_400d_ms": HISTORY_ARCHIVE_BUCKET_MS,
+        },
+        "samples": _normalize_history_samples(samples),
+    }
+
+
 def _load_history(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"version": SKEW_HISTORY_VERSION, "samples": []}
+        return _build_history_doc([])
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"version": SKEW_HISTORY_VERSION, "samples": []}
+        return _build_history_doc([])
     if not isinstance(payload, dict):
-        return {"version": SKEW_HISTORY_VERSION, "samples": []}
-    samples = payload.get("samples")
-    if not isinstance(samples, list):
-        payload["samples"] = []
-    return payload
+        return _build_history_doc([])
+    samples = _normalize_history_samples(payload.get("samples"))
+    if samples:
+        samples = _compact_history_samples(
+            samples,
+            reference_ts_ms=max(int(row["ts_ms"]) for row in samples),
+        )
+    return _build_history_doc(samples)
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:

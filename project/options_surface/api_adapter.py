@@ -180,6 +180,10 @@ def to_options_surface_response(
         served_call_convex=result.served_call_convex,
         served_density_grid=result.served_density_grid,
         selected_model_status=result.selected_model_status,
+        serving_mode=result.serving_mode,
+        config_version=result.config_version,
+        config_hash=result.config_hash,
+        primary_failure_category=result.primary_failure_category,
         feed=feed,
         freshness=freshness,
         warnings=list(result.warnings),
@@ -591,6 +595,10 @@ def _display_schema(result: OptionsSurfaceResult) -> OptionsSurfaceDisplayState:
         customer_warning_scope=state.customer_warning_scope
         if state.customer_warning_scope in {"served", "research", "none"}
         else "none",
+        serving_mode=state.serving_mode,
+        config_version=state.config_version,
+        config_hash=state.config_hash,
+        primary_failure_category=state.primary_failure_category,
     )
 
 

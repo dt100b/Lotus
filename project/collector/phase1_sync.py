@@ -58,7 +58,7 @@ class Phase1SyncService:
             return self.settings.history_page_size
         return self.settings.page_size
 
-    def sync_instruments(self) -> int:
+    def sync_instruments(self, *, include_expired: bool = True) -> int:
         """
         Sync instrument metadata for normalization.
 
@@ -72,9 +72,10 @@ class Phase1SyncService:
         if self.history_client is not None:
             sources.append(self.history_client)
 
+        expired_states = (False, True) if include_expired else (False,)
         for source in sources:
             for kind in self.INSTRUMENT_KINDS:
-                for expired in (False, True):
+                for expired in expired_states:
                     instruments = source.get_instruments(
                         currency="BTC",
                         kind=kind,
@@ -95,6 +96,7 @@ class Phase1SyncService:
         end_ms: int,
         run_id: str,
         job_name: str,
+        persist_cursors: bool = True,
     ) -> dict[str, Any]:
         summary = {
             "job_name": job_name,
@@ -104,6 +106,7 @@ class Phase1SyncService:
             "trade_rows_inserted": 0,
             "trade_host": self.trade_client.base_url,
             "trade_page_size": self.trade_page_size,
+            "cursor_persistence": bool(persist_cursors),
         }
 
         self.store.upsert_backfill_job(
@@ -118,11 +121,15 @@ class Phase1SyncService:
             summary["chunks_total"] += 1
 
             for trade_kind in self.RAW_TRADE_KINDS:
-                cursor = self.store.get_backfill_cursor(
-                    job_name,
-                    chunk_start_ms,
-                    chunk_end_ms,
-                    trade_kind,
+                cursor = (
+                    self.store.get_backfill_cursor(
+                        job_name,
+                        chunk_start_ms,
+                        chunk_end_ms,
+                        trade_kind,
+                    )
+                    if persist_cursors
+                    else None
                 )
 
                 if (
@@ -158,29 +165,31 @@ class Phase1SyncService:
                                 f"for chunk=[{chunk_start_ms},{chunk_end_ms}] kind={trade_kind} "
                                 f"host={self.trade_client.base_url}"
                             )
+                        if persist_cursors:
+                            self.store.upsert_backfill_cursor(
+                                job_name=job_name,
+                                chunk_start_ms=chunk_start_ms,
+                                chunk_end_ms=chunk_end_ms,
+                                trade_kind=trade_kind,
+                                continuation=str(next_continuation),
+                                status="running",
+                                page_count=page_count,
+                                fetched_rows=fetched_rows,
+                            )
+                        continuation = str(next_continuation)
+                        continue
+
+                    if persist_cursors:
                         self.store.upsert_backfill_cursor(
                             job_name=job_name,
                             chunk_start_ms=chunk_start_ms,
                             chunk_end_ms=chunk_end_ms,
                             trade_kind=trade_kind,
-                            continuation=str(next_continuation),
-                            status="running",
+                            continuation=None,
+                            status="completed",
                             page_count=page_count,
                             fetched_rows=fetched_rows,
                         )
-                        continuation = str(next_continuation)
-                        continue
-
-                    self.store.upsert_backfill_cursor(
-                        job_name=job_name,
-                        chunk_start_ms=chunk_start_ms,
-                        chunk_end_ms=chunk_end_ms,
-                        trade_kind=trade_kind,
-                        continuation=None,
-                        status="completed",
-                        page_count=page_count,
-                        fetched_rows=fetched_rows,
-                    )
                     summary["chunks_completed"] += 1
                     break
 

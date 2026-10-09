@@ -15,6 +15,8 @@ from collector.deribit_client import build_live_client
 from collector.phase1_sync import Phase1SyncService
 from ledger.raw_store import RawStore
 from pipeline.dashboard_snapshot import materialize_dashboard_snapshot
+from vol_surface.atm_refresh import AtmCurveRefresher
+from vol_surface.skew_refresh import SkewRefresher
 
 # Main Deribit public trade hot-store is roughly ~24h. Cap self-heal windows so
 # a multi-day gap falls back to historical_backfill rather than empty main-host
@@ -56,7 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--lookback-minutes",
         type=int,
-        default=180,
+        default=30,
         help=(
             "Minimum rolling lookback for each live sync pass. "
             "Actual start is min(now - lookback, max(DB max trade, now - 20h)) "
@@ -66,10 +68,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--interval-seconds",
         type=int,
-        default=120,
+        default=60,
         help=(
-            "Seconds to wait between refresh cycles after materialization finishes. "
-            "Phase 6 default is 120s for large history-backed DBs."
+            "Target seconds between cycle starts. Slow cycles begin the next pass "
+            "immediately; fast cycles sleep only for the remaining cadence."
         ),
     )
     parser.add_argument(
@@ -162,10 +164,30 @@ def resolve_live_sync_window(
 
 def main() -> None:
     args = parse_args()
+    # ATM quote collection runs throughout slow trade/inventory cycles, rather
+    # than waiting behind ingestion, replay, and the larger GEX ticker batch.
+    atm_worker = None
+    skew_worker = None
+    if not args.once and args.greeks_json is None:
+        atm_worker = AtmCurveRefresher(args.artifacts_dir)
+        atm_worker.start()  # An existing standalone collector can own the lease.
+        skew_worker = SkewRefresher(args.artifacts_dir)
+        skew_worker.start()
+    try:
+        run_loop(args)
+    finally:
+        if atm_worker is not None:
+            atm_worker.stop()
+        if skew_worker is not None:
+            skew_worker.stop()
+
+
+def run_loop(args: argparse.Namespace) -> None:
     cycle = 0
 
     while True:
         cycle += 1
+        cycle_started = time.monotonic()
         try:
             summary = run_cycle(args)
             # flush so operator logs stay current under Windows pipe buffering
@@ -192,7 +214,8 @@ def main() -> None:
         if args.once:
             return
 
-        time.sleep(max(args.interval_seconds, 1))
+        elapsed = time.monotonic() - cycle_started
+        time.sleep(max(float(args.interval_seconds) - elapsed, 1.0))
 
 
 def run_cycle(args: argparse.Namespace) -> dict[str, object]:
@@ -218,12 +241,19 @@ def run_cycle(args: argparse.Namespace) -> dict[str, object]:
         run_id = store.start_run(start_ms, end_ms)
 
         try:
-            instrument_rows = service.sync_instruments()
+            # Live trades can only reference active instruments. Historical
+            # catalogs already remain in SQLite; avoid re-downloading the main
+            # host's expired catalog every minute.
+            instrument_rows = service.sync_instruments(include_expired=False)
             backfill = service.backfill_trades(
                 start_ms=start_ms,
                 end_ms=end_ms,
                 run_id=run_id,
                 job_name=args.job_name,
+                # Rolling live windows are deliberately re-fetched and deduped.
+                # Persisting their ever-changing chunk boundaries only bloats
+                # backfill_cursors; durable cursors remain enabled for history.
+                persist_cursors=False,
             )
             store.finish_run(
                 run_id,

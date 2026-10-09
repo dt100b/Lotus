@@ -17,6 +17,10 @@ from project.options_surface.surface.constrained_svi import (
     SmileFitResult,
     residual_budget,
 )
+from project.options_surface.config import (
+    SurfaceServingConfig,
+    default_serving_config,
+)
 from project.options_surface.surface.fitters import (
     FittedSmile,
     RawSviFitter,
@@ -30,12 +34,15 @@ from project.options_surface.types import (
     ModelStatus,
     PointResidual,
     ResidualSummary,
+    SmileFitDiagnostics,
     SmilePoint,
 )
 
 SELECTION_NO_FALLBACK = "constrained_svi_not_eligible_no_pchip_fallback"
 SELECTION_SELECTED = "selected_constrained_svi_diagnostic_candidate"
 SELECTION_EXPLICIT = "explicit_fitter_override"
+SELECTION_DISABLED = "serving_disabled"
+SELECTION_SHADOW_RECORD_ONLY = "shadow_compare_record_only"
 
 
 def select_serving_candidate(
@@ -45,18 +52,14 @@ def select_serving_candidate(
     forward_usd: float,
     sparse: bool,
     serving_fitter: SmileFitter | None = None,
-) -> tuple[SmileFitter, str, tuple[CandidateComparison, ...], SmileFitResult | None]:
-    """Return (fitter_to_calibrate, selection_reason, comparison, constrained_result).
+    serving_config: SurfaceServingConfig | None = None,
+) -> tuple[SmileFitter, str, tuple[CandidateComparison, ...], SmileFitResult | None, bool]:
+    """Return (fitter, selection_reason, comparison, constrained_result, serve_density).
 
-    The returned fitter is always the serving candidate that the orchestrator
-    should calibrate. It is never silently swapped to PCHIP.
+    The returned fitter is never silently swapped to PCHIP. `serve_density`
+    is the explicit publish decision for this snapshot.
     """
-    constrained = ConstrainedSviFitter()
-    constrained_result = constrained.fit_result(
-        points,
-        time_to_expiry_years=time_to_expiry_years,
-        forward_usd=forward_usd,
-    )
+    config = serving_config or default_serving_config()
     pchip = TotalVariancePchipFitter().fit(
         points,
         time_to_expiry_years=time_to_expiry_years,
@@ -83,29 +86,121 @@ def select_serving_candidate(
         selected=False,
         extra_reasons=("research_not_selectable",),
     )
-    eligible = _constrained_eligible(constrained_result, sparse=sparse)
-    constrained_row = _compare_constrained(
-        constrained_result,
-        selected=eligible and serving_fitter is None,
-        sparse=sparse,
+    if not config.attempt_constrained_svi:
+        constrained_row = _not_attempted_constrained(sparse=sparse)
+        comparison = (constrained_row, pchip_row, svi_row)
+        return DisabledServingFitter(), SELECTION_DISABLED, comparison, None, False
+
+    constrained = ConstrainedSviFitter()
+    constrained_result = constrained.fit_result(
+        points,
+        time_to_expiry_years=time_to_expiry_years,
+        forward_usd=forward_usd,
     )
+    eligible = _constrained_eligible(constrained_result, sparse=sparse)
     if serving_fitter is not None:
-        reason = SELECTION_EXPLICIT
-        selected_name = serving_fitter.name
+        constrained_row = _compare_constrained(
+            constrained_result,
+            selected=serving_fitter.name == "constrained_svi",
+            sparse=sparse,
+        )
         comparison = _mark_selected(
             (constrained_row, pchip_row, svi_row),
-            selected_name,
+            serving_fitter.name,
         )
-        return serving_fitter, reason, comparison, constrained_result
-    if eligible:
-        comparison = (constrained_row, pchip_row, svi_row)
-        return constrained, SELECTION_SELECTED, comparison, constrained_result
-    comparison = (
-        _compare_constrained(constrained_result, selected=False, sparse=sparse),
-        pchip_row,
-        svi_row,
+        serve = serving_fitter.name == "constrained_svi" and eligible
+        return serving_fitter, SELECTION_EXPLICIT, comparison, constrained_result, serve
+    if eligible and config.publish_selected:
+        constrained_row = _compare_constrained(
+            constrained_result, selected=True, sparse=sparse
+        )
+        return constrained, SELECTION_SELECTED, (constrained_row, pchip_row, svi_row), constrained_result, True
+    constrained_row = _compare_constrained(
+        constrained_result, selected=False, sparse=sparse
     )
-    return constrained, SELECTION_NO_FALLBACK, comparison, constrained_result
+    if eligible and not config.publish_selected:
+        reason = SELECTION_SHADOW_RECORD_ONLY
+        serve = False
+    else:
+        reason = SELECTION_NO_FALLBACK
+        serve = False
+    return constrained, reason, (constrained_row, pchip_row, svi_row), constrained_result, serve
+
+
+class DisabledServingFitter:
+    """Explicit non-serving engine. Never a PCHIP stand-in."""
+
+    name = "none"
+    grade = FitterGrade.DIAGNOSTIC
+
+    def fit(
+        self,
+        points: Sequence[SmilePoint],
+        *,
+        time_to_expiry_years: float,
+        forward_usd: float,
+    ) -> FittedSmile:
+        _ = points
+
+        def evaluate(_k: float) -> float:
+            return float("nan")
+
+        diagnostics = SmileFitDiagnostics(
+            fitter_name=self.name,
+            fitter_grade=self.grade,
+            status=ModelStatus.REJECTED,
+            residual_rms=None,
+            weighted_residual_rms=None,
+            optimizer_status="not_attempted",
+            parameter_count=0,
+            parameters={},
+            observation_count=0,
+            k_min=None,
+            k_max=None,
+            extrapolated=False,
+            notes=("serving_disabled",),
+            fit_converged=False,
+            failure_reasons=("serving_disabled",),
+        )
+        return FittedSmile(
+            fitter_name=self.name,
+            fitter_grade=self.grade,
+            diagnostics=diagnostics,
+            k_min=0.0,
+            k_max=0.0,
+            time_to_expiry_years=float(time_to_expiry_years),
+            forward_usd=float(forward_usd or 0.0),
+            knot_k=(),
+            knot_w=(),
+            parameters={},
+            _evaluate_w=evaluate,
+        )
+
+
+def _not_attempted_constrained(*, sparse: bool) -> CandidateComparison:
+    reasons = ["constrained_svi_not_attempted", "serving_disabled"]
+    if sparse:
+        reasons.append("insufficient_or_sparse_observations")
+    return CandidateComparison(
+        fitter_name="constrained_svi",
+        fitter_grade=FitterGrade.DIAGNOSTIC_CANDIDATE,
+        status=ModelStatus.REJECTED,
+        converged=False,
+        residual_rms=None,
+        weighted_residual_rms=None,
+        max_abs_residual=None,
+        k_min=None,
+        k_max=None,
+        call_monotone=None,
+        call_convex=None,
+        min_butterfly=None,
+        density_status=None,
+        residual_budget_ok=None,
+        selected=False,
+        reason_codes=tuple(reasons),
+        notes=("constrained_svi_not_attempted",),
+        eligible_for_density=False,
+    )
 
 
 def compare_fitted(

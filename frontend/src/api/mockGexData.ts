@@ -242,23 +242,23 @@ function addRange(strikes: Set<number>, start: number, end: number, step: number
 const GAMMA_FLIP_MIN_MASS_FRACTION = 0.015 // 1.5%
 /**
  * Near-spot eligibility window (parity with backend
- * GAMMA_FLIP_MAX_DISTANCE_FRAC). Mass-valid crosses outside spot ± 15%
- * yield no_cross — never publish a far wing zero as Flip.
+ * GAMMA_FLIP_MAX_DISTANCE_FRAC). Mass-valid crosses outside spot ± 12%
+ * yield no_cross — never publish a far wing zero as HVL.
  * Separate from Regime profile corridor (display-only, spot ± 8%).
  */
-const GAMMA_FLIP_MAX_DISTANCE_FRAC = 0.15 // ±15% of spot
+const GAMMA_FLIP_MAX_DISTANCE_FRAC = 0.12 // ±12% of spot
 
 /** Locked empty-state copy (parity with backend GAMMA_FLIP_EMPTY_*). */
-const GAMMA_FLIP_EMPTY_NEUTRAL = 'No local flip · GEX one-sided'
-const GAMMA_FLIP_EMPTY_SHORT = 'No local flip · GEX one-sided (short)'
-const GAMMA_FLIP_EMPTY_LONG = 'No local flip · GEX one-sided (long)'
+const GAMMA_FLIP_EMPTY_NEUTRAL = 'No local HVL · GEX one-sided'
+const GAMMA_FLIP_EMPTY_SHORT = 'No local HVL · GEX one-sided (short)'
+const GAMMA_FLIP_EMPTY_LONG = 'No local HVL · GEX one-sided (long)'
 /** Clean one-sided polarity threshold (parity with backend). */
 const GAMMA_FLIP_ONE_SIDED_MIN_FRAC = 0.05
 
 /**
  * Cumulative net-GEX zero-cross nearest spot with meaningful mass,
- * restricted to the spot ± 15% eligibility window.
- * Mirrors backend `_estimate_gamma_flip` (shared Gamma Flip definition).
+ * restricted to the spot ± 12% eligibility window.
+ * Mirrors backend `_estimate_gamma_flip` (HVL definition).
  * Returns null level + no_cross when no mass-valid in-window cross exists.
  */
 function estimateGammaFlip(
@@ -271,7 +271,14 @@ function estimateGammaFlip(
 
   const sorted = [...rows].sort((a, b) => a.strike - b.strike)
   const ref = spotPrice > 0 ? spotPrice : sorted[Math.floor(sorted.length / 2)]!.strike
-  const totalAbs = sorted.reduce((sum, row) => sum + Math.abs(row.netGexUsd), 0)
+  const maxDist = ref > 0 ? ref * GAMMA_FLIP_MAX_DISTANCE_FRAC : Infinity
+  // Window-local mass denominator (parity with backend / zeroGamma.ts).
+  const windowRows =
+    ref > 0
+      ? sorted.filter((row) => Math.abs(row.strike - ref) <= maxDist)
+      : sorted
+  const massRows = windowRows.length > 0 ? windowRows : sorted
+  const totalAbs = massRows.reduce((sum, row) => sum + Math.abs(row.netGexUsd), 0)
   const minMass = Math.max(totalAbs * GAMMA_FLIP_MIN_MASS_FRACTION, 1e-12)
 
   type Crossing = { level: number; mass: number }
@@ -309,9 +316,8 @@ function estimateGammaFlip(
     previousCumulative = cumulative
   }
 
-  // Near-spot eligibility: discard mass-valid crosses outside spot ± 15%.
+  // Near-spot eligibility: discard mass-valid crosses outside spot ± 12%.
   if (ref > 0) {
-    const maxDist = ref * GAMMA_FLIP_MAX_DISTANCE_FRAC
     crossings = crossings.filter((item) => Math.abs(item.level - ref) <= maxDist)
   }
 

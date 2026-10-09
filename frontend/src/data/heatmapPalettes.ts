@@ -281,10 +281,11 @@ function mixRgb(a: Rgba, b: Rgba, t: number): Rgba {
 }
 
 const heatmapPaletteStorageKey = 'lotus-heatmap-palette'
-const heatmapIntensityStorageKey = 'lotus-heatmap-intensity'
+const heatmapIntensityStorageKey = 'lotus-price-gex-opacity-v3'
 
-/** Default TRACE opacity (~matches the softened base after OHLC readability pass). */
-export const defaultHeatmapIntensity = 80
+/** Default GEX / TRACE opacity — mid-slider is the desk-optimal underlay. */
+/** Balanced midpoint; double-clicking the Price/GEX slider returns here. */
+export const defaultHeatmapIntensity = 50
 export const minHeatmapIntensity = 20
 export const maxHeatmapIntensity = 100
 

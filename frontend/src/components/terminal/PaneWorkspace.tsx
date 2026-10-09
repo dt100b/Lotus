@@ -340,6 +340,9 @@ export function PaneWorkspace({ layout, onLayoutChange, renderCell, className }:
                 orientation="horizontal"
                 onDrag={(dy) => handleRowResize(row - 1, dy)}
                 onDragEnd={() => snapRow(row - 1)}
+                onReset={() => restoreRowResplit(row - 1)}
+                beforePct={rowHeights[row - 1]}
+                afterPct={rowHeights[row]}
                 label={`Resize rows ${row} / ${row + 1}`}
               />
             ) : null}
@@ -407,6 +410,9 @@ export function PaneWorkspace({ layout, onLayoutChange, renderCell, className }:
                         orientation="vertical"
                         onDrag={(dx) => handleColResize(row, col - 1, dx)}
                         onDragEnd={() => snapCol(row, col - 1)}
+                        onReset={() => restoreColResplit(row, col - 1)}
+                        beforePct={widths[col - 1]}
+                        afterPct={widths[col]}
                         label={`Resize columns in row ${row + 1}`}
                       />
                     ) : null}

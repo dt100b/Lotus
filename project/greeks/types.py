@@ -29,6 +29,15 @@ class GreekSnapshot:
     # Deribit ticker greeks.delta when available (call > 0, put < 0). Optional for
     # backward-compatible snapshots; skew falls back to BS |Δ| from mark_iv.
     delta: float | None = None
+    # Keep quote quality and forward provenance for surface consumers.
+    bid_price: float | None = None
+    ask_price: float | None = None
+    bid_size: float | None = None
+    ask_size: float | None = None
+    bid_iv: float | None = None
+    ask_iv: float | None = None
+    forward_source: str | None = None
+    expiration_timestamp: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

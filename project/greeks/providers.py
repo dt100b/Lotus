@@ -268,9 +268,56 @@ class DeribitPublicGreeksProvider:
         ]
         return self.fetch_greeks_for_instruments(instrument_names)
 
+    def fetch_near_atm_greeks(self) -> dict[str, GreekSnapshot]:
+        """Full-chain discovery; fetch only central OTM quotes for the ATM curve."""
+        from vol_surface.atm_term import select_atm_instruments
+
+        return self._fetch_selected_option_greeks(select_atm_instruments)
+
+    def fetch_skew_greeks(self) -> dict[str, GreekSnapshot]:
+        """Independent 25/10-delta and ATM discovery, never inventory selection."""
+        from vol_surface.skew import select_skew_instruments
+
+        return self._fetch_selected_option_greeks(
+            lambda rows: select_skew_instruments(rows, as_of_ms=int(time.time()*1000)))
+
+    def _fetch_selected_option_greeks(self, select_instruments) -> dict[str, GreekSnapshot]:
+
+        response = self._client.get(
+            "/public/get_book_summary_by_currency",
+            params={"currency": "BTC", "kind": "option"},
+        )
+        response.raise_for_status()
+        rows = response.json().get("result")
+        if not isinstance(rows, list):
+            raise ValueError("Unexpected Deribit option-chain response")
+        names = select_instruments(rows)
+        # An ATM refresh must leave enough of the five-minute quote lifetime
+        # for the next worker pass. The inventory cache can otherwise serve
+        # quotes nearly four minutes old (batch fetch time + cache TTL).
+        snapshots = self.fetch_greeks_for_instruments(names, max_quote_age_seconds=60)
+        # Preserve discovered expiries even if all their ticker requests failed.
+        # These placeholders never pass quote-quality checks.
+        for name in names:
+            snapshots.setdefault(name, GreekSnapshot(name, 0, 0, int(time.time()*1000)))
+        # Discovery itself can lack a forward. Preserve every observed expiry,
+        # including ones for which selection produced no ticker candidates.
+        from normalizer.instruments import parse_deribit_option_instrument_name
+        represented = {parsed.expiry_ts_ms for name in snapshots
+                       if (parsed := parse_deribit_option_instrument_name(name)) is not None}
+        for row in rows:
+            name = str(row.get("instrument_name") or "")
+            parsed = parse_deribit_option_instrument_name(name)
+            if parsed and parsed.underlying == "BTC" and parsed.expiry_ts_ms not in represented:
+                snapshots[name] = GreekSnapshot(name, 0, 0, int(time.time()*1000))
+                represented.add(parsed.expiry_ts_ms)
+        return snapshots
+
     def fetch_greeks_for_instruments(
         self,
         instrument_names: Iterable[str],
+        *,
+        max_quote_age_seconds: float | None = None,
     ) -> dict[str, GreekSnapshot]:
         """Fetch option Greeks for the given instruments with TTL cache + concurrency.
 
@@ -288,9 +335,14 @@ class DeribitPublicGreeksProvider:
         to_fetch: list[str] = []
         cache_hits = 0
         now = time.monotonic()
+        quote_now_ms = int(time.time() * 1000)
 
         for name in names:
             cached = self._cache.get(name, now=now) if self._cache is not None else None
+            if cached is not None and max_quote_age_seconds is not None:
+                age_ms = quote_now_ms - cached.snapshot_ts
+                if age_ms < -5_000 or age_ms > max_quote_age_seconds * 1000:
+                    cached = None
             if cached is not None:
                 snapshots[name] = cached
                 cache_hits += 1
@@ -465,6 +517,13 @@ class DeribitPublicGreeksProvider:
                     open_interest=open_interest,
                     mark_iv=mark_iv,
                     delta=delta,
+                    bid_price=_maybe_float(result.get("best_bid_price")),
+                    ask_price=_maybe_float(result.get("best_ask_price")),
+                    bid_size=_maybe_float(result.get("best_bid_amount")),
+                    ask_size=_maybe_float(result.get("best_ask_amount")),
+                    bid_iv=_maybe_float(result.get("bid_iv")),
+                    ask_iv=_maybe_float(result.get("ask_iv")),
+                    forward_source="ticker_underlying_price" if result.get("underlying_price") else "spot_fallback",
                 ),
                 rate_limit_hits=rate_limit_hits,
             )
@@ -522,6 +581,14 @@ def load_greeks_snapshot_json(path: str | Path) -> dict[str, GreekSnapshot]:
             open_interest=_maybe_float(row.get("open_interest")),
             mark_iv=_maybe_float(row.get("mark_iv")),
             delta=_maybe_float(row.get("delta")),
+            bid_price=_maybe_float(row.get("bid_price")),
+            ask_price=_maybe_float(row.get("ask_price")),
+            bid_size=_maybe_float(row.get("bid_size")),
+            ask_size=_maybe_float(row.get("ask_size")),
+            bid_iv=_maybe_float(row.get("bid_iv")),
+            ask_iv=_maybe_float(row.get("ask_iv")),
+            forward_source=row.get("forward_source"),
+            expiration_timestamp=row.get("expiration_timestamp"),
         )
         snapshots[snapshot.instrument_name] = snapshot
 

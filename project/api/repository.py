@@ -74,6 +74,9 @@ from pipeline.vol_compare import (
     assemble_vol_compare,
     empty_vol_compare_payload,
 )
+from vol_surface.snapshot import attach_parkinson_rv, attach_atm_rv
+from vol_surface.atm_term import FILENAME as ATM_CURVE_FILENAME, VERSION as ATM_CURVE_VERSION
+from vol_surface.atm_refresh import LIVE_FILENAME as ATM_LIVE_CURVE_FILENAME, read_json as read_atm_json
 
 VIEW_TO_FIELD = {
     "net": "net_gex",
@@ -519,6 +522,8 @@ class SnapshotRepository:
                 futures = self.futures_provider.fetch()
             except Exception:
                 futures = ()
+        from project.options_surface.config import load_serving_config
+
         result = build_options_surface(
             chain.rows,
             expiry=selected_expiry,
@@ -531,6 +536,7 @@ class SnapshotRepository:
                 "transport": feed.transport,
                 "status": feed.status,
             },
+            serving_config=load_serving_config(),
             require_iv_market=str(chain.source).startswith("deribit_ticker_ws"),
             require_open_state=str(chain.source).startswith("deribit_ticker_ws"),
             require_sizes=str(chain.source).startswith("deribit_ticker_ws"),
@@ -916,14 +922,38 @@ class SnapshotRepository:
             result["gamma_bars_include_otc"] = gamma_bars_include_otc
         # Additive secondary Regime analytics (Velocity / Horizon / Active Strikes).
         # Always scoped to the full production book; never mutates main Regime fields.
-        # Live vol_compare (DVOL + RV overlay) is attached at serve time so Deribit /
-        # Hyperliquid history is not re-fetched by the materializer on every cycle.
+        # Live vol_compare (DVOL + Parkinson RV) is attached at serve time so the
+        # candle history is not re-fetched by the materializer on every cycle.
+        # The desk surface is built at materialize; its 30d ATM is joined to the
+        # latest Parkinson RV30 from this same payload.
         vol_compare = _fetch_vol_compare()
         flow_regime = payload.get("flow_regime")
         if isinstance(flow_regime, dict):
             # Shallow copy so cached snapshot payload is never mutated in place.
             flow_regime = dict(flow_regime)
             flow_regime["vol_compare"] = vol_compare
+            # Dedicated artifact cannot be overwritten by an older running
+            # inventory worker. Legacy one-shot artifacts remain a fallback.
+            for filename in (ATM_LIVE_CURVE_FILENAME, ATM_CURVE_FILENAME):
+                try:
+                    curve = read_atm_json(self.artifacts_dir / filename)
+                    if isinstance(curve, dict) and curve.get("version") == ATM_CURVE_VERSION:
+                        from vol_surface.atm_history import daily_lookbacks, atm_history_series
+                        curve["lookbacks"] = daily_lookbacks(self.artifacts_dir, int(curve["as_of_ms"]))
+                        curve["history"] = {"atm":atm_history_series(self.artifacts_dir,int(curve["as_of_ms"]))}
+                        flow_regime["atm_term_curve"] = attach_atm_rv(curve, vol_compare.get("rv_series", []))
+                        break
+                except (OSError, ValueError):
+                    continue
+            from vol_surface.skew_refresh import load_skew
+            flow_regime["skew_surface"] = load_skew(self.artifacts_dir, now_ms=int(datetime.now(UTC).timestamp()*1000))
+            surface = flow_regime.get("vol_surface")
+            if isinstance(surface, dict):
+                flow_regime["vol_surface"] = attach_parkinson_rv(
+                    surface,
+                    _latest_series_value(vol_compare.get("rv_series")),
+                    rv_as_of_ms=int(vol_compare["rv_series"][-1]["ts_ms"]) if vol_compare.get("rv_series") else None,
+                )
             result["flow_regime"] = flow_regime
         else:
             # Materialize may omit flow_regime; still expose series as sibling.
@@ -1113,10 +1143,10 @@ def _fetch_deribit_dvol() -> float | None:
 
 
 def _fetch_rv_trend() -> dict[str, Any]:
-    """Short vs longer realized-vol ratio from Hyperliquid 1h BTC closes.
+    """Short vs longer Parkinson vol from complete Deribit hourly BTC ranges.
 
-    - short window: last ~24 hours (24 × 1h returns)
-    - long window: last ~7 days (168 × 1h returns)
+    - short window: last ~24 hours (24 hourly high-low bars)
+    - long window: last ~7 days (168 hourly high-low bars)
     - ratio = short_rv / long_rv
     - Accelerating ≥ 1.30, Expanding ≥ 1.10, Stable ≥ 0.90,
       Contracting ≥ 0.70, else Collapsing
@@ -1141,36 +1171,23 @@ def _fetch_rv_trend() -> dict[str, Any]:
         return _rv_trend_cache[1]
 
     try:
-        end_ms = int(now.timestamp() * 1000)
-        start_ms = end_ms - 8 * 24 * 60 * 60 * 1000  # ~8d buffer for 7d window
-        response = httpx.post(
-            HYPERLIQUID_INFO_URL,
-            json={
-                "type": "candleSnapshot",
-                "req": {
-                    "coin": "BTC",
-                    "interval": "1h",
-                    "startTime": start_ms,
-                    "endTime": end_ms,
-                },
-            },
-            headers={"Content-Type": "application/json"},
-            timeout=3.0,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list) or len(payload) < 30:
-            return _rv_trend_cache[1] if _rv_trend_cache is not None else empty
-
-        closes: list[float] = []
-        for row in payload:
-            close = _hyperliquid_candle_close(row)
-            if close is not None and close > 0:
-                closes.append(close)
-
-        result = _compute_rv_trend_from_closes(closes)
-    except (httpx.HTTPError, KeyError, TypeError, ValueError, IndexError):
-        return _rv_trend_cache[1] if _rv_trend_cache is not None else empty
+        from vol_surface.parkinson import rolling_parkinson_series
+        end_ms = int(now.timestamp()*1000)
+        bars = _fetch_deribit_btc_perpetual_1h_closes(start_ms=end_ms-8*86_400_000,end_ms=end_ms)
+        short = rolling_parkinson_series(bars,lookback_bars=24,as_of_ms=end_ms)
+        long = rolling_parkinson_series(bars,lookback_bars=168,as_of_ms=end_ms)
+        if not short or not long or short[-1]['ts_ms'] != long[-1]['ts_ms'] or end_ms-long[-1]['ts_ms'] > 2*3_600_000:
+            return empty
+        fast, slow = float(short[-1]['value']),float(long[-1]['value'])
+        if slow <= 0:
+            return empty
+        ratio = fast/slow
+        result = {'rv_ratio':round(ratio,4),'rv_trend':_rv_trend_label(ratio),
+                  'rv_short':round(fast,2),'rv_long':round(slow,2)}
+    except (httpx.HTTPError,KeyError,TypeError,ValueError,IndexError):
+        if _rv_trend_cache is not None and (now-_rv_trend_cache[0]).total_seconds() <= 600:
+            return _rv_trend_cache[1]
+        return empty
 
     _rv_trend_cache = (now, result)
     return result
@@ -1191,42 +1208,30 @@ def _hyperliquid_candle_close(row: Any) -> float | None:
     return None
 
 
-def _compute_rv_trend_from_closes(closes: list[float]) -> dict[str, Any]:
-    """Annualized short/long realized vol from sequential closes; ratio + label."""
+def _compute_rv_trend_from_ranges(highs: list[float], lows: list[float]) -> dict[str, Any]:
+    """Annualized short/long Parkinson vol from hourly ranges; ratio + label."""
+    from vol_surface.parkinson import PARKINSON_BARS_1D, PARKINSON_BARS_7D, parkinson_vol_percent
+
     empty: dict[str, Any] = {
         "rv_ratio": None,
         "rv_trend": None,
         "rv_short": None,
         "rv_long": None,
     }
-    if len(closes) < 30:
+    if len(highs) != len(lows) or len(highs) < PARKINSON_BARS_7D:
         return empty
 
-    log_returns: list[float] = []
-    for previous, current in zip(closes, closes[1:]):
-        if previous <= 0 or current <= 0:
-            continue
-        log_returns.append(math.log(current / previous))
-
-    if len(log_returns) < 28:
-        return empty
-
-    # 1h bars → annualize with √(24 * 365)
-    periods_per_year = 24.0 * 365.0
-    short_n = min(24, len(log_returns))
-    long_n = min(168, len(log_returns))
-    short_rv = _sample_stdev(log_returns[-short_n:]) * math.sqrt(periods_per_year)
-    long_rv = _sample_stdev(log_returns[-long_n:]) * math.sqrt(periods_per_year)
-
-    if not (math.isfinite(short_rv) and math.isfinite(long_rv)) or long_rv <= 1e-12:
+    short_rv = parkinson_vol_percent(highs[-PARKINSON_BARS_1D:], lows[-PARKINSON_BARS_1D:])
+    long_rv = parkinson_vol_percent(highs[-PARKINSON_BARS_7D:], lows[-PARKINSON_BARS_7D:])
+    if short_rv is None or long_rv is None or long_rv <= 1e-12:
         return empty
 
     ratio = short_rv / long_rv
     return {
         "rv_ratio": round(ratio, 4),
         "rv_trend": _rv_trend_label(ratio),
-        "rv_short": round(short_rv * 100, 2),  # percent units
-        "rv_long": round(long_rv * 100, 2),
+        "rv_short": round(short_rv, 2),
+        "rv_long": round(long_rv, 2),
     }
 
 
@@ -1257,11 +1262,27 @@ def _sample_stdev(values: list[float]) -> float:
     return math.sqrt(max(variance, 0.0))
 
 
-def _fetch_vol_compare(*, window: str = VOL_COMPARE_DEFAULT_WINDOW) -> dict[str, Any]:
-    """DVOL history + aligned RV30 (primary) + spread for Regime vol-compare chart.
+def _latest_series_value(series: Any) -> float | None:
+    """Last finite ``value`` on a ``[{ts_ms, value}]`` series."""
+    if not isinstance(series, list) or not series:
+        return None
+    last = series[-1]
+    if not isinstance(last, dict):
+        return None
+    try:
+        value = float(last.get("value"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
 
-    Primary pair is **DVOL (30d) vs RV30** (720 × 1h returns). RV7 is included
-    as an optional secondary overlay only — it does not drive the spread or
+
+def _fetch_vol_compare(*, window: str = VOL_COMPARE_DEFAULT_WINDOW) -> dict[str, Any]:
+    """DVOL history + aligned Parkinson RV30 (primary) + spread.
+
+    Primary pair is **DVOL (30d) vs Parkinson RV30** (720 hourly high-low bars).
+    RV7 is an optional secondary overlay only — it does not drive the spread or
     IV rich/cheap chip.
 
     Cached (~90s). On Deribit/HL failure, returns last good payload when available,
@@ -1314,7 +1335,8 @@ def _fetch_vol_compare(*, window: str = VOL_COMPARE_DEFAULT_WINDOW) -> dict[str,
         if not payload.get("dvol_series"):
             raise ValueError("DVOL series empty after parse")
     except Exception as exc:  # noqa: BLE001 — never break Regime serve path
-        if _vol_compare_cache is not None and _vol_compare_cache[1] == win:
+        if (_vol_compare_cache is not None and _vol_compare_cache[1] == win
+                and (now-_vol_compare_cache[0]).total_seconds() <= 600):
             return _vol_compare_cache[2]
         return empty_vol_compare_payload(
             as_of_ms=as_of_ms,
@@ -1455,19 +1477,39 @@ def _fetch_hyperliquid_btc_1h_closes(
     return out
 
 
+def _hyperliquid_candle_range(row: Any) -> tuple[float, float] | None:
+    """Parse (high, low) from a Hyperliquid candle. Close-only rows are refused."""
+    try:
+        if isinstance(row, (list, tuple)):
+            if len(row) < 5:
+                return None
+            high = float(row[2])
+            low = float(row[3])
+        elif isinstance(row, dict):
+            high = float(row["h"])
+            low = float(row["l"])
+        else:
+            return None
+    except (TypeError, ValueError, KeyError, IndexError):
+        return None
+    if not (math.isfinite(high) and math.isfinite(low) and high > 0 and low > 0 and high >= low):
+        return None
+    return high, low
+
+
 def _fetch_deribit_btc_perpetual_1h_closes(
     *,
     start_ms: int,
     end_ms: int,
-) -> list[tuple[int, float]]:
-    """Full-depth BTC-PERPETUAL hourly closes for the primary RV30 series."""
+) -> list[tuple[int, float, float, float]]:
+    """BTC-PERPETUAL hourly (ts, high, low, close) bars for Parkinson RV."""
     start = int(start_ms)
     end = int(end_ms)
     if end <= start:
         return []
 
     chunk_ms = 30 * 86_400_000
-    by_ts: dict[int, float] = {}
+    by_ts: dict[int, tuple[float, float, float]] = {}
     cursor = start
     while cursor < end:
         chunk_end = min(cursor + chunk_ms, end)
@@ -1485,19 +1527,48 @@ def _fetch_deribit_btc_perpetual_1h_closes(
         body = response.json()
         result = body.get("result") if isinstance(body, dict) else None
         ticks = result.get("ticks") if isinstance(result, dict) else None
+        highs = result.get("high") if isinstance(result, dict) else None
+        lows = result.get("low") if isinstance(result, dict) else None
         closes = result.get("close") if isinstance(result, dict) else None
-        if isinstance(ticks, list) and isinstance(closes, list):
-            for raw_ts, raw_close in zip(ticks, closes, strict=False):
+        if (
+            isinstance(ticks, list)
+            and isinstance(highs, list)
+            and isinstance(lows, list)
+            and isinstance(closes, list)
+        ):
+            for raw_ts, raw_high, raw_low, raw_close in zip(ticks, highs, lows, closes, strict=False):
                 try:
                     ts_ms = int(raw_ts)
+                    high = float(raw_high)
+                    low = float(raw_low)
                     close = float(raw_close)
                 except (TypeError, ValueError):
+                    try:
+                        missing_ts = int(raw_ts)
+                        if missing_ts > 0:
+                            by_ts[missing_ts] = (float("nan"),float("nan"),float("nan"))
+                    except (TypeError,ValueError):
+                        pass
                     continue
-                if ts_ms > 0 and math.isfinite(close) and close > 0:
-                    by_ts[ts_ms] = close
+                if (
+                    ts_ms > 0
+                    and math.isfinite(high)
+                    and math.isfinite(low)
+                    and math.isfinite(close)
+                    and high > 0
+                    and low > 0
+                    and close > 0
+                    and high >= low
+                ):
+                    by_ts[ts_ms] = (high, low, close)
+                elif ts_ms > 0:
+                    by_ts[ts_ms] = (float("nan"),float("nan"),float("nan"))
         cursor = chunk_end
 
-    return sorted(by_ts.items(), key=lambda point: point[0])
+    return [
+        (ts_ms, high, low, close)
+        for ts_ms, (high, low, close) in sorted(by_ts.items(), key=lambda point: point[0])
+    ]
 
 
 def _hyperliquid_candle_ts(row: Any) -> int | None:

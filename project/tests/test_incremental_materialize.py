@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -333,3 +334,69 @@ def test_materialize_auto_incremental_matches_full(tmp_path: Path) -> None:
     assert lag.positions_sha_match is True
     assert full.checkpoint_lag_count == 0
     assert third.checkpoint_lag_count == 0
+
+
+def test_late_historical_insert_forces_full_replay(tmp_path: Path) -> None:
+    db_path = tmp_path / "phase1.sqlite3"
+    artifacts = tmp_path / "artifacts"
+    snapshot = tmp_path / "latest.json"
+    greeks = tmp_path / "greeks.json"
+    _seed_phase1_db(db_path)
+    _greeks_fixture(greeks)
+
+    materialize_dashboard_snapshot(
+        db_path=db_path,
+        artifacts_dir=artifacts,
+        snapshot_path=snapshot,
+        greeks_json=greeks,
+        mode="full",
+        lightweight=True,
+        fail_on_empty=False,
+        strict_instrument_lookup=False,
+    )
+    checkpoint = load_checkpoint(artifacts / "inventory_checkpoint.json")
+    assert checkpoint is not None
+    checkpoint_created_ms = int(
+        datetime.fromisoformat(checkpoint.created_at_utc.replace("Z", "+00:00")).timestamp()
+        * 1000
+    )
+
+    late = {
+        "trade_id": "late-t0",
+        "trade_seq": -1,
+        "timestamp": 1_699_999_999_000,
+        "instrument_name": "BTC-31DEC26-90000-C",
+        "direction": "sell",
+        "amount": 4,
+        "price": 0.05,
+    }
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO raw_trades (
+              instrument_name, trade_id, trade_seq, timestamp_ms, direction,
+              block_trade_id, combo_trade_id, source_run_id, ingested_at_ms, payload_json
+            ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 'late-run', ?, ?)
+            """,
+            (
+                late["instrument_name"],
+                late["trade_id"],
+                late["trade_seq"],
+                late["timestamp"],
+                late["direction"],
+                checkpoint_created_ms + 1_000,
+                json.dumps(late),
+            ),
+        )
+
+    result = materialize_dashboard_snapshot(
+        db_path=db_path,
+        artifacts_dir=artifacts,
+        snapshot_path=snapshot,
+        greeks_json=greeks,
+        mode="auto",
+        lightweight=True,
+        fail_on_empty=False,
+        strict_instrument_lookup=False,
+    )
+    assert result.materialize_mode == "full"
